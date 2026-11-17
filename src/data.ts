@@ -75,8 +75,8 @@ export const NIGHT_WATCHES_PLAYABLE = 2;
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----
-export type ItemKind = "tool" | "material";
-export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string }
+export type ItemKind = "tool" | "material" | "seed" | "crop";
+export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string; value?: number }
 
 export const ITEMS: Record<string, ItemDef> = {
   hoe: { id: "hoe", name: "Hoe", greek: "dikella", kind: "tool", desc: "Breaks ground into tilled soil." },
@@ -84,13 +84,13 @@ export const ITEMS: Record<string, ItemDef> = {
   sickle: { id: "sickle", name: "Sickle", greek: "drepanon", kind: "tool", desc: "Cuts brush and flowers." },
   axe: { id: "axe", name: "Bronze axe", greek: "pelekys", kind: "tool", desc: "Fells saplings, and trees with several swings." },
   mattock: { id: "mattock", name: "Mattock", greek: "makele", kind: "tool", desc: "Breaks and lifts stones." },
-  Wood: { id: "Wood", name: "Wood", kind: "material", desc: "Timber for building and fuel." },
-  Stone: { id: "Stone", name: "Stone", kind: "material", desc: "Fieldstone for walls and building." },
+  Wood: { id: "Wood", value: 1, name: "Wood", kind: "material", desc: "Timber for building and fuel." },
+  Stone: { id: "Stone", value: 1, name: "Stone", kind: "material", desc: "Fieldstone for walls and building." },
   Fiber: { id: "Fiber", name: "Fiber", kind: "material", desc: "Plant fiber for cord and thatch, and fodder for the goats." },
-  Flowers: { id: "Flowers", name: "Wildflowers", kind: "material", desc: "For garlands and small offerings." },
-  Milk: { id: "Milk", name: "Goat's milk", greek: "gala", kind: "material", desc: "Fresh from your goats. Cheese comes with the dairy." },
-  Honey: { id: "Honey", name: "Honey", greek: "meli", kind: "material", desc: "Sweet and sacred: food, medicine and a fine offering." },
-  Wax: { id: "Wax", name: "Beeswax", greek: "keros", kind: "material", desc: "For candles, writing tablets and sealing jars." },
+  Flowers: { id: "Flowers", value: 1, name: "Wildflowers", kind: "material", desc: "For garlands and small offerings." },
+  Milk: { id: "Milk", value: 5, name: "Goat's milk", greek: "gala", kind: "material", desc: "Fresh from your goats. Cheese comes with the dairy." },
+  Honey: { id: "Honey", value: 10, name: "Honey", greek: "meli", kind: "material", desc: "Sweet and sacred: food, medicine and a fine offering." },
+  Wax: { id: "Wax", value: 4, name: "Beeswax", greek: "keros", kind: "material", desc: "For candles, writing tablets and sealing jars." },
 };
 
 // ---- the homestead's animals ----
@@ -147,3 +147,37 @@ export function rollTerrain(from: number, r: () => number): { terrain: number; s
   }
   return { terrain: from, special: false, roll: 1 };
 }
+
+// ---- crops ----
+export interface CropDef {
+  id: string; name: string; greek: string;
+  days: number; // nights of watered growth until ripe
+  regrow?: number; // nights to ripen again after picking
+  yield: number;
+  seasons: string[];
+  aretai: string; god: string; // planting in this patron's hour improves the harvest
+  value: number; seedPrice: number; packet: number;
+  desc: string; seedDesc: string;
+}
+export const CROPS: Record<string, CropDef> = {
+  Millet: { id: "Millet", name: "Millet", greek: "kenchros", days: 6, yield: 3, seasons: ["Summer"], aretai: "Oikos", god: "Demeter", value: 3, seedPrice: 5, packet: 5,
+    desc: "A hardy summer grain for porridge and bread.", seedDesc: "Grows in summer. Ripe in 6 watered nights." },
+  Chickpeas: { id: "Chickpeas", name: "Chickpeas", greek: "erebinthos", days: 8, yield: 3, seasons: ["Summer"], aretai: "Oikos", god: "Demeter", value: 4, seedPrice: 8, packet: 5,
+    desc: "Roasted, stewed or ground: food for the whole year.", seedDesc: "Grows in summer. Ripe in 8 watered nights." },
+  Melon: { id: "Melon", name: "Melon", greek: "pepon", days: 10, yield: 1, seasons: ["Summer"], aretai: "Phoenix", god: "Aphrodite", value: 14, seedPrice: 12, packet: 3,
+    desc: "Sweet and heavy with juice; prized at any table.", seedDesc: "Grows in summer. Ripe in 10 watered nights." },
+  Mint: { id: "Mint", name: "Mint", greek: "minthe", days: 5, regrow: 3, yield: 2, seasons: ["Spring", "Summer", "Autumn"], aretai: "Pneuma", god: "Dionysus", value: 3, seedPrice: 6, packet: 3,
+    desc: "Fragrant: for the kykeon, for medicine, and for the dead.", seedDesc: "Grows spring to autumn. Ripe in 5 nights, then picked again every 3." },
+};
+export const seedId = (crop: string) => `seed_${crop}`;
+for (const c of Object.values(CROPS)) {
+  ITEMS[c.id] = { id: c.id, name: c.name, greek: c.greek, kind: "crop", desc: c.desc, value: c.value };
+  ITEMS[seedId(c.id)] = { id: seedId(c.id), name: `${c.name} seed`, kind: "seed", desc: c.seedDesc };
+}
+ITEMS.Grapes = { id: "Grapes", name: "Grapes", greek: "staphyle", kind: "crop", desc: "From the old vine. Tread them in the vat for wine, when you have one.", value: 2 };
+export const QUALITY = ["", "ordinary", "fine", "excellent"];
+export const QUALITY_MULT = [1, 1, 1.5, 2];
+export const START_SEEDS: [string, number][] = [["Millet", 10], ["Chickpeas", 6], ["Mint", 3], ["Melon", 2]];
+export const START_TALLY = 20;
+/** Nights a planted crop can go unwatered before it withers. */
+export const DRY_LIMIT = 3;

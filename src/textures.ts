@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { CROPS, seedId } from "./data";
 
 // Placeholder pixel art, drawn in code. Warm Mediterranean palette.
 export const T = {
@@ -221,14 +222,72 @@ export function makeTextures(scene: Phaser.Scene) {
     if (full) px(c, o + 4, 4, 3, 1, "#8fc4dc");
   });
 
+  // Crops: four growth stages each, plus a shared withered frame.
+  const cropIds = Object.keys(CROPS);
+  const crops = canvasTex(scene, "crops", 16 * (cropIds.length * 4 + 1), 16, (c) => {
+    cropIds.forEach((id, i) => { for (let st = 0; st < 4; st++) drawCrop(c, (i * 4 + st) * 16, id, st); });
+    const o = cropIds.length * 4 * 16;
+    px(c, o + 7, 8, 1, 6, "#8a6a3a"); px(c, o + 4, 9, 3, 1, "#8a6a3a"); px(c, o + 8, 7, 4, 1, "#7a5a33"); px(c, o + 5, 12, 6, 1, "#6b4a2b");
+  });
+  cropIds.forEach((id, i) => { for (let st = 0; st < 4; st++) crops.add(`${id}_${st}`, 0, (i * 4 + st) * 16, 0, 16, 16); });
+  crops.add("withered", 0, cropIds.length * 64, 0, 16, 16);
+
+  // The old grapevine on its frame: bare, then hung with grapes.
+  const vine = canvasTex(scene, "vine", 32, 24, (c) => {
+    for (const o of [0, 16]) {
+      px(c, o + 1, 4, 2, 20, "#6b4a2b"); px(c, o + 13, 4, 2, 20, "#6b4a2b"); px(c, o, 3, 16, 2, "#8a5f35");
+      px(c, o + 7, 8, 2, 16, "#5a3d22");
+      px(c, o + 1, 0, 14, 6, "#5e7f34"); px(c, o + 3, 5, 10, 4, "#4f6b2c"); px(c, o + 2, 1, 3, 2, "#71953f"); px(c, o + 10, 2, 3, 2, "#71953f");
+      if (o) { for (const [x, y] of [[3, 6], [10, 7], [6, 9]]) { px(c, o + x, y, 3, 3, "#5a2d5e"); px(c, o + x + 1, y + 3, 1, 1, "#5a2d5e"); px(c, o + x, y, 1, 1, "#8a5a8e"); } }
+    }
+  });
+  vine.add(0, 0, 0, 0, 16, 24); vine.add(1, 0, 16, 0, 16, 24);
+
   canvasTex(scene, "pithos", 12, 16, (c) => {
     px(c, 2, 2, 8, 13, "#b5643b"); px(c, 1, 5, 10, 7, "#c4703f"); px(c, 3, 0, 6, 3, "#9c5532"); px(c, 2, 8, 8, 1, "#2a1d14");
   });
 }
 
-export const ITEM_ICON_ORDER = ["hoe", "jar", "sickle", "axe", "mattock", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax"];
+export const ITEM_ICON_ORDER = ["hoe", "jar", "sickle", "axe", "mattock", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
+
+const CROP_COL: Record<string, [string, string]> = {
+  Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
+};
+
+function drawCrop(c: Ctx, o: number, id: string, st: number) {
+  const leaf = "#6f9a3c", leafD = "#557a2c", [a, b] = CROP_COL[id];
+  if (st === 0) { px(c, o + 5, 9, 2, 1, "#5a3d22"); px(c, o + 9, 10, 2, 1, "#5a3d22"); px(c, o + 7, 12, 2, 1, "#5a3d22"); return; }
+  if (st === 1) { px(c, o + 7, 9, 1, 4, leaf); px(c, o + 5, 9, 2, 1, leaf); px(c, o + 8, 8, 2, 1, leaf); return; }
+  switch (id) {
+    case "Millet":
+      for (const x of [4, 7, 10]) { px(c, o + x, 5, 1, 9, leaf); px(c, o + x - 1, 8, 1, 3, leafD); }
+      if (st === 3) for (const x of [4, 7, 10]) { px(c, o + x - 1, 2, 3, 4, a); px(c, o + x, 1, 1, 2, b); }
+      break;
+    case "Chickpeas":
+      px(c, o + 4, 6, 8, 7, leafD); px(c, o + 5, 5, 6, 2, leaf); px(c, o + 3, 8, 2, 3, leaf); px(c, o + 11, 8, 2, 3, leaf);
+      if (st === 3) for (const [x, y] of [[5, 7], [9, 8], [7, 10], [10, 11]]) px(c, o + x, y, 2, 2, a);
+      break;
+    case "Melon":
+      px(c, o + 2, 11, 12, 2, leafD); px(c, o + 3, 9, 3, 3, leaf); px(c, o + 10, 9, 3, 3, leaf);
+      if (st === 3) { px(c, o + 5, 7, 6, 6, a); px(c, o + 6, 6, 4, 1, a); px(c, o + 6, 8, 1, 3, b); px(c, o + 9, 8, 1, 3, b); }
+      else px(c, o + 7, 10, 2, 2, a);
+      break;
+    case "Mint":
+      px(c, o + 7, 6, 1, 8, leafD); for (const [x, y] of [[4, 7], [9, 6], [5, 10], [9, 10]]) px(c, o + x, y, 3, 2, st === 3 ? a : leaf);
+      if (st === 3) { px(c, o + 6, 3, 3, 3, b); px(c, o + 7, 2, 1, 1, "#c9a0d8"); }
+      break;
+  }
+}
 
 function drawIcon(c: Ctx, o: number, id: string) {
+  if (id.startsWith("seed_")) {
+    const [a] = CROP_COL[id.slice(5)];
+    px(c, o + 4, 4, 8, 10, "#c9b48f"); px(c, o + 5, 3, 6, 2, "#a99878"); px(c, o + 6, 2, 4, 1, "#8a7a5a"); px(c, o + 4, 13, 8, 1, "#a99878");
+    px(c, o + 6, 7, 2, 2, a); px(c, o + 9, 9, 2, 2, a); px(c, o + 6, 10, 1, 1, a);
+    return;
+  }
+  if (CROP_COL[id]) { drawCrop(c, o, id, 3); return; }
   const wood = "#8a5f35", bronze = "#c98a3e", bronzeD = "#9c6528";
   switch (id) {
     case "hoe": for (let i = 0; i < 11; i++) px(c, o + 3 + i, 13 - i, 2, 2, wood); px(c, o + 10, 1, 5, 3, bronze); px(c, o + 12, 4, 3, 2, bronzeD); break;
@@ -244,6 +303,7 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "Stone": px(c, o + 3, 5, 10, 8, "#9c968a"); px(c, o + 4, 4, 7, 2, "#b5afa2"); px(c, o + 3, 12, 10, 2, "#7f7a70"); break;
     case "Fiber": for (let i = 0; i < 5; i++) px(c, o + 3 + i * 2, 2 + (i % 2), 1, 12, "#9aa04a"); px(c, o + 3, 8, 10, 2, "#c4a35a"); break;
     case "Flowers": px(c, o + 7, 6, 1, 9, "#5e7f34"); px(c, o + 5, 3, 2, 2, "#e85f7a"); px(c, o + 9, 4, 2, 2, "#f2c14e"); px(c, o + 6, 7, 2, 2, "#e8e2f0"); break;
+    case "Grapes": for (const [x, y] of [[4, 4], [8, 4], [6, 7], [10, 7], [8, 10], [6, 11]]) { px(c, o + x, y, 3, 3, "#5a2d5e"); px(c, o + x, y, 1, 1, "#8a5a8e"); } px(c, o + 8, 1, 1, 3, "#6b4a2b"); px(c, o + 9, 2, 3, 2, "#5e7f34"); break;
     case "Milk": px(c, o + 3, 6, 10, 7, "#b5643b"); px(c, o + 2, 5, 12, 2, "#c4703f"); px(c, o + 3, 5, 10, 2, "#f4efe4"); px(c, o + 4, 13, 8, 1, "#9c5532"); break;
     case "Honey": px(c, o + 4, 4, 8, 10, "#c4703f"); px(c, o + 5, 2, 6, 2, "#9c5532"); px(c, o + 5, 6, 6, 6, "#e0a530"); px(c, o + 6, 7, 2, 2, "#f6cf5a"); break;
     case "Wax": px(c, o + 2, 5, 12, 8, "#e6c74a"); for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) px(c, o + 3 + i * 4 + (j % 2) * 2, 6 + j * 3, 2, 2, "#c9a530"); break;

@@ -1,7 +1,9 @@
 import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
-import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN } from "./data";
+import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
+  CROPS, seedId, QUALITY, QUALITY_MULT } from "./data";
+import type { CropRec } from "./state";
 import { Animal, type Species } from "./animals";
 import type { ScreenRec } from "./state";
 
@@ -32,10 +34,10 @@ function labor(cost: Record<string, number>, fatigue: number, aretai: string): s
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
-function give(id: string, qty: number): string {
-  const left = G.addItem(id, qty);
+function give(id: string, qty: number, q?: number): string {
+  const left = G.addItem(id, qty, q);
   if (left > 0) G.say(`Your hands are full: ${left} ${ITEMS[id].name} left on the ground.`);
-  return `+${qty - left} ${ITEMS[id].name}`;
+  return `+${qty - left} ${q && q > 1 ? QUALITY[q] + " " : ""}${ITEMS[id].name}`;
 }
 
 
@@ -229,6 +231,8 @@ class FarmScene extends PlayScene {
   trough!: Phaser.GameObjects.Image;
   bees!: Phaser.GameObjects.Graphics;
   beeT = 0;
+  cropSprites = new Map<string, Phaser.GameObjects.Image>();
+  vine!: Phaser.GameObjects.Image;
 
   constructor() { super("Farm"); }
 
@@ -263,7 +267,7 @@ class FarmScene extends PlayScene {
     // The starting plot beside the hut, and a pair of old olive trees.
     for (let y = 12; y <= 15; y++) for (let x = 27; x <= 32; x++) { ground[y][x] = T.DIRT; objs[y][x] = -1; }
     objs[9][18] = T.OLIVE; objs[12][19] = T.OLIVE;
-    for (let y = HUT.ty; y < HUT.ty + 4; y++) for (let x = HUT.tx - 1; x < HUT.tx + HUT.w + 1; x++) objs[y][x] = -1;
+    for (let y = HUT.ty; y < HUT.ty + 5; y++) for (let x = HUT.tx - 2; x < HUT.tx + HUT.w + 1; x++) objs[y][x] = -1;
     for (let y = WELL.ty - 1; y <= WELL.ty + 1; y++) for (let x = WELL.tx - 1; x <= WELL.tx + 1; x++) objs[y][x] = -1;
     // The goat pen west of the path, and the beehive among flowers to the east.
     for (let y = PEN.y0 - 1; y <= PEN.y1 + 1; y++) for (let x = PEN.x0 - 1; x <= PEN.x1 + 1; x++) objs[y][x] = -1;
@@ -309,6 +313,12 @@ class FarmScene extends PlayScene {
     solid(hive.x, hive.y + 6, 12, 8);
     this.bees = this.add.graphics().setDepth(HIVE.ty * TILE + 13);
 
+    // The old vine beside the hut, and whatever is growing in the soil.
+    this.vine = this.add.image(20 * TILE + 8, 10 * TILE + 4, "vine", 0).setDepth(11 * TILE);
+    solid(this.vine.x, this.vine.y + 8, 14, 6);
+    this.cropSprites.clear();
+    for (const k of Object.keys(G.data.crops)) this.drawCrop(k);
+
     const signs = [
       { tx: 22, ty: MH - 3, text: "South: the road to the village. The road runs on through the wild; the village itself opens in Milestone 4." },
       { tx: MW - 3, ty: 14, text: "East: the wild lands, where the land changes as you go. Mind the hour: night falls hard out there." },
@@ -322,7 +332,8 @@ class FarmScene extends PlayScene {
     this.targets = [
       { x: DOOR_X, y: (DOOR.ty + 1) * TILE, label: "Enter the hut", act: () => this.enterHouse() },
       { ...at(WELL.tx, WELL.ty), label: "Look at the well", act: () => G.say("A stone-lined well. With your water jar in hand, press Space here to fill it.") },
-      { x: pithos.x, y: pithos.y + 6, label: "Look in the storage jar", act: () => G.say("A pithos, a great storage jar. Empty, for now.") },
+      { x: pithos.x, y: pithos.y + 6, label: "Trade with the miller's cart", act: () => ui(this).openMarket() },
+      { x: this.vine.x, y: this.vine.y + 4, get label() { return G.data.month === 1 && G.data.vineYear !== G.data.year ? "Pick grapes" : "Look at the vine"; }, act: () => this.tendVine() },
       { ...at(18, 9), label: "Look at the olive tree", act: () => G.say("An old olive tree, Athena's gift. Its fruit ripens in late autumn.") },
       { ...at(19, 12), label: "Look at the olive tree", act: () => G.say("An old olive tree, gnarled and patient.") },
       ...signs.map((s) => ({ ...at(s.tx, s.ty), label: "Read the sign", act: () => G.say(s.text) })),
@@ -472,6 +483,7 @@ class FarmScene extends PlayScene {
     if (!this.paused) for (const a of this.animals) a.update(dt, this.player, scare);
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
     this.manger.setFrame(G.data.manger > 0 ? 1 : 0);
+    this.vine.setFrame(G.data.month === 1 && G.data.vineYear !== G.data.year ? 1 : 0);
     this.trough.setFrame(G.data.trough > 0 ? 1 : 0);
     this.drawBees(dt);
     if (!this.common(dt)) return;
@@ -496,6 +508,59 @@ class FarmScene extends PlayScene {
       const k = 1 + i * 0.37;
       g.fillRect(Math.round(cx + Math.cos(this.beeT * 2.1 * k + i) * (7 + i * 2)), Math.round(cy - 4 + Math.sin(this.beeT * 3.3 * k + i * 2) * (4 + i)), 1, 1);
     }
+  }
+
+  ripeAt(c: CropRec) { const d = CROPS[c.id]; return c.picks > 0 && d.regrow ? d.regrow : d.days; }
+  isRipe(c: CropRec) { return !c.withered && c.growth >= this.ripeAt(c); }
+
+  drawCrop(k: string) {
+    const c = G.data.crops[k];
+    let img = this.cropSprites.get(k);
+    if (!c) { img?.destroy(); this.cropSprites.delete(k); return; }
+    const [x, y] = k.split(",").map(Number);
+    const at = this.ripeAt(c);
+    const frame = c.withered ? "withered" : `${c.id}_${c.growth >= at ? 3 : c.picks > 0 ? 2 : c.growth === 0 ? 0 : c.growth < at / 2 ? 1 : 2}`;
+    if (!img) { img = this.add.image(x * TILE + 8, y * TILE + 8, "crops", frame).setDepth(y * TILE + 10); this.cropSprites.set(k, img); }
+    else img.setFrame(frame);
+  }
+
+  /** Space on a planted tile: harvest it, clear it, or say how it's doing. Returns true if handled. */
+  workCrop(x: number, y: number, tool: string | null): boolean {
+    const k = `${x},${y}`, c = G.data.crops[k];
+    if (!c) return false;
+    const d = CROPS[c.id];
+    if (c.withered) { delete G.data.crops[k]; this.drawCrop(k); G.say(`You pull up the withered ${d.name.toLowerCase()}.`); return true; }
+    if (this.isRipe(c)) {
+      const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0));
+      const got = give(d.id, d.yield, q);
+      if (d.regrow) { c.picks++; c.growth = 0; c.dryNights = 0; c.dryStreak = 0; G.say(`You pick the ${d.name.toLowerCase()}: ${got}. It will be ready again in ${d.regrow} nights.`); }
+      else { delete G.data.crops[k]; G.say(`You harvest the ${d.name.toLowerCase()}: ${got}${q === 3 ? ". A splendid crop!" : ""}`); }
+      this.drawCrop(k);
+      return true;
+    }
+    if (tool === "jar") return false; // watering goes ahead as usual
+    const wet = G.data.ground[k] === "wet";
+    G.say(`${d.name}: ${c.growth} of ${this.ripeAt(c)} nights grown.${wet ? " Watered today." : " It needs water today."}`);
+    return true;
+  }
+
+  plant(x: number, y: number, seed: string) {
+    const k = `${x},${y}`, crop = seed.slice(5), d = CROPS[crop];
+    if (!G.data.ground[k]) { G.say("Seeds need tilled soil. Break the ground with the hoe first."); return; }
+    if (!d.seasons.includes(G.month.season)) { G.say(`It isn't the season for ${d.name.toLowerCase()}.`); return; }
+    const b = labor({ Earth: 1 }, 1, "Oikos"); if (b === null) return;
+    G.removeItem(seed, 1);
+    const hour = G.patron?.aretai === d.aretai;
+    G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0 };
+    this.drawCrop(k);
+    G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.god}'s hour, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
+  }
+
+  tendVine() {
+    if (G.data.month !== 1) { G.say(`An old vine, older than you. Its grapes ripen in Metageitnion.`); return; }
+    if (G.data.vineYear === G.data.year) { G.say("You've picked the vine clean this year."); return; }
+    G.data.vineYear = G.data.year;
+    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12)}. Dionysus will want his share.`);
   }
 
   leaveFor(wx: number, wy: number, entry: "N" | "W") {
@@ -530,6 +595,11 @@ class FarmScene extends PlayScene {
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     const soil = G.data.ground[`${x},${y}`];
     const isWell = x === WELL.tx && (y === WELL.ty || y === WELL.ty + 1);
+    if (this.workCrop(x, y, tool)) return;
+    if (item && ITEMS[item.id].kind === "seed") {
+      if (G.data.crops[`${x},${y}`]) { G.say("Something is already growing there."); return; }
+      this.plant(x, y, item.id); return;
+    }
 
     switch (tool) {
       case "hoe":
@@ -860,6 +930,7 @@ class WildScene extends PlayScene {
 
 // ------------------------------------------------------------------ the HUD, hotbar, inventory, light, dialogs and sleep
 const SLOT = 44, GAP = 4;
+interface Cell { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; qty: Phaser.GameObjects.Text; star: Phaser.GameObjects.Text }
 const HOTBAR_X = (W - (SLOT * 10 + GAP * 9)) / 2, HOTBAR_Y = H - SLOT - 14;
 
 class UIScene extends Phaser.Scene {
@@ -877,9 +948,10 @@ class UIScene extends Phaser.Scene {
   dialog?: Phaser.GameObjects.Container;
   promptText!: Phaser.GameObjects.Text;
   itemName!: Phaser.GameObjects.Text;
-  hotbar: { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; qty: Phaser.GameObjects.Text }[] = [];
+  hotbar: Cell[] = [];
+  market?: Phaser.GameObjects.Container;
   hotbarGfx!: Phaser.GameObjects.Graphics;
-  inv?: { root: Phaser.GameObjects.Container; cells: { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; qty: Phaser.GameObjects.Text }[]; info: Phaser.GameObjects.Text };
+  inv?: { root: Phaser.GameObjects.Container; cells: Cell[]; info: Phaser.GameObjects.Text };
   held: number | null = null;
 
   constructor() { super("UI"); }
@@ -909,7 +981,8 @@ class UIScene extends Phaser.Scene {
       this.add.text(x + 3, HOTBAR_Y + 1, String((i + 1) % 10), { ...font, fontSize: "11px", color: "#c9b48f" });
       const icon = this.add.image(x + SLOT / 2, HOTBAR_Y + SLOT / 2, "items", "hoe").setScale(2);
       const qty = this.add.text(x + SLOT - 3, HOTBAR_Y + SLOT - 2, "", { ...font, fontSize: "12px", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(1, 1);
-      this.hotbar.push({ bg, icon, qty });
+      const star = this.add.text(x + SLOT - 3, HOTBAR_Y + 1, "", { ...font, fontSize: "12px", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(1, 0);
+      this.hotbar.push({ bg, icon, qty, star });
     }
     this.itemName = this.add.text(W / 2, HOTBAR_Y - 12, "", { ...font, fontSize: "14px", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5, 1);
     this.promptText = this.add.text(W / 2, HOTBAR_Y - 36, "", { ...font, fontSize: "16px", color: "#fbe39a", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5, 1);
@@ -922,7 +995,7 @@ class UIScene extends Phaser.Scene {
     kb.on("keydown", (e: KeyboardEvent) => {
       if (this.dialog) return;
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
-      if (e.key === "i" || e.key === "I" || e.key === "Tab") this.toggleInventory();
+      if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market) this.toggleInventory();
     });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       if (this.modal) return;
@@ -946,6 +1019,8 @@ class UIScene extends Phaser.Scene {
       "Hoe: till soil · Water jar: water tilled soil, refill at the well",
       "Sickle: brush and flowers · Axe: saplings and trees · Mattock: stones",
       "Walk off the east or south edge of the farm into the wild. Each new place stays as you found it.",
+      "Crops: choose seeds and press Space on tilled soil; water daily; harvest with Space when ripe.",
+      "Watered every night, or sown in the crop's patron hour, it grows finer (★). Trade at the pithos.",
       "Goats: pet and milk them daily (E); keep the manger in Fiber and the trough in water.",
       "The hive gives honey every few days. Wild creatures bolt if you run at them.",
       "",
@@ -957,7 +1032,7 @@ class UIScene extends Phaser.Scene {
       "Stay up past the second watch of the night and you will collapse.",
       "Watered soil dries overnight. Your life is saved each dawn.",
     ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 760, 500, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const hbg = this.add.rectangle(W / 2, H / 2, 800, 560, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
@@ -966,7 +1041,10 @@ class UIScene extends Phaser.Scene {
       if (this.dialog || this.inv) return;
       this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
     });
-    for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => { if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp(); });
+    for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
+      if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+    });
+    this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
   }
 
@@ -1021,11 +1099,12 @@ class UIScene extends Phaser.Scene {
     bar("Fire", y0 + 64, G.essence.Fire / G.essenceMax.Fire, 0xd63a2a);
   }
 
-  fillSlot(cell: { icon: Phaser.GameObjects.Image; qty: Phaser.GameObjects.Text }, i: number) {
+  fillSlot(cell: Cell, i: number) {
     const s = G.data.slots[i];
-    if (!s) { cell.icon.setVisible(false); cell.qty.setText(""); return; }
+    if (!s) { cell.icon.setVisible(false); cell.qty.setText(""); cell.star.setText(""); return; }
     cell.icon.setVisible(true).setFrame(s.id);
-    cell.qty.setText(ITEMS[s.id].kind === "material" ? String(s.qty) : s.id === "jar" ? `${G.data.jarWater}` : "");
+    cell.qty.setText(ITEMS[s.id].kind !== "tool" ? String(s.qty) : s.id === "jar" ? `${G.data.jarWater}` : "");
+    cell.star.setText(s.q && s.q > 1 ? "★" : "").setColor(s.q === 3 ? "#f2c14e" : "#d8d8e0");
   }
 
   drawHotbar() {
@@ -1036,7 +1115,7 @@ class UIScene extends Phaser.Scene {
     }
     const s = G.selectedItem;
     const d = s ? ITEMS[s.id] : null;
-    this.itemName.setText(d ? `${d.name}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${JAR_CAPACITY} water` : ""}` : "Bare hands");
+    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${d.name}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${JAR_CAPACITY} water` : ""}` : "Bare hands");
   }
 
   toggleInventory() {
@@ -1057,10 +1136,11 @@ class UIScene extends Phaser.Scene {
       const bg = this.add.rectangle(cx, cy, SLOT, SLOT, 0x2a1d14, 1).setOrigin(0, 0).setStrokeStyle(2, 0x6b4a2b).setInteractive({ useHandCursor: true });
       const icon = this.add.image(cx + SLOT / 2, cy + SLOT / 2, "items", "hoe").setScale(2);
       const qty = this.add.text(cx + SLOT - 3, cy + SLOT - 2, "", { ...font, fontSize: "12px", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(1, 1);
+      const star = this.add.text(cx + SLOT - 3, cy + 1, "", { ...font, fontSize: "12px", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(1, 0);
       bg.on("pointerdown", () => this.clickSlot(i));
       bg.on("pointerover", () => { if (this.inv) this.inv.info.setText(this.describe(i)); });
-      root.add([bg, icon, qty]);
-      cells.push({ bg, icon, qty });
+      root.add([bg, icon, qty, star]);
+      cells.push({ bg, icon, qty, star });
     }
     const info = this.add.text(W / 2, y0 + h - 44, "Hover over an item to see what it is.", { ...font, fontSize: "14px", align: "center", wordWrap: { width: w - 40 } }).setOrigin(0.5, 0);
     root.add(info);
@@ -1068,11 +1148,66 @@ class UIScene extends Phaser.Scene {
     this.inv = { root, cells, info };
   }
 
+  openMarket() { if (this.market || this.dialog) return; if (this.inv) this.toggleInventory(); this.modal = true; this.buildMarket(); }
+  closeMarket() { this.market?.destroy(); this.market = undefined; this.modal = this.help.visible || !!this.inv; }
+
+  /** The miller's cart: leave goods in the pithos, order seeds against his tally. */
+  buildMarket() {
+    this.market?.destroy();
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 760, h = 470, x0 = (W - w) / 2, y0 = (H - h) / 2 - 20;
+    const root = this.add.container(0, 0).setDepth(23);
+    this.market = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 14, `The miller's cart  ·  his tally owes you ${G.data.tally} measures`, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 42, "Leave goods in the pithos and his cart takes them at dawn. Seeds you order come with it.", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    const head = (x: number, y: number, t: string) => root.add(this.add.text(x, y, t, { ...font, fontSize: "15px", color: "#fbe39a" }));
+    const row = (x: number, y: number, t: string, ok: boolean, fn?: () => void) => {
+      const tx = this.add.text(x, y, t, { ...font, fontSize: "14px", color: ok ? "#f2e6c9" : "#8d877b" });
+      if (fn && ok) tx.setInteractive({ useHandCursor: true }).on("pointerover", () => tx.setColor("#f2c14e")).on("pointerout", () => tx.setColor("#f2e6c9")).on("pointerdown", () => { fn(); this.buildMarket(); });
+      root.add(tx);
+    };
+    const name = (s: { id: string; q?: number }) => `${s.q && s.q > 1 ? QUALITY[s.q] + " " : ""}${ITEMS[s.id].name}`;
+    const each = (s: { id: string; q?: number }) => Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1]);
+
+    // Left: your goods, then what's already in the pithos.
+    const lx = x0 + 24; let y = y0 + 74;
+    head(lx, y, "Your goods (click to leave a stack in the pithos)"); y += 24;
+    const goods = G.data.slots.map((s, i) => ({ s, i })).filter(({ s }) => s && (ITEMS[s.id].value ?? 0) > 0);
+    if (!goods.length) { row(lx, y, "Nothing the miller wants yet.", false); y += 20; }
+    for (const { s, i } of goods.slice(0, 9)) { row(lx, y, `${name(s!)} × ${s!.qty}  ·  ${each(s!)} each`, true, () => { G.data.outbox.push({ ...s! }); G.data.slots[i] = null; }); y += 20; }
+    y += 10;
+    const total = G.data.outbox.reduce((n, s) => n + each(s) * s.qty, 0);
+    head(lx, y, `In the pithos for the cart: ${total} measures (click to take back)`); y += 24;
+    if (!G.data.outbox.length) { row(lx, y, "Empty.", false); y += 20; }
+    G.data.outbox.slice(0, 7).forEach((s, j) => { row(lx, y, `${name(s)} × ${s.qty}`, true, () => { const left = G.addItem(s.id, s.qty, s.q); if (left) s.qty = left; else G.data.outbox.splice(j, 1); }); y += 20; });
+
+    // Right: seed orders.
+    const rx = x0 + w / 2 + 30; y = y0 + 74;
+    head(rx, y, "Order seeds (paid from the tally)"); y += 24;
+    for (const c of Object.values(CROPS)) {
+      const ok = G.data.tally >= c.seedPrice;
+      const season = c.seasons.includes(G.month.season) ? "" : "  (out of season)";
+      row(rx, y, `${c.name} seed × ${c.packet}  ·  ${c.seedPrice} measures${season}`, ok, () => {
+        G.data.tally -= c.seedPrice;
+        const o = G.data.orders.find((o) => o.id === seedId(c.id));
+        if (o) o.qty += c.packet; else G.data.orders.push({ id: seedId(c.id), qty: c.packet });
+      });
+      y += 20;
+    }
+    y += 10;
+    head(rx, y, "Coming with the cart at dawn"); y += 24;
+    if (!G.data.orders.length) row(rx, y, "Nothing ordered.", false);
+    else for (const o of G.data.orders) { row(rx, y, `${ITEMS[o.id].name} × ${o.qty}`, false); y += 20; }
+
+    root.add(this.add.text(W / 2, y0 + h - 26, "E or Esc to close", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+
   describe(i: number) {
     const s = G.data.slots[i];
     if (!s) return "Empty.";
     const d = ITEMS[s.id];
-    return `${d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind === "material" ? ` × ${s.qty}` : ""}: ${d.desc}`;
+    return `${s.q ? QUALITY[s.q][0].toUpperCase() + QUALITY[s.q].slice(1) + " " + d.name.toLowerCase() : d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind !== "tool" ? ` × ${s.qty}` : ""}: ${d.desc}${d.value ? ` Worth ${Math.round(d.value * QUALITY_MULT[s.q ?? 1])} measures each to the miller.` : ""}`;
   }
 
   clickSlot(i: number) {

@@ -3,9 +3,11 @@ import {
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
   ITEMS, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
+  CROPS, seedId, START_SEEDS, START_TALLY, DRY_LIMIT, QUALITY_MULT,
 } from "./data";
 
-export interface Slot { id: string; qty: number }
+export interface Slot { id: string; qty: number; q?: number } // q: quality 1-3 for produce
+export interface CropRec { id: string; growth: number; dryNights: number; dryStreak: number; hourBonus: boolean; withered: boolean; picks: number }
 export interface ScreenRec { terrain: number; special: boolean; feature: string; cleared: string[] }
 
 const SAVE_KEY = "worksanddays.save.v1";
@@ -37,6 +39,12 @@ export interface SaveData {
   manger: number; // fodder in the goats' manger
   trough: number; // water in the goats' trough
   hiveDay: number; // day number of the last honey harvest
+  crops: Record<string, CropRec>; // "x,y" on the homestead
+  tally: number; // the miller's tally of what he owes you, in measures of grain
+  outbox: Slot[]; // goods left in the pithos for the miller's cart
+  orders: Slot[]; // seeds ordered, delivered at dawn
+  vineYear: number; // year the old vine was last picked
+  seedsGiven?: boolean;
 }
 
 export class GameState {
@@ -70,6 +78,8 @@ export class GameState {
     d.ground ??= {}; d.treeHits ??= {};
     d.goats ??= START_GOATS.map((g) => ({ ...g }));
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
+    d.crops ??= {}; d.tally ??= START_TALLY; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
+    if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
     return d;
   }
@@ -80,17 +90,17 @@ export class GameState {
   count(id: string) { return this.data.slots.reduce((n, s) => n + (s && s.id === id ? s.qty : 0), 0); }
 
   /** Add items, stacking where possible. Returns how many did not fit. */
-  addItem(id: string, qty: number): number {
+  addItem(id: string, qty: number, q?: number): number {
     const def = ITEMS[id];
-    const stacks = def && def.kind === "material";
+    const stacks = def && def.kind !== "tool";
     if (stacks) {
       for (const s of this.data.slots) {
         if (qty <= 0) break;
-        if (s && s.id === id && s.qty < STACK_MAX) { const add = Math.min(qty, STACK_MAX - s.qty); s.qty += add; qty -= add; }
+        if (s && s.id === id && s.q === q && s.qty < STACK_MAX) { const add = Math.min(qty, STACK_MAX - s.qty); s.qty += add; qty -= add; }
       }
     }
     for (let i = 0; i < this.data.slots.length && qty > 0; i++) {
-      if (!this.data.slots[i]) { const add = stacks ? Math.min(qty, STACK_MAX) : 1; this.data.slots[i] = { id, qty: add }; qty -= add; }
+      if (!this.data.slots[i]) { const add = stacks ? Math.min(qty, STACK_MAX) : 1; this.data.slots[i] = q ? { id, qty: add, q } : { id, qty: add }; qty -= add; }
     }
     return qty;
   }
@@ -127,6 +137,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
+      crops: {}, tally: START_TALLY, outbox: [], orders: [], vineYear: 0,
     };
   }
 
@@ -229,9 +240,33 @@ export class GameState {
       if (this.data.month === 0) this.data.year += 1;
     }
     this.essence = { ...this.essenceMax };
+    const notes: string[] = [];
+    // Crops grow on nights their soil is watered, and wither after too many dry ones or out of season.
+    let withered = 0;
+    for (const [k, c] of Object.entries(this.data.crops)) {
+      if (c.withered) continue;
+      const def = CROPS[c.id];
+      if (!def.seasons.includes(this.month.season)) { c.withered = true; withered++; continue; }
+      const ripeAt = c.picks > 0 && def.regrow ? def.regrow : def.days;
+      if (c.growth >= ripeAt) continue; // ripe: it waits for you
+      if (this.data.ground[k] === "wet") { c.growth++; c.dryStreak = 0; }
+      else { c.dryNights++; c.dryStreak++; if (c.dryStreak >= DRY_LIMIT) { c.withered = true; withered++; } }
+    }
+    if (withered) notes.push(`${withered} planting${withered > 1 ? "s" : ""} withered.`);
+    // The miller's cart calls at dawn: it takes what you left in the pithos and brings what you ordered.
+    if (this.data.outbox.length) {
+      let earned = 0;
+      for (const s of this.data.outbox) earned += Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1] * s.qty);
+      this.data.tally += earned; this.data.outbox = [];
+      notes.push(`The miller's cart took your goods: +${earned} measures on his tally.`);
+    }
+    if (this.data.orders.length) {
+      for (const o of this.data.orders) this.addItem(o.id, o.qty);
+      notes.push(`Seeds arrived: ${this.data.orders.map((o) => `${o.qty} ${ITEMS[o.id].name}`).join(", ")}.`);
+      this.data.orders = [];
+    }
     for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "wet") this.data.ground[k] = "tilled";
     // The goats eat and drink in the night; a goat that goes without gives no milk.
-    const notes: string[] = [];
     for (const g of this.data.goats) {
       if (this.data.manger >= 1 && this.data.trough >= 1) { this.data.manger--; this.data.trough--; g.fed = true; }
       else { g.fed = false; g.affection = Math.max(0, g.affection - 1); notes.push(`${g.name} went hungry or thirsty in the night.`); }
