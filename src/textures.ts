@@ -1,0 +1,251 @@
+import Phaser from "phaser";
+
+// Placeholder pixel art, drawn in code. Warm Mediterranean palette.
+export const T = {
+  GRASS: 0, GRASS2: 1, DIRT: 2, PATH: 3,
+  BRUSH: 4, SAPLING: 5, STONE: 6, TREE: 7, BOULDER: 8, EDGE: 9,
+  FLOOR: 10, WALL: 11, FLOWERS: 12, OLIVE: 13, TILLED: 14, WET: 15, FENCE: 16,
+  MEADOW: 17, FOREST: 18, ROCKY: 19,
+};
+export const TILE = 16;
+const COUNT = 20;
+
+type Ctx = CanvasRenderingContext2D;
+
+function px(c: Ctx, x: number, y: number, w: number, h: number, col: string) { c.fillStyle = col; c.fillRect(x, y, w, h); }
+
+function speckle(c: Ctx, ox: number, base: string, dots: string[], n: number, seed: number) {
+  px(c, ox, 0, TILE, TILE, base);
+  let s = seed;
+  for (let i = 0; i < n; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const x = s % 16; s = (s * 9301 + 49297) % 233280; const y = s % 16;
+    px(c, ox + x, y, 1, 1, dots[i % dots.length]);
+  }
+}
+
+function drawTile(c: Ctx, i: number) {
+  const o = i * TILE;
+  const grass = "#a7a34e";
+  switch (i) {
+    case T.GRASS: speckle(c, o, grass, ["#bdb760", "#8e8a3e"], 14, 7); break;
+    case T.GRASS2: speckle(c, o, "#9f9b48", ["#c3bd66", "#86823a", "#d9c27a"], 18, 31); break;
+    case T.DIRT: speckle(c, o, "#b98a55", ["#a87a48", "#c99a62"], 16, 11); break;
+    case T.PATH: speckle(c, o, "#d2b07a", ["#c39f69", "#e0c08c"], 14, 5); break;
+    case T.BRUSH:
+      px(c, o + 3, 6, 10, 7, "#6d7a2f"); px(c, o + 5, 4, 6, 4, "#7d8a38"); px(c, o + 4, 8, 3, 2, "#56621f");
+      px(c, o + 10, 9, 2, 2, "#56621f"); break;
+    case T.SAPLING:
+      px(c, o + 7, 8, 2, 6, "#6b4a2b"); px(c, o + 4, 3, 8, 6, "#5e7f34"); px(c, o + 6, 2, 4, 2, "#71953f"); break;
+    case T.STONE:
+      px(c, o + 4, 7, 8, 6, "#9c968a"); px(c, o + 5, 6, 6, 2, "#b5afa2"); px(c, o + 5, 11, 7, 2, "#7f7a70"); break;
+    case T.TREE:
+      px(c, o + 7, 10, 3, 6, "#5a3d22"); px(c, o + 1, 1, 14, 10, "#4f6b2c"); px(c, o + 3, 0, 10, 2, "#5f7f35");
+      px(c, o + 2, 3, 3, 3, "#67883b"); px(c, o + 9, 5, 3, 3, "#3f5823"); break;
+    case T.BOULDER:
+      px(c, o + 1, 4, 14, 11, "#8d877b"); px(c, o + 2, 2, 11, 3, "#a49e91"); px(c, o + 3, 5, 4, 3, "#bab3a5"); px(c, o + 1, 13, 14, 2, "#6c675e"); break;
+    case T.EDGE:
+      px(c, o, 0, TILE, TILE, "#3c5422"); px(c, o + 2, 2, 6, 6, "#4a6629"); px(c, o + 9, 7, 6, 6, "#33491d"); px(c, o + 4, 10, 5, 5, "#476227"); break;
+    case T.FLOOR: speckle(c, o, "#c7a678", ["#b8966a", "#d4b487"], 12, 23); px(c, o, 15, 16, 1, "#b08f63"); break;
+    case T.WALL: px(c, o, 0, TILE, TILE, "#e8dcc2"); px(c, o, 12, 16, 4, "#c9b48f"); px(c, o + 3, 4, 2, 2, "#d8c9a8"); break;
+    case T.FLOWERS:
+      px(c, o + 3, 4, 2, 2, "#e85f7a"); px(c, o + 10, 6, 2, 2, "#f2c14e"); px(c, o + 6, 11, 2, 2, "#e8e2f0"); px(c, o + 12, 12, 2, 2, "#e85f7a"); break;
+    case T.OLIVE:
+      px(c, o + 7, 9, 2, 7, "#6b5a45"); px(c, o + 1, 2, 14, 8, "#8a9a6a"); px(c, o + 3, 1, 9, 2, "#9aab78"); px(c, o + 4, 4, 2, 2, "#5a6a45"); break;
+    case T.TILLED:
+      px(c, o, 0, TILE, TILE, "#9c6e40");
+      for (let y = 1; y < 16; y += 4) { px(c, o, y, 16, 1, "#7f5733"); px(c, o, y + 1, 16, 1, "#b0804f"); }
+      break;
+    case T.WET:
+      px(c, o, 0, TILE, TILE, "#6a4528");
+      for (let y = 1; y < 16; y += 4) { px(c, o, y, 16, 1, "#4e321c"); px(c, o, y + 1, 16, 1, "#7d5432"); }
+      break;
+    case T.MEADOW: speckle(c, o, "#adb04f", ["#c6c25e", "#e2c86a", "#d98aa0", "#8f9a40"], 20, 43); break;
+    case T.FOREST: speckle(c, o, "#6f7d3a", ["#5d6a2f", "#86914a", "#7a5a33"], 18, 47); break;
+    case T.ROCKY: speckle(c, o, "#b3a27c", ["#9c8c68", "#c8b88f", "#8d877b"], 20, 53); break;
+    case T.FENCE:
+      px(c, o, 5, 16, 2, "#8a5f35"); px(c, o, 10, 16, 2, "#8a5f35"); px(c, o, 7, 16, 1, "#5a3d22");
+      px(c, o + 2, 2, 3, 13, "#6b4a2b"); px(c, o + 11, 2, 3, 13, "#6b4a2b"); px(c, o + 2, 2, 3, 1, "#a87443"); px(c, o + 11, 2, 3, 1, "#a87443");
+      break;
+  }
+}
+
+function canvasTex(scene: Phaser.Scene, key: string, w: number, h: number, draw: (c: Ctx) => void) {
+  const tex = scene.textures.createCanvas(key, w, h)!;
+  const c = tex.getContext();
+  c.imageSmoothingEnabled = false;
+  draw(c);
+  tex.refresh();
+  return tex;
+}
+
+export function makeTextures(scene: Phaser.Scene) {
+  canvasTex(scene, "tiles", TILE * COUNT, TILE, (c) => { for (let i = 0; i < COUNT; i++) drawTile(c, i); });
+
+  // Player: four facings in one strip (down, left, right, up), 16x16 each.
+  const player = canvasTex(scene, "player", 64, 16, (c) => {
+    for (let f = 0; f < 4; f++) {
+      const o = f * 16;
+      px(c, o + 5, 13, 6, 2, "rgba(0,0,0,0.25)");
+      px(c, o + 5, 6, 6, 7, "#e9e1cf"); // chiton
+      px(c, o + 5, 9, 6, 1, "#b0412f"); // belt
+      px(c, o + 6, 1, 4, 5, "#c98e62"); // head
+      px(c, o + 6, 1, 4, 2, "#4a3324"); // hair
+      px(c, o + 6, 13, 1, 2, "#6b4a2b"); px(c, o + 9, 13, 1, 2, "#6b4a2b");
+      if (f === 0) { px(c, o + 7, 3, 1, 1, "#2a1d14"); px(c, o + 8, 3, 1, 1, "#2a1d14"); }
+      if (f === 1) px(c, o + 6, 3, 1, 1, "#2a1d14");
+      if (f === 2) px(c, o + 9, 3, 1, 1, "#2a1d14");
+      if (f === 3) px(c, o + 6, 1, 4, 4, "#4a3324");
+    }
+  });
+  for (let f = 0; f < 4; f++) player.add(f, 0, f * 16, 0, 16, 16);
+
+  // The one-room hut: limestone walls, reed thatch, a door.
+  canvasTex(scene, "hut", 64, 56, (c) => {
+    px(c, 4, 22, 56, 32, "#e8dcc2"); px(c, 4, 48, 56, 6, "#c9b48f");
+    px(c, 0, 8, 64, 18, "#c9a35a"); px(c, 4, 2, 56, 8, "#d8b468"); px(c, 0, 24, 64, 3, "#a9853f");
+    for (let x = 2; x < 64; x += 5) px(c, x, 10, 1, 14, "#b38f48");
+    px(c, 26, 32, 12, 22, "#6b4a2b"); px(c, 28, 34, 8, 18, "#5a3d22"); px(c, 34, 43, 1, 2, "#e6c74a");
+    px(c, 10, 32, 8, 7, "#5a4632"); px(c, 46, 32, 8, 7, "#5a4632");
+  });
+
+  canvasTex(scene, "altar", 16, 20, (c) => {
+    px(c, 2, 8, 12, 12, "#d9d0bd"); px(c, 1, 7, 14, 2, "#ece4d2"); px(c, 2, 18, 12, 2, "#b7ac95");
+    px(c, 6, 2, 4, 5, "#e8862e"); px(c, 7, 0, 2, 3, "#f2c14e");
+  });
+
+  canvasTex(scene, "sign", 16, 16, (c) => {
+    px(c, 7, 6, 2, 10, "#6b4a2b"); px(c, 1, 2, 14, 6, "#b08a55"); px(c, 2, 4, 12, 1, "#7a5a33");
+  });
+
+  canvasTex(scene, "hearth", 32, 24, (c) => {
+    px(c, 0, 8, 32, 16, "#8d877b"); px(c, 2, 10, 28, 12, "#5a4f45");
+    px(c, 8, 12, 16, 8, "#e8862e"); px(c, 11, 8, 10, 6, "#f2c14e"); px(c, 14, 5, 4, 4, "#fbe39a");
+  });
+
+  canvasTex(scene, "bed", 16, 28, (c) => {
+    px(c, 0, 0, 16, 28, "#6b4a2b"); px(c, 1, 1, 14, 26, "#c9b48f"); px(c, 2, 2, 12, 6, "#e9e1cf"); px(c, 1, 10, 14, 17, "#b0412f");
+  });
+
+  canvasTex(scene, "niche", 16, 16, (c) => {
+    px(c, 0, 0, 16, 16, "#d8c9a8"); px(c, 3, 3, 10, 10, "#a99878"); px(c, 6, 6, 4, 6, "#e6c74a"); px(c, 7, 4, 2, 2, "#e8862e");
+  });
+
+  canvasTex(scene, "well", 20, 22, (c) => {
+    px(c, 2, 8, 16, 12, "#a49e91"); px(c, 1, 7, 18, 3, "#c4bdae"); px(c, 4, 9, 12, 4, "#2f4a5c");
+    px(c, 2, 18, 16, 2, "#7f7a70"); px(c, 3, 0, 2, 9, "#6b4a2b"); px(c, 15, 0, 2, 9, "#6b4a2b"); px(c, 3, 0, 14, 2, "#7a5a33");
+    px(c, 9, 2, 2, 6, "#c9b48f");
+  });
+
+  // Item icons, one 16x16 frame each, in the order of ITEM_ICON_ORDER.
+  const icons = canvasTex(scene, "items", 16 * ITEM_ICON_ORDER.length, 16, (c) => {
+    ITEM_ICON_ORDER.forEach((id, i) => drawIcon(c, i * 16, id));
+  });
+  ITEM_ICON_ORDER.forEach((id, i) => icons.add(id, 0, i * 16, 0, 16, 16));
+
+  // Animals: two 16x16 frames each, facing right (flipped to face left).
+  const strip = (key: string, draw: (c: Ctx, o: number, f: number) => void) => {
+    const t = canvasTex(scene, key, 32, 16, (c) => { draw(c, 0, 0); draw(c, 16, 1); });
+    t.add(0, 0, 0, 0, 16, 16); t.add(1, 0, 16, 0, 16, 16);
+  };
+  strip("goat", (c, o, f) => {
+    px(c, o + 3, 14, 10, 2, "rgba(0,0,0,0.22)");
+    const L = "#6b5a45";
+    if (f === 0) { px(c, o + 4, 11, 1, 3, L); px(c, o + 6, 11, 1, 3, L); px(c, o + 9, 11, 1, 3, L); px(c, o + 11, 11, 1, 3, L); }
+    else { px(c, o + 3, 11, 1, 3, L); px(c, o + 7, 11, 1, 3, L); px(c, o + 8, 11, 1, 3, L); px(c, o + 12, 11, 1, 3, L); }
+    px(c, o + 3, 6, 9, 6, "#efe7d6"); px(c, o + 3, 10, 9, 1, "#d6ccb6"); px(c, o + 2, 5, 2, 2, "#efe7d6");
+    px(c, o + 11, 3, 4, 5, "#efe7d6"); px(c, o + 14, 6, 1, 2, "#d6ccb6");
+    px(c, o + 11, 1, 1, 3, "#5a4632"); px(c, o + 12, 0, 2, 1, "#5a4632"); px(c, o + 10, 4, 2, 1, "#d6ccb6");
+    px(c, o + 13, 4, 1, 1, "#2a1d14"); px(c, o + 13, 8, 1, 2, "#d6ccb6");
+  });
+  strip("hare", (c, o, f) => {
+    px(c, o + 4, 14, 8, 2, "rgba(0,0,0,0.22)");
+    const y = f === 0 ? 0 : -2, B = "#a48461", D = "#86684a";
+    px(c, o + 4, 9 + y, 8, 5, B); px(c, o + 5, 13 + y, 6, 1, D); px(c, o + 3, 9 + y, 2, 2, "#f2ece0");
+    px(c, o + 10, 7 + y, 4, 4, B); px(c, o + 12, 8 + y, 1, 1, "#2a1d14");
+    px(c, o + 10, 2 + y, 1, 5, B); px(c, o + 12, 3 + y, 1, 4, D);
+    if (f === 1) px(c, o + 3, 13 + y, 3, 2, D);
+  });
+  strip("fox", (c, o, f) => {
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)");
+    const R = "#c8642a", D = "#3a2c22";
+    if (f === 0) { px(c, o + 4, 11, 1, 3, D); px(c, o + 10, 11, 1, 3, D); } else { px(c, o + 5, 11, 1, 3, D); px(c, o + 9, 11, 1, 3, D); }
+    px(c, o + 3, 8, 9, 4, R); px(c, o + 0, 6, 4, 3, R); px(c, o + 0, 6, 1, 2, "#f2ece0");
+    px(c, o + 11, 6, 4, 4, R); px(c, o + 15, 8, 1, 1, D); px(c, o + 11, 4, 1, 2, R); px(c, o + 14, 4, 1, 2, R);
+    px(c, o + 11, 9, 3, 2, "#f2ece0"); px(c, o + 13, 7, 1, 1, D);
+  });
+  strip("deer", (c, o, f) => {
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)");
+    const B = "#9a6a3e", D = "#5a3d22";
+    if (f === 0) { px(c, o + 3, 10, 1, 4, D); px(c, o + 5, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 2, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 2, 6, 11, 5, B); px(c, o + 4, 7, 2, 1, "#e8dcc2"); px(c, o + 8, 8, 2, 1, "#e8dcc2"); px(c, o + 1, 6, 2, 2, "#f2ece0");
+    px(c, o + 11, 3, 2, 4, B); px(c, o + 12, 2, 4, 3, B); px(c, o + 14, 3, 1, 1, D);
+    px(c, o + 11, 0, 1, 2, "#c9b48f"); px(c, o + 13, 0, 1, 2, "#c9b48f"); px(c, o + 10, 0, 1, 1, "#c9b48f"); px(c, o + 14, 0, 1, 1, "#c9b48f");
+  });
+  strip("boar", (c, o, f) => {
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.25)");
+    const B = "#4a3a2c", D = "#2a1d14";
+    if (f === 0) { px(c, o + 4, 11, 2, 3, D); px(c, o + 10, 11, 2, 3, D); } else { px(c, o + 3, 11, 2, 3, D); px(c, o + 11, 11, 2, 3, D); }
+    px(c, o + 2, 6, 11, 6, B); px(c, o + 3, 5, 8, 1, "#3a2c22"); for (let i = 0; i < 4; i++) px(c, o + 4 + i * 2, 4, 1, 2, D);
+    px(c, o + 12, 7, 4, 4, B); px(c, o + 15, 9, 1, 2, "#7a5a50"); px(c, o + 13, 10, 1, 2, "#f2ece0"); px(c, o + 13, 8, 1, 1, "#c4703f");
+  });
+  strip("bird", (c, o, f) => {
+    if (f === 0) {
+      px(c, o + 6, 14, 5, 1, "rgba(0,0,0,0.2)");
+      px(c, o + 6, 10, 4, 3, "#8a6a4a"); px(c, o + 9, 9, 2, 2, "#6b4a2b"); px(c, o + 11, 10, 1, 1, "#e0b04a");
+      px(c, o + 5, 10, 1, 2, "#5a4632"); px(c, o + 7, 12, 2, 1, "#c9b48f");
+    } else {
+      px(c, o + 6, 7, 4, 3, "#8a6a4a"); px(c, o + 9, 6, 2, 2, "#6b4a2b"); px(c, o + 11, 7, 1, 1, "#e0b04a");
+      px(c, o + 3, 5, 4, 1, "#6b4a2b"); px(c, o + 9, 5, 4, 1, "#6b4a2b"); px(c, o + 2, 4, 2, 1, "#5a4632"); px(c, o + 12, 4, 2, 1, "#5a4632");
+    }
+  });
+
+  // A straw skep hive, the goats' manger and water trough (empty, then full).
+  canvasTex(scene, "hive", 16, 20, (c) => {
+    px(c, 2, 18, 12, 2, "rgba(0,0,0,0.22)"); px(c, 1, 16, 14, 3, "#8a5f35");
+    px(c, 2, 6, 12, 10, "#d9b25e"); px(c, 4, 3, 8, 3, "#d9b25e"); px(c, 6, 1, 4, 2, "#d9b25e");
+    for (const y of [4, 7, 10, 13]) px(c, 2, y, 12, 1, "#b38f48");
+    px(c, 7, 13, 3, 3, "#3a2c22");
+  });
+  const two = (key: string, w: number, h: number, draw: (c: Ctx, o: number, full: boolean) => void) => {
+    const t = canvasTex(scene, key, w * 2, h, (c) => { draw(c, 0, false); draw(c, w, true); });
+    t.add(0, 0, 0, 0, w, h); t.add(1, 0, w, 0, w, h);
+  };
+  two("manger", 16, 12, (c, o, full) => {
+    px(c, o + 1, 4, 14, 7, "#8a5f35"); px(c, o + 2, 5, 12, 4, "#5a3d22"); px(c, o + 1, 10, 2, 2, "#6b4a2b"); px(c, o + 13, 10, 2, 2, "#6b4a2b");
+    if (full) { px(c, o + 2, 3, 12, 4, "#c4a35a"); px(c, o + 4, 2, 3, 1, "#d9c27a"); px(c, o + 9, 2, 4, 1, "#9aa04a"); }
+  });
+  two("trough", 16, 10, (c, o, full) => {
+    px(c, o + 1, 3, 14, 6, "#a49e91"); px(c, o + 1, 2, 14, 2, "#c4bdae"); px(c, o + 2, 4, 12, 3, full ? "#3f7fa0" : "#6c675e");
+    if (full) px(c, o + 4, 4, 3, 1, "#8fc4dc");
+  });
+
+  canvasTex(scene, "pithos", 12, 16, (c) => {
+    px(c, 2, 2, 8, 13, "#b5643b"); px(c, 1, 5, 10, 7, "#c4703f"); px(c, 3, 0, 6, 3, "#9c5532"); px(c, 2, 8, 8, 1, "#2a1d14");
+  });
+}
+
+export const ITEM_ICON_ORDER = ["hoe", "jar", "sickle", "axe", "mattock", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax"];
+
+function drawIcon(c: Ctx, o: number, id: string) {
+  const wood = "#8a5f35", bronze = "#c98a3e", bronzeD = "#9c6528";
+  switch (id) {
+    case "hoe": for (let i = 0; i < 11; i++) px(c, o + 3 + i, 13 - i, 2, 2, wood); px(c, o + 10, 1, 5, 3, bronze); px(c, o + 12, 4, 3, 2, bronzeD); break;
+    case "jar":
+      px(c, o + 5, 1, 6, 2, "#9c5532"); px(c, o + 6, 3, 4, 2, "#b5643b"); px(c, o + 3, 5, 10, 9, "#c4703f"); px(c, o + 4, 14, 8, 1, "#9c5532");
+      px(c, o + 3, 8, 10, 1, "#2a1d14"); px(c, o + 1, 6, 2, 4, "#9c5532"); px(c, o + 13, 6, 2, 4, "#9c5532"); break;
+    case "sickle":
+      px(c, o + 3, 10, 2, 5, wood); px(c, o + 4, 9, 2, 2, wood);
+      px(c, o + 5, 3, 2, 7, bronze); px(c, o + 6, 2, 5, 2, bronze); px(c, o + 10, 3, 3, 2, bronze); px(c, o + 12, 5, 2, 3, bronzeD); break;
+    case "axe": for (let i = 0; i < 11; i++) px(c, o + 3 + i, 14 - i, 2, 2, wood); px(c, o + 8, 1, 6, 7, bronze); px(c, o + 7, 2, 2, 5, bronzeD); break;
+    case "mattock": for (let i = 0; i < 11; i++) px(c, o + 3 + i, 14 - i, 2, 2, wood); px(c, o + 5, 2, 10, 3, "#8d877b"); px(c, o + 4, 4, 2, 4, "#6c675e"); px(c, o + 14, 4, 2, 2, "#6c675e"); break;
+    case "Wood": px(c, o + 1, 6, 14, 5, "#8a5f35"); px(c, o + 2, 7, 12, 1, "#a87443"); px(c, o + 13, 6, 3, 5, "#c9a06a"); px(c, o + 3, 10, 12, 4, "#7a5230"); px(c, o + 14, 10, 2, 4, "#c9a06a"); break;
+    case "Stone": px(c, o + 3, 5, 10, 8, "#9c968a"); px(c, o + 4, 4, 7, 2, "#b5afa2"); px(c, o + 3, 12, 10, 2, "#7f7a70"); break;
+    case "Fiber": for (let i = 0; i < 5; i++) px(c, o + 3 + i * 2, 2 + (i % 2), 1, 12, "#9aa04a"); px(c, o + 3, 8, 10, 2, "#c4a35a"); break;
+    case "Flowers": px(c, o + 7, 6, 1, 9, "#5e7f34"); px(c, o + 5, 3, 2, 2, "#e85f7a"); px(c, o + 9, 4, 2, 2, "#f2c14e"); px(c, o + 6, 7, 2, 2, "#e8e2f0"); break;
+    case "Milk": px(c, o + 3, 6, 10, 7, "#b5643b"); px(c, o + 2, 5, 12, 2, "#c4703f"); px(c, o + 3, 5, 10, 2, "#f4efe4"); px(c, o + 4, 13, 8, 1, "#9c5532"); break;
+    case "Honey": px(c, o + 4, 4, 8, 10, "#c4703f"); px(c, o + 5, 2, 6, 2, "#9c5532"); px(c, o + 5, 6, 6, 6, "#e0a530"); px(c, o + 6, 7, 2, 2, "#f6cf5a"); break;
+    case "Wax": px(c, o + 2, 5, 12, 8, "#e6c74a"); for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) px(c, o + 3 + i * 4 + (j % 2) * 2, 6 + j * 3, 2, 2, "#c9a530"); break;
+  }
+}
