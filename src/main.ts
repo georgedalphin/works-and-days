@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money } from "./data";
 import type { CropRec } from "./state";
 import { Animal, type Species } from "./animals";
 import type { ScreenRec } from "./state";
@@ -939,6 +939,7 @@ class UIScene extends Phaser.Scene {
   date!: Phaser.GameObjects.Text;
   timeText!: Phaser.GameObjects.Text;
   place!: Phaser.GameObjects.Text;
+  purse!: Phaser.GameObjects.Text;
   patron!: Phaser.GameObjects.Text;
   badge!: Phaser.GameObjects.Rectangle;
   bars!: Phaser.GameObjects.Graphics;
@@ -971,6 +972,7 @@ class UIScene extends Phaser.Scene {
     // Fatigue and Essence, top right.
     this.add.rectangle(W - 312, 12, 300, 92, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
     this.bars = this.add.graphics();
+    this.purse = this.add.text(W - 16, 110, "", { ...font, fontSize: "14px", color: "#e8e2d0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
 
     // Hotbar.
     this.hotbarGfx = this.add.graphics();
@@ -1055,6 +1057,7 @@ class UIScene extends Phaser.Scene {
     this.date.setText(`${G.dateLabel()} · ${G.moon}`);
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
+    this.purse.setText(`Purse: ${money(G.data.silver)}`);
     const p = G.patron;
     if (p) {
       this.badge.setFillStyle(Phaser.Display.Color.HexStringToColor(p.color).color);
@@ -1151,7 +1154,7 @@ class UIScene extends Phaser.Scene {
   openMarket() { if (this.market || this.dialog) return; if (this.inv) this.toggleInventory(); this.modal = true; this.buildMarket(); }
   closeMarket() { this.market?.destroy(); this.market = undefined; this.modal = this.help.visible || !!this.inv; }
 
-  /** The miller's cart: leave goods in the pithos, order seeds against his tally. */
+  /** The miller's cart: leave goods in the pithos to sell, and buy seeds. */
   buildMarket() {
     this.market?.destroy();
     const font = { fontFamily: FONT, color: "#f2e6c9" };
@@ -1159,8 +1162,8 @@ class UIScene extends Phaser.Scene {
     const root = this.add.container(0, 0).setDepth(23);
     this.market = root;
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
-    root.add(this.add.text(W / 2, y0 + 14, `The miller's cart  ·  his tally owes you ${G.data.tally} measures`, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
-    root.add(this.add.text(W / 2, y0 + 42, "Leave goods in the pithos and his cart takes them at dawn. Seeds you order come with it.", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 14, `The miller's cart  ·  your purse: ${money(G.data.silver)}`, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 42, "Leave goods in the pithos; his cart takes them at dawn and leaves the coin. Seeds you buy come with it.", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     const head = (x: number, y: number, t: string) => root.add(this.add.text(x, y, t, { ...font, fontSize: "15px", color: "#fbe39a" }));
     const row = (x: number, y: number, t: string, ok: boolean, fn?: () => void) => {
       const tx = this.add.text(x, y, t, { ...font, fontSize: "14px", color: ok ? "#f2e6c9" : "#8d877b" });
@@ -1175,21 +1178,21 @@ class UIScene extends Phaser.Scene {
     head(lx, y, "Your goods (click to leave a stack in the pithos)"); y += 24;
     const goods = G.data.slots.map((s, i) => ({ s, i })).filter(({ s }) => s && (ITEMS[s.id].value ?? 0) > 0);
     if (!goods.length) { row(lx, y, "Nothing the miller wants yet.", false); y += 20; }
-    for (const { s, i } of goods.slice(0, 9)) { row(lx, y, `${name(s!)} × ${s!.qty}  ·  ${each(s!)} each`, true, () => { G.data.outbox.push({ ...s! }); G.data.slots[i] = null; }); y += 20; }
+    for (const { s, i } of goods.slice(0, 9)) { row(lx, y, `${name(s!)} × ${s!.qty}  ·  ${money(each(s!))} each`, true, () => { G.data.outbox.push({ ...s! }); G.data.slots[i] = null; }); y += 20; }
     y += 10;
     const total = G.data.outbox.reduce((n, s) => n + each(s) * s.qty, 0);
-    head(lx, y, `In the pithos for the cart: ${total} measures (click to take back)`); y += 24;
+    head(lx, y, `In the pithos for the cart: ${money(total)} (click to take back)`); y += 24;
     if (!G.data.outbox.length) { row(lx, y, "Empty.", false); y += 20; }
     G.data.outbox.slice(0, 7).forEach((s, j) => { row(lx, y, `${name(s)} × ${s.qty}`, true, () => { const left = G.addItem(s.id, s.qty, s.q); if (left) s.qty = left; else G.data.outbox.splice(j, 1); }); y += 20; });
 
     // Right: seed orders.
     const rx = x0 + w / 2 + 30; y = y0 + 74;
-    head(rx, y, "Order seeds (paid from the tally)"); y += 24;
+    head(rx, y, "Buy seeds (paid now, delivered at dawn)"); y += 24;
     for (const c of Object.values(CROPS)) {
-      const ok = G.data.tally >= c.seedPrice;
+      const ok = G.data.silver >= c.seedPrice;
       const season = c.seasons.includes(G.month.season) ? "" : "  (out of season)";
-      row(rx, y, `${c.name} seed × ${c.packet}  ·  ${c.seedPrice} measures${season}`, ok, () => {
-        G.data.tally -= c.seedPrice;
+      row(rx, y, `${c.name} seed × ${c.packet}  ·  ${money(c.seedPrice)}${season}`, ok, () => {
+        G.data.silver -= c.seedPrice;
         const o = G.data.orders.find((o) => o.id === seedId(c.id));
         if (o) o.qty += c.packet; else G.data.orders.push({ id: seedId(c.id), qty: c.packet });
       });
@@ -1207,7 +1210,7 @@ class UIScene extends Phaser.Scene {
     const s = G.data.slots[i];
     if (!s) return "Empty.";
     const d = ITEMS[s.id];
-    return `${s.q ? QUALITY[s.q][0].toUpperCase() + QUALITY[s.q].slice(1) + " " + d.name.toLowerCase() : d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind !== "tool" ? ` × ${s.qty}` : ""}: ${d.desc}${d.value ? ` Worth ${Math.round(d.value * QUALITY_MULT[s.q ?? 1])} measures each to the miller.` : ""}`;
+    return `${s.q ? QUALITY[s.q][0].toUpperCase() + QUALITY[s.q].slice(1) + " " + d.name.toLowerCase() : d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind !== "tool" ? ` × ${s.qty}` : ""}: ${d.desc}${d.value ? ` The miller pays ${money(Math.round(d.value * QUALITY_MULT[s.q ?? 1]))} each.` : ""}`;
   }
 
   clickSlot(i: number) {

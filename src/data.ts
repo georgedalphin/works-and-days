@@ -178,6 +178,13 @@ ITEMS.Grapes = { id: "Grapes", name: "Grapes", greek: "staphyle", kind: "crop", 
 export const QUALITY = ["", "ordinary", "fine", "excellent"];
 export const QUALITY_MULT = [1, 1, 1.5, 2];
 export const START_SEEDS: [string, number][] = [["Millet", 10], ["Chickpeas", 6], ["Mint", 3], ["Melon", 2]];
-export const START_TALLY = 20;
+// ---- money: silver coins, and gold coins worth 20 silver (a deliberate, archaic anachronism) ----
+export const START_SILVER = 20;
+export const SILVER_PER_GOLD = 20;
+export function money(silver: number): string {
+  const g = Math.floor(silver / SILVER_PER_GOLD), s = silver % SILVER_PER_GOLD;
+  if (!g) return `${s} silver`;
+  return s ? `${g} gold, ${s} silver` : `${g} gold`;
+}
 /** Nights a planted crop can go unwatered before it withers. */
 export const DRY_LIMIT = 3;

@@ -1,9 +1,9 @@
 import {
   MONTHS, WHEEL, START_ARETAI, essencePools, DAYLIGHT_REAL_SECONDS,
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
-  ITEMS, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
+  ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
-  CROPS, seedId, START_SEEDS, START_TALLY, DRY_LIMIT, QUALITY_MULT,
+  CROPS, seedId, START_SEEDS, START_SILVER, DRY_LIMIT, QUALITY_MULT,
 } from "./data";
 
 export interface Slot { id: string; qty: number; q?: number } // q: quality 1-3 for produce
@@ -40,7 +40,7 @@ export interface SaveData {
   trough: number; // water in the goats' trough
   hiveDay: number; // day number of the last honey harvest
   crops: Record<string, CropRec>; // "x,y" on the homestead
-  tally: number; // the miller's tally of what he owes you, in measures of grain
+  silver: number; // your purse, counted in silver coins (20 silver = 1 gold)
   outbox: Slot[]; // goods left in the pithos for the miller's cart
   orders: Slot[]; // seeds ordered, delivered at dawn
   vineYear: number; // year the old vine was last picked
@@ -78,7 +78,7 @@ export class GameState {
     d.ground ??= {}; d.treeHits ??= {};
     d.goats ??= START_GOATS.map((g) => ({ ...g }));
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
-    d.crops ??= {}; d.tally ??= START_TALLY; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
+    d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
     return d;
@@ -137,7 +137,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      crops: {}, tally: START_TALLY, outbox: [], orders: [], vineYear: 0,
+      crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
   }
 
@@ -257,8 +257,8 @@ export class GameState {
     if (this.data.outbox.length) {
       let earned = 0;
       for (const s of this.data.outbox) earned += Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1] * s.qty);
-      this.data.tally += earned; this.data.outbox = [];
-      notes.push(`The miller's cart took your goods: +${earned} measures on his tally.`);
+      this.data.silver += earned; this.data.outbox = [];
+      notes.push(`The miller's cart took your goods and left ${money(earned)} in the pithos.`);
     }
     if (this.data.orders.length) {
       for (const o of this.data.orders) this.addItem(o.id, o.qty);
