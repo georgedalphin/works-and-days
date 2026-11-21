@@ -4,6 +4,7 @@ import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money } from "./data";
 import type { CropRec } from "./state";
+import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, type Species } from "./animals";
 import type { ScreenRec } from "./state";
 
@@ -34,6 +35,42 @@ function labor(cost: Record<string, number>, fatigue: number, aretai: string): s
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
+/** Extra yield for things you understand fully. */
+const mastery = (id: string, n = 1) => (G.lore(id) >= 3 ? n : 0);
+const OBJ_SUBJECT: Record<number, string> = {
+  [T.TREE]: "oak", [T.SAPLING]: "oak", [T.BRUSH]: "bramble", [T.STONE]: "stone", [T.BOULDER]: "stone", [T.FLOWERS]: "poppy", [T.OLIVE]: "olive",
+};
+const loreName = (id: string) => (G.lore(id) >= 1 ? LORE[id].name : LORE[id].vague);
+
+/**
+ * Investigate a kind of thing: a Gnosis check (d12 ≤ Gnosis + modifiers) that may raise
+ * your understanding of it one tier. Once per kind per day; costs a little Water Essence.
+ */
+function study(id: string): boolean {
+  const d = LORE[id];
+  if (!d) return false;
+  const tier = G.lore(id);
+  if (tier >= 3) { G.say(`You know all there is to know about the ${d.name.toLowerCase()}.`); return false; }
+  if (G.data.lore.studied[id] === G.dayNumber) { G.say(`You've studied ${loreName(id)} all you can today. Come back tomorrow with fresh eyes.`); return false; }
+  const gnosis = G.data.aretai.Gnosis ?? 3;
+  const hera = G.patron?.aretai === "Gnosis" ? HERA_HOUR_BONUS : 0;
+  const fails = Math.min(MAX_PERSEVERANCE, G.data.lore.fails[id] ?? 0);
+  const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails;
+  if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
+  const b = labor({ Water: 3 }, 1, "Gnosis"); if (b === null) return false;
+  G.data.lore.studied[id] = G.dayNumber;
+  const roll = 1 + Math.floor(Math.random() * 12);
+  const odds = `d12 ${roll}, needed 1–${Math.min(12, target)}${hera ? ", Hera's hour +2" : ""}${fails ? `, perseverance +${fails}` : ""}`;
+  if (roll <= target) {
+    G.data.lore.tier[id] = tier + 1; G.data.lore.fails[id] = 0;
+    G.say(`You understand ${d.name.toLowerCase()} better: ${TIERS[tier + 1]} (${odds}).`);
+    return true;
+  }
+  G.data.lore.tier[id] = tier; G.data.lore.fails[id] = (G.data.lore.fails[id] ?? 0) + 1;
+  G.say(`You study ${loreName(id)} closely, but nothing new comes clear (${odds}). Try again tomorrow.`);
+  return false;
+}
+
 function give(id: string, qty: number, q?: number): string {
   const left = G.addItem(id, qty, q);
   if (left > 0) G.say(`Your hands are full: ${left} ${ITEMS[id].name} left on the ground.`);
@@ -45,7 +82,7 @@ function give(id: string, qty: number, q?: number): string {
 function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void }, tool: string | null, obj: number, x: number, y: number, hitKey: string): boolean {
     switch (tool) {
       case "sickle":
-        if (obj === T.BRUSH) { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2)}${b}`); }
+        if (obj === T.BRUSH) { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2 + mastery("bramble"))}${b}`); }
         else if (obj === T.FLOWERS) { sc.clearObject(x, y); G.say(`You cut wildflowers: ${give("Flowers", 2)}`); }
         else G.say("The sickle is for brush and flowers.");
         return true;
@@ -54,7 +91,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
         else if (obj === T.TREE) {
           const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
           const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
-          if (G.data.treeHits[k] >= TREE_HITS) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6)}${b}`); }
+          if (G.data.treeHits[k] >= TREE_HITS) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6 + mastery("oak", 2))}${b}`); }
           else { G.say(`You swing the axe into the oak (${G.data.treeHits[k]} of ${TREE_HITS}).${b}`); sc.cameras.main.shake(80, 0.002); }
         }
         else if (obj === T.OLIVE) G.say("You would never cut an olive tree. Athena would not forgive it.");
@@ -62,14 +99,14 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
         else G.say("Nothing here for the axe.");
         return true;
       case "mattock":
-        if (obj === T.STONE) { const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2)}${b}`); }
+        if (obj === T.STONE) { const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2 + mastery("stone"))}${b}`); }
         else if (obj === T.BOULDER) G.say("Too big for this mattock. A heavier, bronze-shod one from the smith will come later.");
         else G.say("Nothing here for the mattock.");
         return true;
       default:
         // Bare hands, or a material in hand.
         if (obj === T.FLOWERS) { sc.clearObject(x, y); G.say(`You pick wildflowers: ${give("Flowers", 1)}`); }
-        else if (obj === T.BRUSH) { const b = labor({ Earth: 3 }, 3, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You pull up the brush by hand: ${give("Fiber", 1)}${b}`); }
+        else if (obj === T.BRUSH) { const b = labor({ Earth: 3 }, 3, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You pull up the brush by hand: ${give("Fiber", 1 + mastery("bramble"))}${b}`); }
         else if (obj === T.TREE || obj === T.SAPLING || obj === T.STONE || obj === T.BOULDER) G.say("You need a tool for that. Choose one with the number keys 1–0.");
     }
   return true;
@@ -86,7 +123,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   setupInput() {
     this.cursors = this.input.keyboard!.createCursorKeys();
-    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,SPACE,SHIFT") as Record<string, Phaser.Input.Keyboard.Key>;
+    this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,Q,SPACE,SHIFT") as Record<string, Phaser.Input.Keyboard.Key>;
   }
 
   makePlayer(x: number, y: number) {
@@ -159,10 +196,42 @@ abstract class PlayScene extends Phaser.Scene {
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E) && this.current) this.current.act();
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.useItem();
+    if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.investigate();
     return true;
   }
 
   abstract useItem(): void;
+  /** The kind of thing in front of the player, for investigating. */
+  subjectAt(): string | null { return null; }
+  animals: Animal[] = [];
+
+  /** A creature close in front of the player, if any. */
+  creatureAhead(): Animal | null {
+    const [dx, dy] = DV[this.facing];
+    const fx = this.player.x + dx * 14, fy = this.player.y + 4 + dy * 14;
+    let best: Animal | null = null, bestD = 34;
+    for (const a of this.animals) {
+      if (a.state === "gone" || !a.sprite.visible) continue;
+      const d = Math.hypot(a.sprite.x - fx, a.sprite.y - fy);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return best;
+  }
+
+  investigate() {
+    const a = this.creatureAhead();
+    const id = a ? a.kind : this.subjectAt();
+    if (!id || !LORE[id]) { G.say("There's nothing here to investigate."); return; }
+    if (study(id)) ui(this).openLore(id);
+  }
+
+  /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
+  updateAnimals(dt: number) {
+    const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
+    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1);
+    if (!this.paused) for (const a of this.animals) a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
+    else for (const a of this.animals) a.sprite.setVelocity(0, 0);
+  }
 }
 
 // ------------------------------------------------------------------ boot and title
@@ -172,8 +241,10 @@ class BootScene extends Phaser.Scene {
 }
 
 class TitleScene extends Phaser.Scene {
+  starting = false;
   constructor() { super("Title"); }
   create() {
+    this.starting = false;
     const save = GameState.load();
     this.cameras.main.setBackgroundColor("#1f2a3a");
     const g = this.add.graphics();
@@ -201,9 +272,12 @@ class TitleScene extends Phaser.Scene {
     this.add.text(W / 2, H - 100, "Click the game first so it can hear your keys. Your saved life lives in this browser only.", { fontFamily: FONT, fontSize: "14px", color: "#8d877b" }).setOrigin(0.5);
   }
   begin(state: GameState) {
+    if (this.starting) return; // a click and a key in the same frame must not start the game twice
+    this.starting = true;
     G = state;
     (window as unknown as { G: GameState }).G = G; // for testing from the console
     this.scene.start(G.data.scene);
+    if (this.scene.isActive("UI")) this.scene.stop("UI");
     this.scene.launch("UI");
   }
 }
@@ -224,7 +298,6 @@ class FarmScene extends PlayScene {
   groundLayer!: Phaser.Tilemaps.TilemapLayer;
   objects!: Phaser.Tilemaps.TilemapLayer;
   baseGround: number[][] = [];
-  animals: Animal[] = [];
   goats: { a: Animal; g: Goat; t: Target }[] = [];
   fox: Animal | null = null;
   manger!: Phaser.GameObjects.Image;
@@ -438,7 +511,7 @@ class FarmScene extends PlayScene {
       G.say(`${g.name} leans into your hand. (Affection ${g.affection}/10)`);
     } else if (g.fed && g.milkedDay !== today) {
       g.milkedDay = today; G.addFatigue(1);
-      const n = g.affection >= 6 ? 2 : 1;
+      const n = g.affection >= (G.lore("goat") >= 3 ? 5 : 6) ? 2 : 1;
       G.say(`You milk ${g.name}: ${give("Milk", n)}${n > 1 ? " (a contented goat gives more)" : ""}`);
     } else {
       G.say(`${g.name} · affection ${g.affection}/10 · ${g.fed ? "ate and drank well last night; milked today" : "went hungry last night, so no milk today"}.`);
@@ -468,7 +541,7 @@ class FarmScene extends PlayScene {
     G.data.hiveDay = G.dayNumber;
     let flowers = 0;
     for (let y = HIVE.ty - 5; y <= HIVE.ty + 5; y++) for (let x = HIVE.tx - 5; x <= HIVE.tx + 5; x++) if (this.objects.getTileAt(x, y)?.index === T.FLOWERS) flowers++;
-    const honey = flowers >= 4 ? 2 : 1;
+    const honey = (flowers >= 4 ? 2 : 1) + mastery("bees");
     const got = `${give("Honey", honey)}, ${give("Wax", 1)}`;
     const calm = G.patron?.aretai === "Oikos";
     if (!calm && d12() <= 3) { G.addFatigue(6); this.cameras.main.shake(100, 0.003); G.say(`A bee stings you! ${got}. (In Demeter's hour the bees stay calm.)`); }
@@ -478,10 +551,7 @@ class FarmScene extends PlayScene {
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     for (const { a, g, t } of this.goats) { t.x = a.sprite.x; t.y = a.sprite.y + 4; t.label = this.goatLabel(g); }
-    const running = this.keys.SHIFT.isDown && (this.player.body!.velocity.length() > 80);
-    const scare = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1);
-    if (!this.paused) for (const a of this.animals) a.update(dt, this.player, scare);
-    else for (const a of this.animals) a.sprite.setVelocity(0, 0);
+    this.updateAnimals(dt);
     this.manger.setFrame(G.data.manger > 0 ? 1 : 0);
     this.vine.setFrame(G.data.month === 1 && G.data.vineYear !== G.data.year ? 1 : 0);
     this.trough.setFrame(G.data.trough > 0 ? 1 : 0);
@@ -532,7 +602,7 @@ class FarmScene extends PlayScene {
     if (c.withered) { delete G.data.crops[k]; this.drawCrop(k); G.say(`You pull up the withered ${d.name.toLowerCase()}.`); return true; }
     if (this.isRipe(c)) {
       const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0));
-      const got = give(d.id, d.yield, q);
+      const got = give(d.id, d.yield + mastery(d.id), q);
       if (d.regrow) { c.picks++; c.growth = 0; c.dryNights = 0; c.dryStreak = 0; G.say(`You pick the ${d.name.toLowerCase()}: ${got}. It will be ready again in ${d.regrow} nights.`); }
       else { delete G.data.crops[k]; G.say(`You harvest the ${d.name.toLowerCase()}: ${got}${q === 3 ? ". A splendid crop!" : ""}`); }
       this.drawCrop(k);
@@ -550,17 +620,28 @@ class FarmScene extends PlayScene {
     if (!d.seasons.includes(G.month.season)) { G.say(`It isn't the season for ${d.name.toLowerCase()}.`); return; }
     const b = labor({ Earth: 1 }, 1, "Oikos"); if (b === null) return;
     G.removeItem(seed, 1);
-    const hour = G.patron?.aretai === d.aretai;
+    const hour = d.aretai === "Night" ? !G.isDay : G.patron?.aretai === d.aretai;
     G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0 };
     this.drawCrop(k);
-    G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.god}'s hour, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
+    G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.aretai === "Night" ? "the night, Hades' time" : `${d.god}'s hour`}, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
   }
 
   tendVine() {
     if (G.data.month !== 1) { G.say(`An old vine, older than you. Its grapes ripen in Metageitnion.`); return; }
     if (G.data.vineYear === G.data.year) { G.say("You've picked the vine clean this year."); return; }
     G.data.vineYear = G.data.year;
-    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12)}. Dionysus will want his share.`);
+    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4))}. Dionysus will want his share.`);
+  }
+
+  subjectAt(): string | null {
+    const [x, y] = this.facingTile();
+    const crop = G.data.crops[`${x},${y}`];
+    if (crop) return crop.id;
+    if (x === HIVE.tx && (y === HIVE.ty || y === HIVE.ty + 1)) return "bees";
+    if (x === 20 && (y === 10 || y === 11)) return "vine";
+    const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (OBJ_SUBJECT[obj]) return OBJ_SUBJECT[obj];
+    return obj === -1 ? "t3" : null;
   }
 
   leaveFor(wx: number, wy: number, entry: "N" | "W") {
@@ -728,7 +809,6 @@ class WildScene extends PlayScene {
   key = "";
   rec!: ScreenRec;
   objects!: Phaser.Tilemaps.TilemapLayer;
-  animals: Animal[] = [];
   open: Record<Side, boolean> = { N: true, S: true, E: true, W: true };
 
   constructor() { super("Wild"); }
@@ -890,16 +970,20 @@ class WildScene extends PlayScene {
 
   update(_t: number, dms: number) {
     const dt = dms / 1000;
-    const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
-    const scare = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1);
-    if (!this.paused) for (const a of this.animals) a.update(dt, this.player, scare);
-    else for (const a of this.animals) a.sprite.setVelocity(0, 0);
+    this.updateAnimals(dt);
     if (!this.common(dt)) return;
     const px = this.player.x, py = this.player.y;
     if (px < 7 && this.open.W) this.leaveFor(-1, 0, "E");
     else if (px > WW * TILE - 7 && this.open.E) this.leaveFor(1, 0, "W");
     else if (py < 6 && this.open.N) this.leaveFor(0, -1, "S");
     else if (py > WH * TILE - 12 && this.open.S) this.leaveFor(0, 1, "N");
+  }
+
+  subjectAt(): string | null {
+    const [x, y] = this.facingTile();
+    const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (OBJ_SUBJECT[obj]) return OBJ_SUBJECT[obj];
+    return obj === -1 ? `t${this.rec.terrain}` : null;
   }
 
   leaveFor(dx: number, dy: number, entry: Side) {
@@ -951,6 +1035,8 @@ class UIScene extends Phaser.Scene {
   itemName!: Phaser.GameObjects.Text;
   hotbar: Cell[] = [];
   market?: Phaser.GameObjects.Container;
+  loreBook?: Phaser.GameObjects.Container;
+  loreSel = "";
   hotbarGfx!: Phaser.GameObjects.Graphics;
   inv?: { root: Phaser.GameObjects.Container; cells: Cell[]; info: Phaser.GameObjects.Text };
   held: number | null = null;
@@ -958,6 +1044,9 @@ class UIScene extends Phaser.Scene {
   constructor() { super("UI"); }
 
   create() {
+    // A scene object is reused when it restarts: start every list and panel fresh.
+    this.hotbar = []; this.labels = {}; this.log = []; this.modal = false;
+    this.inv = undefined; this.market = undefined; this.loreBook = undefined; this.dialog = undefined; this.held = null;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     this.shade = this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0, 0);
 
@@ -997,7 +1086,8 @@ class UIScene extends Phaser.Scene {
     kb.on("keydown", (e: KeyboardEvent) => {
       if (this.dialog) return;
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
-      if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market) this.toggleInventory();
+      if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
+      if ((e.key === "k" || e.key === "K") && !this.market && !this.inv) { if (this.loreBook) this.closeLore(); else this.openLore(); }
     });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       if (this.modal) return;
@@ -1017,6 +1107,7 @@ class UIScene extends Phaser.Scene {
       "Use it: Space, on the ground in front of you",
       "Interact: E, when a prompt appears (doors, bed, hearth, signs)",
       "Inventory: I or Tab (click two slots to swap them)     Help: H",
+      "Investigate: Q, on a creature, plant, stone or the land itself     What you know: K",
       "",
       "Hoe: till soil · Water jar: water tilled soil, refill at the well",
       "Sickle: brush and flowers · Axe: saplings and trees · Mattock: stones",
@@ -1044,7 +1135,7 @@ class UIScene extends Phaser.Scene {
       this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
     });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -1104,10 +1195,13 @@ class UIScene extends Phaser.Scene {
 
   fillSlot(cell: Cell, i: number) {
     const s = G.data.slots[i];
-    if (!s) { cell.icon.setVisible(false); cell.qty.setText(""); cell.star.setText(""); return; }
+    if (!s) { cell.icon.setVisible(false); if (cell.qty.text) cell.qty.setText(""); if (cell.star.text) cell.star.setText(""); return; }
     cell.icon.setVisible(true).setFrame(s.id);
     cell.qty.setText(ITEMS[s.id].kind !== "tool" ? String(s.qty) : s.id === "jar" ? `${G.data.jarWater}` : "");
-    cell.star.setText(s.q && s.q > 1 ? "★" : "").setColor(s.q === 3 ? "#f2c14e" : "#d8d8e0");
+    // Only touch the star when it changes: restyling text every frame is costly and can fail in WebGL.
+    const star = s.q && s.q > 1 ? "★" : "", col = s.q === 3 ? "#f2c14e" : "#d8d8e0";
+    if (cell.star.text !== star) cell.star.setText(star);
+    if (star && cell.star.style.color !== col) cell.star.setColor(col);
   }
 
   drawHotbar() {
@@ -1149,6 +1243,58 @@ class UIScene extends Phaser.Scene {
     root.add(info);
     root.add(this.add.text(W / 2, y0 + h + 10, "I, Tab or Esc to close", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     this.inv = { root, cells, info };
+  }
+
+  openLore(focus?: string) {
+    if (this.market || this.dialog) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.modal = true;
+    if (focus) this.loreSel = focus;
+    this.buildLore();
+  }
+  closeLore() { this.loreBook?.destroy(); this.loreBook = undefined; this.modal = this.help.visible || !!this.inv || !!this.market; }
+
+  /** The book of what you know: every kind of thing you've met, and how well you understand it. */
+  buildLore() {
+    this.loreBook?.destroy();
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 800, h = 480, x0 = (W - w) / 2, y0 = (H - h) / 2 - 20;
+    const root = this.add.container(0, 0).setDepth(23);
+    this.loreBook = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 12, "What you know", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 38, "Investigate things in the world with Q. Each study is a Gnosis check that may deepen your understanding of that kind of thing.", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    const ids = Object.keys(G.data.lore.tier).filter((id) => LORE[id]);
+    ids.sort((a, b) => LORE[a].category.localeCompare(LORE[b].category) || LORE[a].name.localeCompare(LORE[b].name));
+    if (!this.loreSel || !ids.includes(this.loreSel)) this.loreSel = ids[0] ?? "";
+    const pips = (t: number) => "●".repeat(t) + "○".repeat(3 - t);
+    let y = y0 + 66, cat = "";
+    const lx = x0 + 20;
+    for (const id of ids) {
+      const d = LORE[id], t = G.lore(id);
+      const label = t >= 1 ? d.category : "Not yet known";
+      if (label !== cat) { cat = label; root.add(this.add.text(lx, y, cat, { ...font, fontSize: "12px", color: "#fbe39a" })); y += 17; }
+      const name = t >= 1 ? d.name : d.vague[0].toUpperCase() + d.vague.slice(1);
+      const tx = this.add.text(lx + 8, y, `${pips(t)}  ${name}`, { ...font, fontSize: "13px", color: id === this.loreSel ? "#f2c14e" : "#f2e6c9" })
+        .setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.loreSel = id; this.buildLore(); });
+      root.add(tx); y += 17;
+      if (y > y0 + h - 30) break;
+    }
+    // The selected subject.
+    if (this.loreSel) {
+      const d = LORE[this.loreSel], t = G.lore(this.loreSel);
+      const rx = x0 + 290, rw = w - 310;
+      root.add(this.add.rectangle(rx - 12, y0 + 64, 1, h - 90, 0x6b4a2b).setOrigin(0, 0));
+      root.add(this.add.text(rx, y0 + 66, t >= 1 ? d.name : d.vague[0].toUpperCase() + d.vague.slice(1), { ...font, fontSize: "20px" }));
+      root.add(this.add.text(rx, y0 + 94, `Understanding: ${TIERS[t]}  ${pips(t)}`, { ...font, fontSize: "13px", color: "#fbe39a" }));
+      root.add(this.add.text(rx, y0 + 122, loreLines(d, t).join("\n\n"), { ...font, fontSize: "14px", lineSpacing: 2, wordWrap: { width: rw } }));
+      if (t < 3) {
+        const gn = G.data.aretai.Gnosis ?? 3, target = Math.max(0, Math.min(12, gn + TIER_MOD[t + 1] + RARITY_MOD[d.rarity] + Math.min(MAX_PERSEVERANCE, G.data.lore.fails[this.loreSel] ?? 0)));
+        root.add(this.add.text(rx, y0 + h - 50, `Next tier, ${TIERS[t + 1]}: a Gnosis check succeeds on 1–${target} of 12 (+2 in Hera's hour).`, { ...font, fontSize: "12px", color: "#c9b48f", wordWrap: { width: rw } }));
+      }
+    }
+    root.add(this.add.text(W / 2, y0 + h - 22, "K or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }
 
   openMarket() { if (this.market || this.dialog) return; if (this.inv) this.toggleInventory(); this.modal = true; this.buildMarket(); }

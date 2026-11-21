@@ -1,7 +1,7 @@
 import { build } from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 mkdirSync("dist", { recursive: true });
-await build({ entryPoints: ["src/main.ts"], bundle: true, minify: true, format: "iife", target: "es2020", outfile: "dist/app.js", legalComments: "none" });
+await build({ entryPoints: ["src/main.ts"], bundle: true, minify: process.env.DEV ? false : true, format: "iife", target: "es2020", outfile: "dist/app.js", legalComments: "none" });
 const js = readFileSync("dist/app.js", "utf8").replace(/<\/script/gi, "<\\/script");
 const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

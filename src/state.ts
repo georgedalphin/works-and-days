@@ -8,6 +8,8 @@ import {
 
 export interface Slot { id: string; qty: number; q?: number } // q: quality 1-3 for produce
 export interface CropRec { id: string; growth: number; dryNights: number; dryStreak: number; hourBonus: boolean; withered: boolean; picks: number }
+/** What a young farmer already knows on the first day. */
+const START_LORE: Record<string, number> = { goat: 1, bees: 1, Millet: 1, Chickpeas: 1, Melon: 1, Mint: 1, vine: 1, olive: 1, t3: 1 };
 export interface ScreenRec { terrain: number; special: boolean; feature: string; cleared: string[] }
 
 const SAVE_KEY = "worksanddays.save.v1";
@@ -45,6 +47,7 @@ export interface SaveData {
   orders: Slot[]; // seeds ordered, delivered at dawn
   vineYear: number; // year the old vine was last picked
   seedsGiven?: boolean;
+  lore: { tier: Record<string, number>; fails: Record<string, number>; studied: Record<string, number> };
 }
 
 export class GameState {
@@ -80,6 +83,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
+    d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
     return d;
   }
@@ -137,6 +141,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
+      lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
   }
@@ -157,6 +162,8 @@ export class GameState {
     const dist = Math.abs(this.data.wx) + Math.abs(this.data.wy);
     return `${rec ? terrain(rec.terrain).name : "The wild"} · ${dist} screen${dist === 1 ? "" : "s"} from home`;
   }
+  /** Your understanding of a kind of thing: 0 Unknown, 1 Basics, 2 Deep, 3 Full. */
+  lore(id: string) { return this.data.lore.tier[id] ?? 0; }
   get dateKey() { return `${this.data.year}-${this.data.month}-${this.data.day}`; }
 
   /** Real seconds per clock hour, so daylight always lasts DAYLIGHT_REAL_SECONDS. */

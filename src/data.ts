@@ -164,9 +164,9 @@ export const CROPS: Record<string, CropDef> = {
     desc: "A hardy summer grain for porridge and bread.", seedDesc: "Grows in summer. Ripe in 6 watered nights." },
   Chickpeas: { id: "Chickpeas", name: "Chickpeas", greek: "erebinthos", days: 8, yield: 3, seasons: ["Summer"], aretai: "Oikos", god: "Demeter", value: 4, seedPrice: 8, packet: 5,
     desc: "Roasted, stewed or ground: food for the whole year.", seedDesc: "Grows in summer. Ripe in 8 watered nights." },
-  Melon: { id: "Melon", name: "Melon", greek: "pepon", days: 10, yield: 1, seasons: ["Summer"], aretai: "Phoenix", god: "Aphrodite", value: 14, seedPrice: 12, packet: 3,
+  Melon: { id: "Melon", name: "Melon", greek: "pepon", days: 10, yield: 1, seasons: ["Summer"], aretai: "Oikos", god: "Demeter", value: 14, seedPrice: 12, packet: 3,
     desc: "Sweet and heavy with juice; prized at any table.", seedDesc: "Grows in summer. Ripe in 10 watered nights." },
-  Mint: { id: "Mint", name: "Mint", greek: "minthe", days: 5, regrow: 3, yield: 2, seasons: ["Spring", "Summer", "Autumn"], aretai: "Pneuma", god: "Dionysus", value: 3, seedPrice: 6, packet: 3,
+  Mint: { id: "Mint", name: "Mint", greek: "minthe", days: 5, regrow: 3, yield: 2, seasons: ["Spring", "Summer", "Autumn"], aretai: "Night", god: "Hades", value: 3, seedPrice: 6, packet: 3,
     desc: "Fragrant: for the kykeon, for medicine, and for the dead.", seedDesc: "Grows spring to autumn. Ripe in 5 nights, then picked again every 3." },
 };
 export const seedId = (crop: string) => `seed_${crop}`;
