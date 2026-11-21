@@ -2,10 +2,10 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
-import { Animal, type Species } from "./animals";
+import { Animal, SPECIES, type Species } from "./animals";
 import type { ScreenRec } from "./state";
 
 const W = 960, H = 640, ZOOM = 3;
@@ -41,6 +41,8 @@ const OBJ_SUBJECT: Record<number, string> = {
   [T.TREE]: "oak", [T.SAPLING]: "oak", [T.BRUSH]: "bramble", [T.STONE]: "stone", [T.BOULDER]: "stone", [T.FLOWERS]: "poppy", [T.OLIVE]: "olive",
 };
 const loreName = (id: string) => (G.lore(id) >= 1 ? LORE[id].name : LORE[id].vague);
+/** A creature as you would name it: "wild boar" once you know it, "dark, bristling beast" before. */
+const beast = (id: string) => (LORE[id] ? (G.lore(id) >= 1 ? LORE[id].name.toLowerCase() : LORE[id].vague.replace(/^(an?|your) /, "")) : id);
 
 /**
  * Investigate a kind of thing: a Gnosis check (d12 ≤ Gnosis + modifiers) that may raise
@@ -123,7 +125,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
-    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false;
+    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       if (!this.aiming || !p.leftButtonDown()) return;
@@ -150,7 +152,12 @@ abstract class PlayScene extends Phaser.Scene {
     this.time.delayedCall(200, () => this.scene.start(key));
   }
 
+  knock = 0; // seconds of being thrown back by a blow
+  invuln = 0; // seconds before another blow can land
+
   movePlayer(dt: number) {
+    if (this.invuln > 0) { this.invuln -= dt; this.player.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 12) % 2 ? 0.4 : 1); }
+    if (this.knock > 0) { this.knock -= dt; return; }
     const k = this.keys, c = this.cursors;
     let vx = 0, vy = 0;
     if (!this.paused) {
@@ -201,6 +208,8 @@ abstract class PlayScene extends Phaser.Scene {
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
     G.data.px = this.player.x; G.data.py = this.player.y;
     this.current = this.findTarget();
+    const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56);
+    if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E) && this.current) this.current.act();
     const bow = G.selectedItem?.id === "bow";
@@ -216,6 +225,104 @@ abstract class PlayScene extends Phaser.Scene {
     this.updateArrows(dt);
     this.updatePickups();
     return true;
+  }
+
+  // ---------------------------------------------------------------- danger
+  /**
+   * When a creature notices you it rolls a d12 against its Aggression: at or under, it comes at you.
+   * Night makes beasts bolder (+2), Artemis' hour calms them (-2), and a wounded beast fights (+3).
+   */
+  aggressionRoll(a: Animal, bonus = 0): boolean {
+    const d = SPECIES[a.kind];
+    if (d.aggression <= 0 || a.appeased) return false;
+    const agg = d.aggression + (G.isDay ? 0 : 2) + (G.patron?.aretai === "Kardia" ? -2 : 0) + bonus;
+    const roll = 1 + Math.floor(Math.random() * 12);
+    if (roll > agg) return false;
+    a.charge(a.kind === "wolf" ? 7 : 5);
+    this.alarm(a);
+    const name = loreName(a.kind);
+    const how: Record<string, string> = { boar: "lowers its tusks and charges", wolf: "bares its teeth and comes for you", fox: "snarls and darts at you", deer: "lowers its antlers and charges" };
+    G.say(`${name[0].toUpperCase() + name.slice(1)} ${how[a.kind] ?? "comes at you"}! (d12 ${roll}${G.lore(a.kind) >= 2 ? `, Aggression ${agg}` : ""}) Run, fight, or calm it (E).`);
+    return true;
+  }
+
+  alarm(a: Animal) {
+    const t = this.add.text(a.sprite.x, a.sprite.y - 12, "!", { fontFamily: FONT, fontSize: "10px", color: "#e0403a", stroke: "#1f1712", strokeThickness: 2 }).setOrigin(0.5).setResolution(3).setDepth(99999);
+    this.tweens.add({ targets: t, y: t.y - 8, alpha: 0, duration: 900, onComplete: () => t.destroy() });
+  }
+
+  /** A creature lands a blow: Fatigue, a knock back, and if you were already spent, you fall. */
+  struck(a: Animal) {
+    if (this.invuln > 0 || this.leaving) return;
+    const d = SPECIES[a.kind];
+    G.addFatigue(d.damage);
+    this.invuln = 1; this.knock = 0.22;
+    const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
+    this.player.setVelocity(Math.cos(ang) * 170, Math.sin(ang) * 170);
+    this.cameras.main.shake(140, 0.006);
+    this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
+    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts" };
+    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${d.damage} Fatigue)`);
+    if (G.data.fatigue >= 100) this.struckDown(a);
+  }
+
+  struckDown(a: Animal) {
+    G.data.lifeThread = Math.max(0, G.data.lifeThread - 1);
+    for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); }
+    if (G.data.lifeThread <= 0) { ui(this).death(`${LORE[a.kind]?.name ?? a.kind}`); return; }
+    ui(this).sleep(this, true, `You are struck down by the ${beast(a.kind)}. A shepherd finds you and carries you home.\nYour Life Thread frays: ${G.data.lifeThread} of ${START_LIFE_THREAD} remain.`);
+  }
+
+  /** Space with a tool (or bare hands) at a creature right in front of you: a Thymos check to land a blow. */
+  tryStrike(tool: string | null): boolean {
+    if (tool && !(tool in MELEE)) return false;
+    const a = this.creatureAhead();
+    if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > 26) return false;
+    const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return true;
+    const name = beast(a.kind);
+    if (!tool) { // a shove
+      a.bolt(this.player);
+      G.say(`You shove the ${name} away.`);
+      return true;
+    }
+    const thymos = G.data.aretai.Thymos ?? 3;
+    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0);
+    const roll = 1 + Math.floor(Math.random() * 12);
+    if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
+    const q = QUARRY[a.kind];
+    if (a.hp < 0) a.hp = q.hp;
+    a.hp -= MELEE[tool];
+    this.chips(Math.floor(a.sprite.x / TILE), Math.floor(a.sprite.y / TILE), -1, 4);
+    if (a.hp <= 0) { this.kill(a); return true; }
+    a.sprite.setTint(0xff8080); this.time.delayedCall(250, () => a.sprite.clearTint());
+    G.say(`You strike the ${name}! (d12 ${roll}, needed 1–${target})`);
+    if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player);
+    return true;
+  }
+
+  /**
+   * Calm an angry creature (E): a Kardia check, easier with food it likes held out in your hand.
+   * The first step of befriending: a calmed creature lets you be.
+   */
+  appease(a: Animal) {
+    const b = labor({ Water: 2 }, 1, "Kardia"); if (b === null) return;
+    const name = beast(a.kind);
+    const held = G.selectedItem?.id ?? "";
+    const food = (PEACE_FOOD[a.kind] ?? []).includes(held);
+    if (food) G.removeItem(held, 1);
+    const kardia = G.data.aretai.Kardia ?? 3;
+    const target = kardia + 2 + (food ? 3 : 0) + (G.patron?.aretai === "Kardia" ? 2 : 0) - Math.floor(SPECIES[a.kind].aggression / 2);
+    const roll = 1 + Math.floor(Math.random() * 12);
+    const odds = `d12 ${roll}, needed 1–${Math.max(0, target)}${food ? `, ${ITEMS[held].name.toLowerCase()} offered +3` : ""}`;
+    if (roll <= target) {
+      a.appeased = true; a.state = "idle"; a.timer = 3; a.sprite.setVelocity(0, 0);
+      const t = this.add.text(a.sprite.x, a.sprite.y - 12, "♥", { fontFamily: FONT, fontSize: "9px", color: "#9ad07a" }).setOrigin(0.5).setResolution(3).setDepth(99999);
+      this.tweens.add({ targets: t, y: t.y - 10, alpha: 0, duration: 1100, onComplete: () => t.destroy() });
+      G.say(`You speak low and hold still. The ${name} calms and lets you be (${odds}).`);
+    } else {
+      a.charge(4);
+      G.say(`The ${name} won't be calmed (${odds}).${PEACE_FOOD[a.kind] && !food ? ` Try holding out ${PEACE_FOOD[a.kind][0].toLowerCase()}.` : ""}`);
+    }
   }
 
   // ---------------------------------------------------------------- break effects
@@ -358,8 +465,8 @@ abstract class PlayScene extends Phaser.Scene {
       if (hit.hp <= 0) this.kill(hit);
       else {
         hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
-        hit.bolt({ x, y: y - 20 });
-        G.say(`A hit! The ${LORE[hit.kind]?.name.toLowerCase() ?? hit.kind} is wounded and runs.`);
+        if (this.aggressionRoll(hit, 3)) G.say(`A hit! The wounded ${beast(hit.kind)} turns on you!`);
+        else { hit.bolt({ x, y: y - 20 }); G.say(`A hit! The ${beast(hit.kind)} is wounded and runs.`); }
       }
     } else {
       if (goat) G.say("Your arrow thuds into the goat pen. The goats bleat at you reproachfully.");
@@ -372,9 +479,11 @@ abstract class PlayScene extends Phaser.Scene {
   }
 
   kill(a: Animal) {
+    const known = G.lore(a.kind) >= 1;
     a.state = "dead"; a.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
-    const name = LORE[a.kind]?.name.toLowerCase() ?? a.kind;
+    const name = beast(a.kind);
     G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: remember her share." : ""}`);
+    if (!known && LORE[a.kind]) { G.data.lore.tier[a.kind] = 1; G.say(`Up close, you know it now: a ${LORE[a.kind].name.toLowerCase()}.`); }
     if (a.flock.length) for (const b of a.flock) if (b !== a && b.state !== "dead" && b.state !== "gone") b.bolt(a.sprite);
     this.time.delayedCall(700, () => {
       QUARRY[a.kind].drops.forEach(([id, n], i) => this.dropItem(id, n, a.sprite.x - 6 + i * 6, a.sprite.y + 2 + (i % 2) * 4));
@@ -430,6 +539,7 @@ abstract class PlayScene extends Phaser.Scene {
   updateAnimals(dt: number) {
     const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
     const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1);
+    for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     if (!this.paused) for (const a of this.animals) a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
   }
@@ -760,6 +870,7 @@ class FarmScene extends PlayScene {
     if (!this.common(dt)) return;
     this.maybeFox();
     // Walking off the east or south edge leads into the wild.
+    if (this.knock > 0) return;
     if (this.player.x > MW * TILE - 7) this.leaveFor(1, 0, "W");
     else if (this.player.y > MH * TILE - 12) this.leaveFor(0, 1, "N");
     // Walking up into the doorway enters the hut.
@@ -880,6 +991,7 @@ class FarmScene extends PlayScene {
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     const soil = G.data.ground[`${x},${y}`];
     const isWell = x === WELL.tx && (y === WELL.ty || y === WELL.ty + 1);
+    if (this.tryStrike(tool)) return;
     if (this.workCrop(x, y, tool)) return;
     if (item && ITEMS[item.id].kind === "seed") {
       if (G.data.crops[`${x},${y}`]) { G.say("Something is already growing there."); return; }
@@ -1110,6 +1222,7 @@ class WildScene extends PlayScene {
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects);
+    this.wolvesOut = false;
     this.spawnCreatures(p, gen);
     this.cameras.main.fadeIn(250);
 
@@ -1173,11 +1286,29 @@ class WildScene extends PlayScene {
     }
   }
 
+  /** Wolves hunt the forests from dusk. */
+  wolvesOut = false;
+  maybeWolves(gen: () => number = Math.random) {
+    if (this.wolvesOut || this.rec.terrain !== 2 || (G.isDay && G.data.clock < G.daylight - 1)) return;
+    this.wolvesOut = true;
+    const n = 2 + (gen() < 0.5 ? 1 : 0);
+    for (let tries = 0, made = 0; tries < 60 && made < n; tries++) {
+      const x = 3 + Math.floor(gen() * (WW - 6)), y = 3 + Math.floor(gen() * (WH - 6));
+      if (Math.hypot(x * TILE - this.player.x, y * TILE - this.player.y) < 140 || !this.free(x * TILE + 8, y * TILE + 8)) continue;
+      const a = new Animal(this, "wolf", x * TILE + 8, y * TILE + 8, new Phaser.Geom.Rectangle(x * TILE - 90, y * TILE - 90, 180, 180), (px, py) => this.free(px, py));
+      this.physics.add.collider(a.sprite, this.objects);
+      this.animals.push(a); made++;
+    }
+    G.say("Somewhere in the trees, a wolf howls.");
+  }
+
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     this.updateAnimals(dt);
     if (!this.common(dt)) return;
+    this.maybeWolves();
     const px = this.player.x, py = this.player.y;
+    if (this.knock > 0) return; // a blow can't throw you onto the next map
     if (px < 7 && this.open.W) this.leaveFor(-1, 0, "E");
     else if (px > WW * TILE - 7 && this.open.E) this.leaveFor(1, 0, "W");
     else if (py < 6 && this.open.N) this.leaveFor(0, -1, "S");
@@ -1214,6 +1345,7 @@ class WildScene extends PlayScene {
     const item = G.selectedItem;
     const tool = item && ITEMS[item.id].kind === "tool" ? item.id : null;
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (this.tryStrike(tool)) return;
     if (tool === "hoe") { G.say("Save the hoe for your own fields."); return; }
     if (tool === "jar") { G.say("No water here. Springs and rivers come with the wider world."); return; }
     workObject(this, tool, obj, x, y, `${this.key}:${x},${y}`);
@@ -1232,6 +1364,7 @@ class UIScene extends Phaser.Scene {
   timeText!: Phaser.GameObjects.Text;
   place!: Phaser.GameObjects.Text;
   purse!: Phaser.GameObjects.Text;
+  thread!: Phaser.GameObjects.Text;
   patron!: Phaser.GameObjects.Text;
   badge!: Phaser.GameObjects.Rectangle;
   bars!: Phaser.GameObjects.Graphics;
@@ -1270,6 +1403,7 @@ class UIScene extends Phaser.Scene {
     // Fatigue and Essence, top right.
     this.add.rectangle(W - 312, 12, 300, 92, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
     this.bars = this.add.graphics();
+    this.thread = this.add.text(W - 16, 130, "", { ...font, fontSize: "13px", color: "#e8c0b0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
     this.purse = this.add.text(W - 16, 110, "", { ...font, fontSize: "14px", color: "#e8e2d0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
 
     // Hotbar.
@@ -1320,6 +1454,8 @@ class UIScene extends Phaser.Scene {
       "Investigate: Q, on a creature, plant, stone or the land itself     What you know: K",
       "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
       "Handwork: C (arrows from wood and stone)",
+      "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
+      "Blows cost Fatigue; fall when spent and your Life Thread frays.",
       "",
       "Hoe: till soil · Water jar: water tilled soil, refill at the well",
       "Sickle: brush and flowers · Axe: saplings and trees · Mattock: stones",
@@ -1337,7 +1473,7 @@ class UIScene extends Phaser.Scene {
       "Stay up past the second watch of the night and you will collapse.",
       "Watered soil dries overnight. Your life is saved each dawn.",
     ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 820, 600, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const hbg = this.add.rectangle(W / 2, H / 2, 860, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
@@ -1361,6 +1497,8 @@ class UIScene extends Phaser.Scene {
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
     this.purse.setText(`Purse: ${money(G.data.silver)}`);
+    const lt = `Life Thread ${"●".repeat(G.data.lifeThread)}${"○".repeat(Math.max(0, START_LIFE_THREAD - G.data.lifeThread))}`;
+    if (this.thread.text !== lt) this.thread.setText(lt);
     const p = G.patron;
     if (p) {
       this.badge.setFillStyle(Phaser.Display.Color.HexStringToColor(p.color).color);
@@ -1639,20 +1777,30 @@ class UIScene extends Phaser.Scene {
 
   collapse(from: Phaser.Scene) { this.sleep(from, true); }
 
-  sleep(from: Phaser.Scene, collapsed: boolean) {
+  /** The thread is cut. Heirs and the next generation come later; for now, a new life begins. */
+  death(by: string) {
+    this.modal = true;
+    GameState.clearSave();
+    this.add.rectangle(0, 0, W, H, 0x0b0b10, 0.92).setOrigin(0, 0).setDepth(40);
+    this.add.text(W / 2, H / 2, [`Killed by a ${by.toLowerCase()}.`, "", "Your Life Thread is cut, and the Fates close their shears.", "In the full game your heir would take up the homestead.", "", "Press any key to begin a new life."].join("\n"),
+      { fontFamily: FONT, fontSize: "20px", color: "#f2e6c9", align: "center", lineSpacing: 6 }).setOrigin(0.5).setDepth(41);
+    this.time.delayedCall(1200, () => { this.input.keyboard!.once("keydown", () => window.location.reload()); this.input.once("pointerdown", () => window.location.reload()); });
+  }
+
+  sleep(from: Phaser.Scene, collapsed: boolean, cause?: string) {
     this.modal = true;
     if (this.inv) this.toggleInventory();
     this.modal = true;
     const away = from.scene.key === "Wild";
     const { hoursSlept, recovered, notes } = G.sleep(collapsed);
-    if (away) notes.unshift("A passing shepherd finds you and helps you home.");
+    if (away && !cause) notes.unshift("A passing shepherd finds you and helps you home.");
     const wakeX = 3 * TILE, wakeY = 5 * TILE + 8; // beside the bed
     G.data.scene = "House"; G.data.px = wakeX; G.data.py = wakeY;
     const saved = G.save();
     const cover = this.add.rectangle(0, 0, W, H, 0x0b1630, 0).setOrigin(0, 0).setDepth(30);
     this.tweens.add({ targets: cover, fillAlpha: 1, duration: 600 });
     const lines = [
-      collapsed ? "You collapse from exhaustion in the second watch of the night." : "You sleep.",
+      cause ?? (collapsed ? "You collapse from exhaustion in the second watch of the night." : "You sleep."),
       "",
       `Dawn. ${G.dateLabel()}`,
       `${G.moon}`,
@@ -1693,3 +1841,4 @@ class UIScene extends Phaser.Scene {
 });
 
 (window as unknown as { WHEEL: typeof WHEEL }).WHEEL = WHEEL;
+(window as unknown as { Animal: typeof Animal }).Animal = Animal; // for testing from the console

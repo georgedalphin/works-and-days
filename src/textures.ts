@@ -192,6 +192,15 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, o + 2, 6, 11, 6, B); px(c, o + 3, 5, 8, 1, "#3a2c22"); for (let i = 0; i < 4; i++) px(c, o + 4 + i * 2, 4, 1, 2, D);
     px(c, o + 12, 7, 4, 4, B); px(c, o + 15, 9, 1, 2, "#7a5a50"); px(c, o + 13, 10, 1, 2, "#f2ece0"); px(c, o + 13, 8, 1, 1, "#c4703f");
   });
+  strip("wolf", (c, o, f) => {
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)");
+    const G1 = "#7a7468", D = "#3a3630", L = "#a8a294";
+    if (f === 0) { px(c, o + 4, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 3, 10, 1, 4, D); px(c, o + 7, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 3, 6, 10, 5, G1); px(c, o + 4, 6, 7, 1, D); px(c, o + 5, 10, 6, 1, L);
+    px(c, o + 0, 6, 4, 2, G1); px(c, o + 0, 7, 1, 2, D);
+    px(c, o + 11, 4, 4, 4, G1); px(c, o + 15, 6, 1, 2, D); px(c, o + 11, 2, 1, 2, G1); px(c, o + 14, 2, 1, 2, G1); px(c, o + 13, 5, 1, 1, "#e8c86a"); px(c, o + 12, 7, 3, 1, L);
+  });
   strip("bird", (c, o, f) => {
     if (f === 0) {
       px(c, o + 6, 14, 5, 1, "rgba(0,0,0,0.2)");

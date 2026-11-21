@@ -207,6 +207,7 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   fox: { hp: 1, size: 6, drops: [["Hide", 1]] },
   deer: { hp: 2, size: 8, drops: [["Meat", 3], ["Hide", 1], ["Antler", 1]] },
   boar: { hp: 3, size: 7, drops: [["Meat", 3], ["Hide", 1], ["Tusk", 1]] },
+  wolf: { hp: 2, size: 7, drops: [["Hide", 1]] },
 };
 /** Practice makes the archer: experience per shot and per hit, and how much a level is. */
 export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
@@ -214,3 +215,12 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
   { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
 ];
+
+// ---- danger ----
+export const START_LIFE_THREAD = 8; // a Young Adult's thread
+/** Food a creature will take as a peace offering when you try to calm it. */
+export const PEACE_FOOD: Record<string, string[]> = {
+  boar: ["Millet", "Chickpeas", "Melon"], deer: ["Millet", "Chickpeas", "Melon"], wolf: ["Meat"], fox: ["Meat"],
+};
+/** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
+export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };

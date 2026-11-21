@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar";
+export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf";
 
 interface SpeciesDef {
   name: string;
@@ -10,15 +10,19 @@ interface SpeciesDef {
   idle: [number, number]; // seconds spent idling between wanders
   body: [number, number, number, number]; // physics body w, h, offset x, y
   frameRate: number;
+  aggression: number; // a d12 at or under this when it notices you means it comes at you
+  charge: number; // charging speed, px/s
+  damage: number; // Fatigue dealt by a blow
 }
 
 export const SPECIES: Record<Species, SpeciesDef> = {
-  goat: { name: "goat", walk: 14, flee: 0, scare: 0, idle: [1.5, 5], body: [10, 5, 3, 10], frameRate: 4 },
-  hare: { name: "hare", walk: 22, flee: 100, scare: 44, idle: [1, 4], body: [8, 4, 4, 10], frameRate: 7 },
-  fox: { name: "fox", walk: 28, flee: 95, scare: 64, idle: [0.6, 2.5], body: [10, 4, 3, 10], frameRate: 6 },
-  deer: { name: "deer", walk: 20, flee: 110, scare: 72, idle: [1.5, 4], body: [10, 4, 3, 11], frameRate: 7 },
-  boar: { name: "boar", walk: 16, flee: 80, scare: 36, idle: [1, 3.5], body: [11, 5, 2, 10], frameRate: 6 },
-  bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12 },
+  goat: { name: "goat", walk: 14, flee: 0, scare: 0, idle: [1.5, 5], body: [10, 5, 3, 10], frameRate: 4, aggression: 0, charge: 0, damage: 0 },
+  hare: { name: "hare", walk: 22, flee: 100, scare: 44, idle: [1, 4], body: [8, 4, 4, 10], frameRate: 7, aggression: 0, charge: 0, damage: 0 },
+  fox: { name: "fox", walk: 28, flee: 95, scare: 64, idle: [0.6, 2.5], body: [10, 4, 3, 10], frameRate: 6, aggression: 2, charge: 85, damage: 5 },
+  wolf: { name: "wolf", walk: 30, flee: 100, scare: 80, idle: [0.6, 2], body: [11, 4, 2, 10], frameRate: 7, aggression: 6, charge: 108, damage: 10 },
+  deer: { name: "deer", walk: 20, flee: 110, scare: 72, idle: [1.5, 4], body: [10, 4, 3, 11], frameRate: 7, aggression: 1, charge: 95, damage: 8 },
+  boar: { name: "boar", walk: 16, flee: 80, scare: 48, idle: [1, 3.5], body: [11, 5, 2, 10], frameRate: 6, aggression: 5, charge: 100, damage: 15 },
+  bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0 },
 };
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -30,7 +34,14 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
  */
 export class Animal {
   sprite: Phaser.Physics.Arcade.Sprite;
-  state: "idle" | "walk" | "flee" | "gone" | "dead" = "idle";
+  state: "idle" | "walk" | "flee" | "gone" | "dead" | "charge" | "recoil" = "idle";
+  /** Has it rolled its Aggression this encounter? It may roll again after a while apart. */
+  rolled = false;
+  rerollT = 0;
+  appeased = false;
+  /** The scene decides what happens when it notices you (the Aggression roll) and when it lands a blow. */
+  decide?: (a: Animal) => void;
+  strikes?: (a: Animal) => void;
   hp = -1; // set from the quarry table on the first hit
   timer: number;
   tx = 0; ty = 0;
@@ -61,8 +72,15 @@ export class Animal {
       if (this.timer <= 0) this.settle();
       return;
     }
-    if (d.scare && this.state !== "flee") {
-      const dist = Phaser.Math.Distance.Between(s.x, s.y, player.x, player.y);
+    const dist = Phaser.Math.Distance.Between(s.x, s.y, player.x, player.y);
+    if (this.rolled && this.state !== "charge" && this.state !== "recoil" && (this.rerollT -= dt) <= 0 && dist > d.scare * 2) this.rolled = false;
+    // Noticing you: the creature rolls its Aggression (the scene decides: charge, or flee as usual).
+    if (d.aggression > 0 && !this.rolled && !this.appeased && this.state !== "flee" && dist < Math.max(d.scare, 40) * scareMult && this.decide) {
+      this.rolled = true; this.rerollT = 25;
+      this.decide(this);
+    }
+    if (this.state === "charge" || this.state === "recoil") { this.hunt(dt, player, dist); this.animate(dt); return; }
+    if (d.scare && this.state !== "flee" && !this.appeased) {
       if (dist < d.scare * scareMult) {
         for (const a of this.flock.length ? this.flock : [this]) if (a.state !== "flee" && a.state !== "gone") a.bolt(player);
       }
@@ -97,6 +115,33 @@ export class Animal {
         } else if (this.timer <= 0) { this.state = "idle"; this.timer = rand(...d.idle); }
         break;
     }
+    this.animate(dt);
+  }
+
+  /** Charging the player, falling back after a blow, and giving up if outrun. */
+  chaseT = 0;
+  hunt(dt: number, player: { x: number; y: number }, dist: number) {
+    const s = this.sprite, d = this.def;
+    this.timer -= dt; this.chaseT -= dt;
+    if (this.state === "recoil") {
+      if (this.timer <= 0) { this.state = "charge"; }
+      return;
+    }
+    if (this.chaseT <= 0 || dist > 230) { this.state = "idle"; this.timer = 2; s.setVelocity(0, 0); return; } // it gives up
+    const ang = Math.atan2(player.y + 3 - s.y, player.x - s.x);
+    s.setVelocity(Math.cos(ang) * d.charge, Math.sin(ang) * d.charge);
+    if (dist < 10) {
+      this.strikes?.(this);
+      this.state = "recoil"; this.timer = 0.7;
+      s.setVelocity(-Math.cos(ang) * 60, -Math.sin(ang) * 60);
+    }
+  }
+
+  charge(seconds = 5) { this.state = "charge"; this.chaseT = seconds; }
+
+  animate(dt: number) {
+    const s = this.sprite, d = this.def;
+    const body = s.body as Phaser.Physics.Arcade.Body;
     // Animation: two frames while moving, the first at rest.
     const moving = Math.abs(body.velocity.x) + Math.abs(body.velocity.y) > 1;
     if (moving) {
@@ -105,6 +150,7 @@ export class Animal {
       if (Math.abs(body.velocity.x) > 0.5) s.setFlipX(body.velocity.x < 0);
     } else s.setFrame(0);
     s.setDepth(this.state === "flee" && this.kind === "bird" ? 9999 : s.y);
+    void d;
   }
 
   /** Run (or fly) away from the player. */
