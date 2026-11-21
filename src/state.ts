@@ -3,7 +3,7 @@ import {
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
   ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
-  CROPS, seedId, START_SEEDS, START_SILVER, DRY_LIMIT, QUALITY_MULT,
+  CROPS, seedId, START_SEEDS, START_SILVER, STARTING_ARROWS, ARCHERY, DRY_LIMIT, QUALITY_MULT,
 } from "./data";
 
 export interface Slot { id: string; qty: number; q?: number } // q: quality 1-3 for produce
@@ -47,6 +47,8 @@ export interface SaveData {
   orders: Slot[]; // seeds ordered, delivered at dawn
   vineYear: number; // year the old vine was last picked
   seedsGiven?: boolean;
+  archeryXp: number;
+  bowGiven?: boolean;
   lore: { tier: Record<string, number>; fails: Record<string, number>; studied: Record<string, number> };
 }
 
@@ -65,6 +67,7 @@ export class GameState {
   static startingSlots(): (Slot | null)[] {
     const s: (Slot | null)[] = Array(INVENTORY_SIZE).fill(null);
     ["hoe", "jar", "sickle", "axe", "mattock"].forEach((id, i) => (s[i] = { id, qty: 1 }));
+    s[9] = { id: "bow", qty: 1 }; s[10] = { id: "Arrow", qty: STARTING_ARROWS };
     return s;
   }
 
@@ -83,6 +86,8 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
+    d.archeryXp ??= 0;
+    if (!d.bowGiven) { d.bowGiven = true; if (!d.slots.some((s) => s?.id === "bow")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("bow", 1); g.addItem("Arrow", STARTING_ARROWS); } }
     d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
     return d;
@@ -141,6 +146,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
+      archeryXp: 0, bowGiven: true,
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -163,6 +169,7 @@ export class GameState {
     return `${rec ? terrain(rec.terrain).name : "The wild"} · ${dist} screen${dist === 1 ? "" : "s"} from home`;
   }
   /** Your understanding of a kind of thing: 0 Unknown, 1 Basics, 2 Deep, 3 Full. */
+  get archery() { return Math.min(ARCHERY.maxLevel, Math.floor(this.data.archeryXp / ARCHERY.perLevel)); }
   lore(id: string) { return this.data.lore.tier[id] ?? 0; }
   get dateKey() { return `${this.data.year}-${this.data.month}-${this.data.day}`; }
 

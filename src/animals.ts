@@ -30,7 +30,8 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
  */
 export class Animal {
   sprite: Phaser.Physics.Arcade.Sprite;
-  state: "idle" | "walk" | "flee" | "gone" = "idle";
+  state: "idle" | "walk" | "flee" | "gone" | "dead" = "idle";
+  hp = -1; // set from the quarry table on the first hit
   timer: number;
   tx = 0; ty = 0;
   animT = 0;
@@ -54,6 +55,7 @@ export class Animal {
 
   update(dt: number, player: { x: number; y: number }, scareMult: number) {
     const s = this.sprite, d = this.def;
+    if (this.state === "dead") return;
     if (this.state === "gone") {
       this.timer -= dt;
       if (this.timer <= 0) this.settle();

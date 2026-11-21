@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, type Species } from "./animals";
@@ -122,6 +122,14 @@ abstract class PlayScene extends Phaser.Scene {
   leaving = false;
 
   setupInput() {
+    // Scenes are reused when they restart: begin each visit with no arrows in the air.
+    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false;
+    this.aimGfx = this.add.graphics().setDepth(100000);
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (!this.aiming || !p.leftButtonDown()) return;
+      const w = p.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+      this.loose(w.x, w.y);
+    });
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,Q,SPACE,SHIFT") as Record<string, Phaser.Input.Keyboard.Key>;
   }
@@ -195,9 +203,162 @@ abstract class PlayScene extends Phaser.Scene {
     this.current = this.findTarget();
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E) && this.current) this.current.act();
-    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) this.useItem();
+    const bow = G.selectedItem?.id === "bow";
+    this.aiming = bow && this.canHunt && this.keys.SPACE.isDown;
+    if (this.aiming) this.aimAtPointer();
+    this.drawAim();
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
+      if (!bow) this.useItem();
+      else if (!this.canHunt) G.say("Not indoors.");
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.investigate();
+    this.updateArrows(dt);
+    this.updatePickups();
     return true;
+  }
+
+  // ---------------------------------------------------------------- hunting
+  aiming = false;
+  aimGfx!: Phaser.GameObjects.Graphics;
+  cooldown = 0;
+  arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number }[] = [];
+  pickups: { id: string; qty: number; img: Phaser.GameObjects.Image }[] = [];
+  get canHunt() { return true; }
+
+  /** Where the pointer is in the world, pulled in to the bow's range. */
+  aimPoint(): [number, number] {
+    const w = this.input.activePointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
+    const px = this.player.x, py = this.player.y + 4;
+    let dx = w.x - px, dy = w.y - py; const d = Math.hypot(dx, dy);
+    if (d > BOW_RANGE) { dx *= BOW_RANGE / d; dy *= BOW_RANGE / d; }
+    return [px + dx, py + dy];
+  }
+
+  aimAtPointer() {
+    this.player.setVelocity(0, 0);
+    const [tx, ty] = this.aimPoint();
+    const dx = tx - this.player.x, dy = ty - this.player.y;
+    this.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+    this.player.setFrame(this.facing);
+  }
+
+  /**
+   * How far from the aimed spot an arrow may land: wide for a beginner, tight for a master.
+   * Ourania (aim) and Archery practice narrow it; distance widens it; Apollo's hour steadies the hand.
+   */
+  spread(dist: number) {
+    const our = G.data.aretai.Ourania ?? 3;
+    let r = Math.max(2, 26 - 2 * our - 2 * G.archery) * (0.45 + dist / BOW_RANGE);
+    if (G.patron?.aretai === "Ourania") r *= 0.75;
+    if (G.exhausted) r *= 1.4;
+    return r;
+  }
+
+  drawAim() {
+    const g = this.aimGfx; g.clear();
+    if (!this.aiming) return;
+    const sx = this.player.x, sy = this.player.y + 4;
+    const [tx, ty] = this.aimPoint();
+    const d = Math.hypot(tx - sx, ty - sy), h = d * 0.22 + 6;
+    g.fillStyle(0x2a1d14, 0.55);
+    for (let i = 1; i < 12; i++) { const u = i / 12; g.fillRect(sx + (tx - sx) * u, sy + (ty - sy) * u - 4 * h * u * (1 - u), 1, 1); }
+    const r = this.spread(d);
+    g.lineStyle(1, this.cooldown > 0 ? 0x8d877b : 0xf2c14e, 0.9).strokeCircle(tx, ty, r);
+    g.fillStyle(0xf2c14e, 1).fillRect(tx - 1, ty, 3, 1).fillRect(tx, ty - 1, 1, 3);
+  }
+
+  loose(tx0: number, ty0: number) {
+    if (this.cooldown > 0) return;
+    if (G.count("Arrow") <= 0) { G.say("No arrows left. Craft more from wood and stone (C)."); return; }
+    const b = labor({ Air: 2 }, 0.5, "Ourania"); if (b === null) return;
+    G.removeItem("Arrow", 1);
+    const [tx, ty] = this.aimPoint();
+    const sx = this.player.x, sy = this.player.y + 4;
+    const d = Math.hypot(tx - sx, ty - sy), r = this.spread(d);
+    const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
+    const lx = tx + Math.cos(a) * rr, ly = ty + Math.sin(a) * rr;
+    const before = G.archery;
+    G.data.archeryXp += ARCHERY.perShot;
+    if (G.archery > before) G.say(`Your archery improves to ${G.archery}: your arrows fly truer.`);
+    const img = this.add.image(sx, sy - 6, "arrow").setDepth(100001);
+    const shadow = this.add.ellipse(sx, sy, 6, 2, 0x000000, 0.25).setDepth(1);
+    this.arrows.push({ img, shadow, sx, sy: sy - 6, lx, ly, t: 0, T: 0.12 + Math.hypot(lx - sx, ly - sy) / ARROW_SPEED, h: d * 0.22 + 6 });
+    this.cooldown = 0.7;
+    void tx0; void ty0;
+  }
+
+  updateArrows(dt: number) {
+    for (const a of [...this.arrows]) {
+      a.t += dt;
+      const u = Math.min(1, a.t / a.T);
+      const gx = a.sx + (a.lx - a.sx) * u, gy = a.sy + (a.ly - a.sy) * u;
+      const z = 4 * a.h * u * (1 - u), dz = (4 * a.h * (1 - 2 * u)) / a.T;
+      a.img.setPosition(gx, gy - z).setRotation(Math.atan2((a.ly - a.sy) / a.T - dz, (a.lx - a.sx) / a.T));
+      a.shadow.setPosition(gx, gy);
+      if (u >= 1) { this.arrows.splice(this.arrows.indexOf(a), 1); a.img.destroy(); a.shadow.destroy(); this.land(a.lx, a.ly); }
+    }
+  }
+
+  /** Is this spot open ground an arrow can stick in? */
+  openGround(_x: number, _y: number) { return true; }
+
+  /** An arrow strikes only where it falls. */
+  land(x: number, y: number) {
+    const hit = this.animals.find((a) => a.state !== "dead" && a.state !== "gone" && a.sprite.visible && a.kind !== "goat"
+      && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= QUARRY[a.kind].size + 2);
+    const goat = this.animals.find((a) => a.kind === "goat" && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= 10);
+    let broke = Math.random() < 0.1;
+    if (hit) {
+      const q = QUARRY[hit.kind];
+      if (hit.hp < 0) hit.hp = q.hp;
+      hit.hp--; broke = Math.random() < 0.3;
+      const before = G.archery; G.data.archeryXp += ARCHERY.perHit;
+      if (G.archery > before) G.say(`Your archery improves to ${G.archery}: your arrows fly truer.`);
+      if (hit.hp <= 0) this.kill(hit);
+      else {
+        hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
+        hit.bolt({ x, y: y - 20 });
+        G.say(`A hit! The ${LORE[hit.kind]?.name.toLowerCase() ?? hit.kind} is wounded and runs.`);
+      }
+    } else {
+      if (goat) G.say("Your arrow thuds into the goat pen. The goats bleat at you reproachfully.");
+      // The thud of a near miss sends creatures running.
+      for (const a of this.animals) if (a.kind !== "goat" && a.state !== "dead" && a.state !== "gone" && Math.hypot(a.sprite.x - x, a.sprite.y - y) < 40) a.bolt({ x, y });
+    }
+    if (broke) return;
+    if (!this.openGround(x, y)) return; // lost in the brush
+    this.dropItem("Arrow", 1, x, y, "arrowStuck");
+  }
+
+  kill(a: Animal) {
+    a.state = "dead"; a.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
+    const name = LORE[a.kind]?.name.toLowerCase() ?? a.kind;
+    G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: remember her share." : ""}`);
+    if (a.flock.length) for (const b of a.flock) if (b !== a && b.state !== "dead" && b.state !== "gone") b.bolt(a.sprite);
+    this.time.delayedCall(700, () => {
+      QUARRY[a.kind].drops.forEach(([id, n], i) => this.dropItem(id, n, a.sprite.x - 6 + i * 6, a.sprite.y + 2 + (i % 2) * 4));
+      this.tweens.add({ targets: a.sprite, alpha: 0, duration: 500, onComplete: () => a.sprite.destroy() });
+      this.animals.splice(this.animals.indexOf(a), 1);
+    });
+  }
+
+  dropItem(id: string, qty: number, x: number, y: number, tex?: string) {
+    const img = tex ? this.add.image(x, y - 3, tex) : this.add.image(x, y, "items", id).setScale(0.75);
+    img.setDepth(y);
+    this.pickups.push({ id, qty, img });
+  }
+
+  /** Walk over what lies on the ground to pick it up. */
+  updatePickups() {
+    for (const p of [...this.pickups]) {
+      if (Math.hypot(p.img.x - this.player.x, p.img.y - (this.player.y + 4)) > 12) continue;
+      const left = G.addItem(p.id, p.qty);
+      if (left === p.qty) continue; // no room
+      G.say(`+${p.qty - left} ${ITEMS[p.id].name}`);
+      if (left > 0) { p.qty = left; continue; }
+      p.img.destroy(); this.pickups.splice(this.pickups.indexOf(p), 1);
+    }
   }
 
   abstract useItem(): void;
@@ -580,6 +741,8 @@ class FarmScene extends PlayScene {
     }
   }
 
+  openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
+
   ripeAt(c: CropRec) { const d = CROPS[c.id]; return c.picks > 0 && d.regrow ? d.regrow : d.days; }
   isRipe(c: CropRec) { return !c.withered && c.growth >= this.ripeAt(c); }
 
@@ -765,6 +928,7 @@ class HouseScene extends PlayScene {
   }
 
   useItem() { G.say("Not indoors."); }
+  get canHunt() { return false; }
 
   askSleep() {
     const hours = G.sleepHours;
@@ -1000,6 +1164,8 @@ class WildScene extends PlayScene {
     this.rec.cleared.push(`${x},${y}`);
   }
 
+  openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
+
   useItem() {
     const [x, y] = this.facingTile();
     if (x < 1 || y < 1 || x >= WW - 1 || y >= WH - 1) return;
@@ -1036,6 +1202,7 @@ class UIScene extends Phaser.Scene {
   hotbar: Cell[] = [];
   market?: Phaser.GameObjects.Container;
   loreBook?: Phaser.GameObjects.Container;
+  craft?: Phaser.GameObjects.Container;
   loreSel = "";
   hotbarGfx!: Phaser.GameObjects.Graphics;
   inv?: { root: Phaser.GameObjects.Container; cells: Cell[]; info: Phaser.GameObjects.Text };
@@ -1046,7 +1213,7 @@ class UIScene extends Phaser.Scene {
   create() {
     // A scene object is reused when it restarts: start every list and panel fresh.
     this.hotbar = []; this.labels = {}; this.log = []; this.modal = false;
-    this.inv = undefined; this.market = undefined; this.loreBook = undefined; this.dialog = undefined; this.held = null;
+    this.inv = undefined; this.market = undefined; this.loreBook = undefined; this.craft = undefined; this.dialog = undefined; this.held = null;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     this.shade = this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0, 0);
 
@@ -1087,7 +1254,8 @@ class UIScene extends Phaser.Scene {
       if (this.dialog) return;
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
-      if ((e.key === "k" || e.key === "K") && !this.market && !this.inv) { if (this.loreBook) this.closeLore(); else this.openLore(); }
+      if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
+      if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook) { if (this.craft) this.closeCraft(); else this.openCraft(); }
     });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       if (this.modal) return;
@@ -1108,6 +1276,8 @@ class UIScene extends Phaser.Scene {
       "Interact: E, when a prompt appears (doors, bed, hearth, signs)",
       "Inventory: I or Tab (click two slots to swap them)     Help: H",
       "Investigate: Q, on a creature, plant, stone or the land itself     What you know: K",
+      "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
+      "Handwork: C (arrows from wood and stone)",
       "",
       "Hoe: till soil · Water jar: water tilled soil, refill at the well",
       "Sickle: brush and flowers · Axe: saplings and trees · Mattock: stones",
@@ -1125,7 +1295,7 @@ class UIScene extends Phaser.Scene {
       "Stay up past the second watch of the night and you will collapse.",
       "Watered soil dries overnight. Your life is saved each dawn.",
     ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 800, 560, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const hbg = this.add.rectangle(W / 2, H / 2, 820, 600, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
@@ -1135,7 +1305,7 @@ class UIScene extends Phaser.Scene {
       this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
     });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.craft && k === "ESC") this.closeCraft(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -1212,7 +1382,7 @@ class UIScene extends Phaser.Scene {
     }
     const s = G.selectedItem;
     const d = s ? ITEMS[s.id] : null;
-    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${d.name}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${JAR_CAPACITY} water` : ""}` : "Bare hands");
+    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${d.name}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${JAR_CAPACITY} water` : ""}${s!.id === "bow" ? ` · ${G.count("Arrow")} arrows · Archery ${G.archery} · hold Space to aim, click to loose` : ""}` : "Bare hands");
   }
 
   toggleInventory() {
@@ -1243,6 +1413,43 @@ class UIScene extends Phaser.Scene {
     root.add(info);
     root.add(this.add.text(W / 2, y0 + h + 10, "I, Tab or Esc to close", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     this.inv = { root, cells, info };
+  }
+
+  openCraft() {
+    if (this.market || this.dialog || this.loreBook) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.modal = true; this.buildCraft();
+  }
+  closeCraft() { this.craft?.destroy(); this.craft = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook; }
+
+  /** Simple handwork you can do anywhere. A workbench will come with the homestead's structures. */
+  buildCraft() {
+    this.craft?.destroy();
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 560, h = 90 + RECIPES.length * 56 + 40, x0 = (W - w) / 2, y0 = (H - h) / 2 - 30;
+    const root = this.add.container(0, 0).setDepth(23);
+    this.craft = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 12, "Handwork", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 40, "Click a recipe to make it from what you carry.", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    RECIPES.forEach((r, i) => {
+      const y = y0 + 72 + i * 56;
+      const ok = r.needs.every(([id, n]) => G.count(id) >= n);
+      root.add(this.add.image(x0 + 34, y + 18, "items", r.out).setScale(2));
+      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (have ${G.count(id)})`).join(", ");
+      const t = this.add.text(x0 + 64, y, `${ITEMS[r.out].name} × ${r.qty}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
+      root.add(t);
+      root.add(this.add.text(x0 + 64, y + 22, r.desc, { ...font, fontSize: "12px", color: "#c9b48f" }));
+      if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => {
+        if (labor({}, 1, "Techne") === null) return;
+        for (const [id, n] of r.needs) G.removeItem(id, n);
+        const left = G.addItem(r.out, r.qty);
+        G.say(`You make ${r.qty - left} ${ITEMS[r.out].name.toLowerCase()}.${left ? " Your pack is full." : ""}`);
+        this.buildCraft();
+      });
+    });
+    root.add(this.add.text(W / 2, y0 + h - 26, "C or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }
 
   openLore(focus?: string) {

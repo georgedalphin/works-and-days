@@ -83,11 +83,18 @@ export const ITEMS: Record<string, ItemDef> = {
   jar: { id: "jar", name: "Water jar", greek: "hydria", kind: "tool", desc: "Waters tilled soil. Refill it at the well." },
   sickle: { id: "sickle", name: "Sickle", greek: "drepanon", kind: "tool", desc: "Cuts brush and flowers." },
   axe: { id: "axe", name: "Bronze axe", greek: "pelekys", kind: "tool", desc: "Fells saplings, and trees with several swings." },
+  bow: { id: "bow", name: "Hunting bow", greek: "toxon", kind: "tool", desc: "Hold Space to draw and aim, click where you want the arrow to land. Arrows strike only where they fall." },
   mattock: { id: "mattock", name: "Mattock", greek: "makele", kind: "tool", desc: "Breaks and lifts stones." },
   Wood: { id: "Wood", value: 1, name: "Wood", kind: "material", desc: "Timber for building and fuel." },
   Stone: { id: "Stone", value: 1, name: "Stone", kind: "material", desc: "Fieldstone for walls and building." },
   Fiber: { id: "Fiber", name: "Fiber", kind: "material", desc: "Plant fiber for cord and thatch, and fodder for the goats." },
   Flowers: { id: "Flowers", value: 1, name: "Wildflowers", kind: "material", desc: "For garlands and small offerings." },
+  Arrow: { id: "Arrow", name: "Arrows", greek: "oistos", kind: "material", desc: "Stone-tipped arrows. Craft more from wood and stone (C)." },
+  Meat: { id: "Meat", value: 4, name: "Meat", greek: "kreas", kind: "material", desc: "Fresh game. Roast it, salt it, or offer the thigh bones to the gods." },
+  Hide: { id: "Hide", value: 6, name: "Hide", greek: "dora", kind: "material", desc: "A pelt for leather, cloaks and bedding." },
+  Antler: { id: "Antler", value: 8, name: "Antler", kind: "material", desc: "For tool handles, pins and charms. Artemis' animal: honor her for it." },
+  Tusk: { id: "Tusk", value: 10, name: "Boar tusk", kind: "material", desc: "Protective amulets (+3), and the plates of a boar's-tusk helmet." },
+  Feather: { id: "Feather", value: 1, name: "Feathers", kind: "material", desc: "For fletching and small charms." },
   Milk: { id: "Milk", value: 5, name: "Goat's milk", greek: "gala", kind: "material", desc: "Fresh from your goats. Cheese comes with the dairy." },
   Honey: { id: "Honey", value: 10, name: "Honey", greek: "meli", kind: "material", desc: "Sweet and sacred: food, medicine and a fine offering." },
   Wax: { id: "Wax", value: 4, name: "Beeswax", greek: "keros", kind: "material", desc: "For candles, writing tablets and sealing jars." },
@@ -188,3 +195,22 @@ export function money(silver: number): string {
 }
 /** Nights a planted crop can go unwatered before it withers. */
 export const DRY_LIMIT = 3;
+
+// ---- hunting ----
+export const BOW_RANGE = 170; // px, the farthest you can send an arrow
+export const ARROW_SPEED = 230; // px/s along the ground, plus a moment to loose
+export const STARTING_ARROWS = 12;
+/** Hits to bring down each creature, and what it leaves. */
+export const QUARRY: Record<string, { hp: number; size: number; drops: [string, number][] }> = {
+  hare: { hp: 1, size: 5, drops: [["Meat", 1], ["Hide", 1]] },
+  bird: { hp: 1, size: 4, drops: [["Meat", 1], ["Feather", 2]] },
+  fox: { hp: 1, size: 6, drops: [["Hide", 1]] },
+  deer: { hp: 2, size: 8, drops: [["Meat", 3], ["Hide", 1], ["Antler", 1]] },
+  boar: { hp: 3, size: 7, drops: [["Meat", 3], ["Hide", 1], ["Tusk", 1]] },
+};
+/** Practice makes the archer: experience per shot and per hit, and how much a level is. */
+export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
+export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string }[] = [
+  { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
+  { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
+];
