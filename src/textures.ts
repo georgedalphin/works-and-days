@@ -81,7 +81,8 @@ function canvasTex(scene: Phaser.Scene, key: string, w: number, h: number, draw:
 }
 
 export function makeTextures(scene: Phaser.Scene) {
-  canvasTex(scene, "tiles", TILE * COUNT, TILE, (c) => { for (let i = 0; i < COUNT; i++) drawTile(c, i); });
+  const tiles = canvasTex(scene, "tiles", TILE * COUNT, TILE, (c) => { for (let i = 0; i < COUNT; i++) drawTile(c, i); });
+  for (let i = 0; i < COUNT; i++) tiles.add(`t${i}`, 0, i * TILE, 0, TILE, TILE); // single tiles, for break effects
 
   // Player: four facings in one strip (down, left, right, up), 16x16 each.
   const player = canvasTex(scene, "player", 64, 16, (c) => {

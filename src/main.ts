@@ -92,7 +92,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
           const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
           const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
           if (G.data.treeHits[k] >= TREE_HITS) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6 + mastery("oak", 2))}${b}`); }
-          else { G.say(`You swing the axe into the oak (${G.data.treeHits[k]} of ${TREE_HITS}).${b}`); sc.cameras.main.shake(80, 0.002); }
+          else { G.say(`You swing the axe into the oak (${G.data.treeHits[k]} of ${TREE_HITS}).${b}`); sc.cameras.main.shake(80, 0.002); (sc as unknown as PlayScene).chips(x, y, T.TREE, 4); }
         }
         else if (obj === T.OLIVE) G.say("You would never cut an olive tree. Athena would not forgive it.");
         else if (obj === T.FENCE) G.say("That's the goats' fence.");
@@ -216,6 +216,46 @@ abstract class PlayScene extends Phaser.Scene {
     this.updateArrows(dt);
     this.updatePickups();
     return true;
+  }
+
+  // ---------------------------------------------------------------- break effects
+  /** Bits flying off a tree, stone or bush as a tool bites into it. */
+  chips(tx: number, ty: number, tile: number, n = 7) {
+    const cols: Record<number, number[]> = {
+      [T.TREE]: [0x8a5f35, 0x5e7f34, 0x71953f], [T.SAPLING]: [0x8a5f35, 0x71953f], [T.OLIVE]: [0x8a9a6a],
+      [T.STONE]: [0x9c968a, 0xc4bdae, 0x6c675e], [T.BOULDER]: [0x9c968a, 0x6c675e],
+      [T.BRUSH]: [0x6f8a3a, 0x8fa04a, 0x5a6b2c], [T.FLOWERS]: [0xe85f7a, 0xf2c14e, 0xe8e2f0, 0x5e7f34],
+    };
+    const c = cols[tile] ?? [0x8d877b];
+    const cx = tx * TILE + 8, cy = ty * TILE + 9;
+    for (let i = 0; i < n; i++) {
+      const bit = this.add.rectangle(cx + (Math.random() - 0.5) * 8, cy + (Math.random() - 0.5) * 6, 2, 2, c[i % c.length]).setDepth(cy + 20);
+      const dx = (Math.random() - 0.5) * 30, up = 6 + Math.random() * 10;
+      this.tweens.add({ targets: bit, x: bit.x + dx, duration: 450, ease: "Linear" });
+      this.tweens.add({ targets: bit, y: bit.y - up, duration: 180, ease: "Quad.easeOut", yoyo: true, hold: 0,
+        onComplete: () => this.tweens.add({ targets: bit, alpha: 0, duration: 200, onComplete: () => bit.destroy() }) });
+    }
+  }
+
+  /** A quick, simple animation of something being taken down. */
+  breakFx(tx: number, ty: number, tile: number) {
+    if (tile < 0) return;
+    const x = tx * TILE + 8, y = ty * TILE + 16;
+    const ghost = this.add.image(x, y, "tiles", `t${tile}`).setOrigin(0.5, 1).setDepth(y + 1);
+    if (tile === T.TREE || tile === T.SAPLING) {
+      // Topples away from the player and fades.
+      const dir = this.player.x < x ? 1 : -1;
+      this.tweens.add({ targets: ghost, angle: 85 * dir, duration: 420, ease: "Quad.easeIn",
+        onComplete: () => { this.chips(tx + dir, ty, tile, 8); this.tweens.add({ targets: ghost, alpha: 0, duration: 220, onComplete: () => ghost.destroy() }); } });
+    } else if (tile === T.STONE || tile === T.BOULDER) {
+      // Cracks apart: a jolt, then crumbles.
+      this.chips(tx, ty, tile, 10);
+      this.tweens.add({ targets: ghost, scaleX: 1.15, scaleY: 0.6, alpha: 0, duration: 260, ease: "Quad.easeOut", onComplete: () => ghost.destroy() });
+    } else {
+      // Brush and flowers: cut down to nothing.
+      this.chips(tx, ty, tile, 6);
+      this.tweens.add({ targets: ghost, scaleY: 0, alpha: 0.4, duration: 200, ease: "Quad.easeIn", onComplete: () => ghost.destroy() });
+    }
   }
 
   // ---------------------------------------------------------------- hunting
@@ -827,6 +867,7 @@ class FarmScene extends PlayScene {
   }
 
   clearObject(x: number, y: number) {
+    this.breakFx(x, y, this.objects.getTileAt(x, y)?.index ?? -1);
     this.objects.putTileAt(-1, x, y);
     G.data.cleared.push(`${x},${y}`);
   }
@@ -1160,6 +1201,7 @@ class WildScene extends PlayScene {
   }
 
   clearObject(x: number, y: number) {
+    this.breakFx(x, y, this.objects.getTileAt(x, y)?.index ?? -1);
     this.objects.putTileAt(-1, x, y);
     this.rec.cleared.push(`${x},${y}`);
   }
