@@ -1,0 +1,62 @@
+import asyncio
+from playwright.async_api import async_playwright
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--use-gl=swiftshader","--enable-unsafe-swiftshader"])
+        pg = await b.new_page(viewport={"width":960,"height":640})
+        errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
+        await pg.goto("file:///home/claude/works-and-days/dist/index.html"); await pg.wait_for_timeout(1200)
+        await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
+        U="game.scene.getScene('UI')"; V="game.scene.getScene('Village')"
+        await pg.evaluate(f"{U}.help.setVisible(false); {U}.modal=false; game.scene.getScene('House').goTo('Farm')"); await pg.wait_for_timeout(2500)
+        # walk south off the farm
+        await pg.evaluate("game.scene.getScene('Farm').player.setPosition(24*16+8, 34*16+4)")
+        await pg.keyboard.down("s"); await pg.wait_for_timeout(700); await pg.keyboard.up("s"); await pg.wait_for_timeout(2200)
+        print("scene", await pg.evaluate("G.data.scene"), await pg.evaluate("G.locationLabel()"), "| stranger", await pg.evaluate("JSON.stringify(G.data.stranger)"))
+        await pg.screenshot(path="/home/claude/test/d0_village.png")
+        opts = lambda: pg.evaluate(f"{U}.talkOpts.map(o=>o.label).join(' / ')")
+        text = lambda: pg.evaluate(f"{U}.talkPanel ? {U}.talkPanel.list.filter(o=>o.type==='Text').map(o=>o.text).slice(0,3).join(' || ') : ''")
+        # talk to Theron
+        await pg.evaluate(f"(()=>{{const s={V};const t=s.targets.find(t=>t.label.includes('Theron'));s.player.setPosition(t.x,t.y+12);s.facing=3;}})()"); await pg.wait_for_timeout(200)
+        print("prompt", await pg.evaluate(f"{U}.promptText.text"))
+        await pg.keyboard.press("e"); await pg.wait_for_timeout(300)
+        print("talk:", await text()); print("opts:", await opts())
+        await pg.screenshot(path="/home/claude/test/d1_talk.png")
+        await pg.keyboard.press("1"); await pg.wait_for_timeout(200); print("chat:", await text())
+        await pg.evaluate("G.addItem('Honey',2); G.data.selected=G.data.slots.findIndex(s=>s&&s.id==='Honey')")
+        await pg.evaluate(f"{U}.talkTo(window.WHEEL&&{U}.talkPanel?{U}.talkOpts&&null:null)") if False else None
+        await pg.evaluate(f"{U}.closeTalk(); {V}.targets.find(t=>t.label.includes('Theron')).act()"); await pg.wait_for_timeout(200)
+        print("opts2:", await opts())
+        await pg.evaluate(f"{U}.talkOpts.find(o=>o.label.startsWith('Give')).fn()"); await pg.wait_for_timeout(200); print("gift:", await text(), "rel", await pg.evaluate("G.rel('theron')"))
+        await pg.evaluate(f"{U}.talkOpts.find(o=>o.label.startsWith('Trade')).fn()"); await pg.wait_for_timeout(300)
+        await pg.screenshot(path="/home/claude/test/d2_mill.png")
+        await pg.evaluate("G.addItem('Melon',1,3)")
+        await pg.evaluate(f"{U}.buildMarket(); {U}.market.list.find(o=>o.input&&o.text&&o.text.startsWith('excellent Melon')).emit('pointerdown')"); await pg.wait_for_timeout(100)
+        print("sold:", await pg.evaluate("G.messages.map(m=>m.text).slice(-1)[0]"), "purse", await pg.evaluate("G.data.silver"))
+        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(100)
+        # smith upgrade
+        await pg.evaluate("G.data.silver=200; G.addItem('Wood',10)")
+        await pg.evaluate(f"{V}.targets.find(t=>t.label.includes('Lykos')).act()"); await pg.wait_for_timeout(200)
+        print("smith opts:", await opts())
+        await pg.evaluate(f"{U}.talkOpts.find(o=>o.label.startsWith('Bronze-shod')).fn()"); await pg.wait_for_timeout(100); print("order:", await text(), "job", await pg.evaluate("JSON.stringify(G.data.smithJob)"), "mattocks", await pg.evaluate("G.count('mattock')"))
+        await pg.evaluate(f"{U}.closeTalk(); G.sleep(false)")
+        await pg.evaluate(f"{V}.targets.find(t=>t.label.includes('Lykos')).act()"); await pg.wait_for_timeout(200)
+        print("smith opts next day:", await opts())
+        await pg.evaluate(f"{U}.talkOpts.find(o=>o.label.startsWith('Collect')).fn()"); await pg.wait_for_timeout(100)
+        print("collected:", await pg.evaluate("[G.count('mattock'), G.toolLevel('mattock')]"))
+        await pg.evaluate(f"{U}.closeTalk()")
+        # stranger as a god
+        await pg.evaluate("G.data.stranger={kind:1,god:'Hermes',arrived:G.dayNumber,hosted:false,sensed:false}; G.data.aretai.Pneuma=12; G.addItem('Milk',1); G.data.selected=G.data.slots.findIndex(s=>s&&s.id==='Milk')")
+        await pg.evaluate(f"{U}.talkToStranger()"); await pg.wait_for_timeout(200); print("stranger opts:", await opts())
+        await pg.evaluate(f"{U}.talkOpts[0].fn()"); await pg.wait_for_timeout(100); print("sense:", await text())
+        await pg.evaluate(f"{U}.talkOpts.find(o=>o.label.startsWith('Welcome')).fn()"); await pg.wait_for_timeout(100); print("host:", await text()); print("favor", await pg.evaluate("JSON.stringify(G.data.favor)"), "purse", await pg.evaluate("G.data.silver"))
+        await pg.screenshot(path="/home/claude/test/d3_god.png")
+        await pg.evaluate(f"{U}.closeTalk()")
+        # south to the wild and back
+        await pg.evaluate(f"{V}.player.setPosition(20*16+8, 28*16+4)"); await pg.keyboard.down("s"); await pg.wait_for_timeout(700); await pg.keyboard.up("s"); await pg.wait_for_timeout(2200)
+        print("south:", await pg.evaluate("[G.data.scene, G.data.wx, G.data.wy, G.locationLabel()]"))
+        await pg.evaluate("game.scene.getScene('Wild').player.setPosition(20*16+8, 1*16+8)"); await pg.keyboard.down("w"); await pg.wait_for_timeout(700); await pg.keyboard.up("w"); await pg.wait_for_timeout(2200)
+        print("north again:", await pg.evaluate("G.data.scene"))
+        print("ERRORS:", errs)
+        await b.close()
+asyncio.run(main())

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { CROPS, seedId } from "./data";
 import { FORAGE } from "./forage";
+import { VILLAGERS } from "./village";
 
 // Placeholder pixel art, drawn in code. Warm Mediterranean palette.
 export const T = {
@@ -259,6 +260,46 @@ export function makeTextures(scene: Phaser.Scene) {
   const fr = canvasTex(scene, "forage", 32 * fids.length, 16, (c) => fids.forEach((id, i) => { drawForage(c, i * 32, id, false); drawForage(c, i * 32 + 16, id, true); }));
   fids.forEach((id, i) => { fr.add(id, 0, i * 32, 0, 16, 16); fr.add(`${id}_fruit`, 0, i * 32 + 16, 0, 16, 16); });
 
+  // Villagers: one frame each, facing you; strangers by their look.
+  const vids = Object.keys(VILLAGERS);
+  const looks = ["beggar", "traveler", "shepherd", "potter", "bard"];
+  const people = canvasTex(scene, "people", 16 * (vids.length + looks.length), 16, (c) => {
+    vids.forEach((id, i) => drawPerson(c, i * 16, VILLAGERS[id].look));
+    looks.forEach((l, i) => drawStranger(c, (vids.length + i) * 16, l));
+  });
+  vids.forEach((id, i) => people.add(id, 0, i * 16, 0, 16, 16));
+  looks.forEach((l, i) => people.add(l, 0, (vids.length + i) * 16, 0, 16, 16));
+
+  // The village buildings.
+  canvasTex(scene, "mill", 64, 56, (c) => {
+    px(c, 4, 20, 56, 34, "#d8ccb0"); px(c, 4, 48, 56, 6, "#b8a888"); for (let y = 24; y < 48; y += 6) px(c, 4, y, 56, 1, "#c4b898");
+    px(c, 0, 8, 64, 15, "#a9853f"); px(c, 4, 2, 56, 8, "#c9a35a"); for (let x = 2; x < 64; x += 5) px(c, x, 9, 1, 13, "#8a6a32");
+    px(c, 26, 32, 12, 22, "#6b4a2b"); px(c, 28, 34, 8, 18, "#5a3d22");
+    px(c, 44, 38, 14, 14, "#9c968a"); px(c, 46, 40, 10, 10, "#b8b2a6"); px(c, 50, 44, 2, 2, "#6c675e"); // millstone
+    px(c, 8, 42, 8, 10, "#c9b48f"); px(c, 9, 40, 6, 3, "#b8a07a"); px(c, 16, 44, 7, 8, "#c9b48f"); // sacks
+  });
+  canvasTex(scene, "smithy", 64, 56, (c) => {
+    px(c, 2, 18, 60, 36, "#8a7a62"); px(c, 6, 24, 52, 30, "#3a2c22");
+    px(c, 0, 10, 64, 10, "#6b5a45"); px(c, 46, 0, 10, 14, "#7a6a55"); px(c, 47, 0, 8, 2, "#4a3c30");
+    px(c, 10, 34, 16, 12, "#8d877b"); px(c, 12, 36, 12, 6, "#e0703a"); px(c, 14, 37, 8, 3, "#f2c14e"); // forge
+    px(c, 34, 42, 14, 4, "#4a4a50"); px(c, 38, 46, 6, 8, "#3a3a40"); px(c, 32, 42, 4, 2, "#4a4a50"); // anvil
+    px(c, 2, 50, 60, 4, "#6b5a45");
+  });
+  canvasTex(scene, "shrine", 64, 56, (c) => {
+    px(c, 2, 46, 60, 4, "#c4bdae"); px(c, 0, 50, 64, 6, "#a49e91");
+    px(c, 4, 10, 56, 6, "#e8e2d0"); px(c, 8, 2, 48, 8, "#d8d0bc"); px(c, 30, 0, 4, 2, "#d8d0bc"); px(c, 12, 4, 40, 4, "#b0412f");
+    for (const x of [8, 22, 36, 50]) { px(c, x, 16, 6, 30, "#f2ece0"); px(c, x + 1, 16, 1, 30, "#d8d0bc"); }
+    px(c, 16, 22, 32, 24, "#5a4a3a"); px(c, 28, 28, 8, 12, "#c9a35a"); // the image within
+  });
+  canvasTex(scene, "inn", 80, 56, (c) => {
+    px(c, 4, 20, 72, 34, "#e8dcc2"); px(c, 4, 48, 72, 6, "#c9b48f");
+    px(c, 0, 6, 80, 16, "#c9a35a"); px(c, 4, 0, 72, 8, "#d8b468"); for (let x = 2; x < 80; x += 5) px(c, x, 8, 1, 13, "#b38f48");
+    px(c, 34, 32, 12, 22, "#6b4a2b"); px(c, 36, 34, 8, 18, "#5a3d22");
+    px(c, 10, 30, 10, 8, "#3a2c22"); px(c, 60, 30, 10, 8, "#3a2c22"); // windows
+    px(c, 52, 22, 2, 10, "#6b4a2b"); px(c, 48, 30, 12, 7, "#8a5f35"); px(c, 53, 32, 2, 3, "#e6c74a"); // sign
+    px(c, 8, 48, 20, 3, "#8a5f35"); px(c, 9, 51, 2, 3, "#6b4a2b"); px(c, 25, 51, 2, 3, "#6b4a2b"); // bench
+  });
+
   // An arrow in flight (pointing right; rotated as it flies) and one stuck in the ground.
   canvasTex(scene, "arrow", 10, 3, (c) => { px(c, 0, 1, 8, 1, "#a87443"); px(c, 8, 0, 2, 3, "#8d877b"); px(c, 0, 0, 2, 1, "#e8e2d0"); px(c, 0, 2, 2, 1, "#e8e2d0"); });
   canvasTex(scene, "arrowStuck", 5, 8, (c) => { px(c, 2, 0, 1, 7, "#a87443"); px(c, 1, 0, 1, 2, "#e8e2d0"); px(c, 3, 0, 1, 2, "#e8e2d0"); px(c, 1, 7, 3, 1, "rgba(0,0,0,0.25)"); });
@@ -366,5 +407,32 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "Milk": px(c, o + 3, 6, 10, 7, "#b5643b"); px(c, o + 2, 5, 12, 2, "#c4703f"); px(c, o + 3, 5, 10, 2, "#f4efe4"); px(c, o + 4, 13, 8, 1, "#9c5532"); break;
     case "Honey": px(c, o + 4, 4, 8, 10, "#c4703f"); px(c, o + 5, 2, 6, 2, "#9c5532"); px(c, o + 5, 6, 6, 6, "#e0a530"); px(c, o + 6, 7, 2, 2, "#f6cf5a"); break;
     case "Wax": px(c, o + 2, 5, 12, 8, "#e6c74a"); for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) px(c, o + 3 + i * 4 + (j % 2) * 2, 6 + j * 3, 2, 2, "#c9a530"); break;
+  }
+}
+
+function drawPerson(c: Ctx, o: number, look: { tunic: string; hair: string; skin: string; beard?: boolean; veil?: string }) {
+  px(c, o + 5, 13, 6, 2, "rgba(0,0,0,0.25)");
+  px(c, o + 5, 6, 6, 7, look.tunic); px(c, o + 5, 9, 6, 1, "#3a2c22");
+  px(c, o + 6, 1, 4, 5, look.skin); px(c, o + 6, 1, 4, 2, look.hair);
+  px(c, o + 7, 3, 1, 1, "#2a1d14"); px(c, o + 8, 3, 1, 1, "#2a1d14");
+  if (look.beard) px(c, o + 6, 5, 4, 2, look.hair);
+  if (look.veil) { px(c, o + 5, 0, 6, 2, look.veil); px(c, o + 5, 2, 1, 6, look.veil); px(c, o + 10, 2, 1, 6, look.veil); }
+  px(c, o + 6, 13, 1, 2, "#6b4a2b"); px(c, o + 9, 13, 1, 2, "#6b4a2b");
+}
+
+function drawStranger(c: Ctx, o: number, look: string) {
+  const base = { tunic: "#8a7a62", hair: "#5a4632", skin: "#c98e62" };
+  switch (look) {
+    case "beggar":
+      drawPerson(c, o, { tunic: "#7a7468", hair: "#c8c8c0", skin: "#b88a62" });
+      px(c, o + 4, 4, 8, 9, "#6a645a"); px(c, o + 5, 0, 6, 3, "#6a645a"); px(c, o + 12, 3, 1, 12, "#6b4a2b"); break;
+    case "traveler":
+      drawPerson(c, o, base); px(c, o + 3, 0, 10, 2, "#8a6a3a"); px(c, o + 6, -1, 4, 2, "#7a5a2a"); px(c, o + 4, 5, 8, 6, "#9a7a4a"); break;
+    case "shepherd":
+      drawPerson(c, o, { tunic: "#c9b48f", hair: "#3a2c22", skin: "#c98e62" }); px(c, o + 12, 2, 1, 13, "#6b4a2b"); px(c, o + 12, 1, 3, 1, "#6b4a2b"); px(c, o + 14, 2, 1, 2, "#6b4a2b"); break;
+    case "potter":
+      drawPerson(c, o, { tunic: "#a07a62", hair: "#2a1d14", skin: "#a8744a", beard: true }); px(c, o + 1, 4, 4, 7, "#c4703f"); px(c, o + 2, 3, 2, 1, "#9c5532"); break;
+    case "bard":
+      drawPerson(c, o, { tunic: "#e8e2d0", hair: "#c98e2a", skin: "#d8a878" }); px(c, o + 10, 7, 4, 4, "#8a6a3a"); px(c, o + 10, 4, 1, 4, "#c9b48f"); px(c, o + 13, 4, 1, 4, "#c9b48f"); px(c, o + 10, 4, 4, 1, "#c9b48f"); break;
   }
 }

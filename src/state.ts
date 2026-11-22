@@ -30,7 +30,7 @@ export interface SaveData {
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
   treeHits: Record<string, number>;
-  scene: "Farm" | "House" | "Wild";
+  scene: "Farm" | "House" | "Wild" | "Village";
   wx: number; wy: number; // the wilderness screen, in screens from home (0,0)
   entry: "" | "N" | "S" | "E" | "W"; // the side of the next map the player walks in from
   lastTerrain: number; // terrain of the screen the player just left
@@ -49,7 +49,12 @@ export interface SaveData {
   seedsGiven?: boolean;
   archeryXp: number;
   lifeThread: number;
-  farmPicked: Record<string, number>; // forage gathered on the homestead: "x,y" -> day number
+  farmPicked: Record<string, number>;
+  npc: Record<string, { rel: number; talked: number; gifted: number }>;
+  stranger: { kind: number; god: string; arrived: number; hosted: boolean; sensed: boolean } | null;
+  tools: Record<string, number>; // tool levels from the smith (1 = as you started)
+  smithJob: { tool: string; level: number; ready: number } | null;
+  favor: Record<string, number>; // divine favor, -12 to +12 (the gods milestone builds on this) // forage gathered on the homestead: "x,y" -> day number
   bowGiven?: boolean;
   lore: { tier: Record<string, number>; fails: Record<string, number>; studied: Record<string, number> };
 }
@@ -88,7 +93,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {};
+    d.archeryXp ??= 0; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {};
     if (!d.bowGiven) { d.bowGiven = true; if (!d.slots.some((s) => s?.id === "bow")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("bow", 1); g.addItem("Arrow", STARTING_ARROWS); } }
     d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
@@ -148,7 +153,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {},
+      archeryXp: 0, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -166,12 +171,17 @@ export class GameState {
   locationLabel(): string {
     if (this.data.scene === "House") return "Your hut";
     if (this.data.scene === "Farm") return "Your homestead · Cultivated Farmlands";
+    if (this.data.scene === "Village") return "The village · 1 screen from home";
     const rec = this.data.screens[`${this.data.wx},${this.data.wy}`];
     const dist = Math.abs(this.data.wx) + Math.abs(this.data.wy);
     return `${rec ? terrain(rec.terrain).name : "The wild"} · ${dist} screen${dist === 1 ? "" : "s"} from home`;
   }
   /** Your understanding of a kind of thing: 0 Unknown, 1 Basics, 2 Deep, 3 Full. */
   get archery() { return Math.min(ARCHERY.maxLevel, Math.floor(this.data.archeryXp / ARCHERY.perLevel)); }
+  /** How well a villager knows you, -12 to +12. */
+  rel(id: string) { return this.data.npc[id]?.rel ?? 0; }
+  npcRec(id: string) { return (this.data.npc[id] ??= { rel: 0, talked: -1, gifted: -1 }); }
+  toolLevel(id: string) { return this.data.tools[id] ?? 1; }
   lore(id: string) { return this.data.lore.tier[id] ?? 0; }
   get dateKey() { return `${this.data.year}-${this.data.month}-${this.data.day}`; }
 
@@ -282,6 +292,7 @@ export class GameState {
       this.data.orders = [];
     }
     for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "wet") this.data.ground[k] = "tilled";
+    if (this.data.smithJob && this.dayNumber === this.data.smithJob.ready) notes.push("Lykos the smith has finished your tool. Collect it at the smithy.");
     // The goats eat and drink in the night; a goat that goes without gives no milk.
     for (const g of this.data.goats) {
       if (this.data.manger >= 1 && this.data.trough >= 1) { this.data.manger--; this.data.trough--; g.fed = true; }
