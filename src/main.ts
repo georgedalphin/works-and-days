@@ -6,6 +6,7 @@ import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIV
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
+import { FORAGE, bearing, type ForageDef } from "./forage";
 import type { ScreenRec } from "./state";
 
 const W = 960, H = 640, ZOOM = 3;
@@ -125,6 +126,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
+    this.spots = [];
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
@@ -323,6 +325,58 @@ abstract class PlayScene extends Phaser.Scene {
       a.charge(4);
       G.say(`The ${name} won't be calmed (${odds}).${PEACE_FOOD[a.kind] && !food ? ` Try holding out ${PEACE_FOOD[a.kind][0].toLowerCase()}.` : ""}`);
     }
+  }
+
+  // ---------------------------------------------------------------- forage
+  spots: { k: string; tx: number; ty: number; def: ForageDef; base: Phaser.GameObjects.Image; fruit: Phaser.GameObjects.Image }[] = [];
+  /** Where this map remembers what's been gathered: "x,y" -> day number. */
+  picked(): Record<string, number> { return {}; }
+
+  /** Scatter forage over open ground, chosen from what grows in this terrain. */
+  placeForage(gen: () => number, terrainN: number, count: number, ok: (x: number, y: number) => boolean) {
+    for (const s of this.spots) { s.base.destroy(); s.fruit.destroy(); }
+    this.spots = [];
+    const defs = Object.values(FORAGE).filter((f) => f.terrains.includes(terrainN));
+    if (!defs.length) return;
+    const total = defs.reduce((n, d) => n + d.weight, 0);
+    for (let tries = 0; tries < count * 30 && this.spots.length < count; tries++) {
+      const x = 2 + Math.floor(gen() * 60), y = 2 + Math.floor(gen() * 40);
+      let r = gen() * total, def = defs[0];
+      for (const d of defs) { if ((r -= d.weight) <= 0) { def = d; break; } }
+      if (!ok(x, y) || this.spots.some((s) => Math.abs(s.tx - x) + Math.abs(s.ty - y) < 3)) continue;
+      const px = x * TILE + 8, py = y * TILE + 8;
+      const base = this.add.image(px, py, "forage", def.id).setDepth(py + 2);
+      const fruit = this.add.image(px, py, "forage", `${def.id}_fruit`).setDepth(py + 3).setVisible(false);
+      this.spots.push({ k: `${x},${y}`, tx: x, ty: y, def, base, fruit });
+    }
+    this.refreshForage();
+  }
+
+  /** What a plant bears shows only once you understand its kind at Basics. */
+  refreshForage() {
+    const picked = this.picked();
+    for (const s of this.spots) s.fruit.setVisible(G.lore(s.def.id) >= 1 && bearing(s.def, G.data.month, G.dayNumber, picked[s.k]));
+  }
+
+  forageAt(tx: number, ty: number) { return this.spots.find((s) => s.tx === tx && s.ty === ty); }
+
+  gather(tx: number, ty: number): boolean {
+    const s = this.forageAt(tx, ty);
+    if (!s) return false;
+    const d = s.def, name = LORE[d.id].name.toLowerCase();
+    if (G.lore(d.id) < 1) { G.say(`You don't know ${LORE[d.id].vague} well enough to tell whether anything on it is good to gather. Investigate it (Q).`); return true; }
+    const picked = this.picked();
+    if (!d.months.includes(G.data.month)) { G.say(`Nothing to gather from the ${name} now. It bears in ${d.bearsWhen}.`); return true; }
+    if (picked[s.k] !== undefined && G.dayNumber - picked[s.k] < d.regrow) {
+      const left = d.regrow - (G.dayNumber - picked[s.k]);
+      G.say(`You've already gathered from this ${name}. ${left > 30 ? "Not again this season." : `It will bear again in ${left} day${left > 1 ? "s" : ""}.`}`); return true;
+    }
+    const b = labor({ Earth: 1 }, 0.5, "Oikos"); if (b === null) return true;
+    picked[s.k] = G.dayNumber;
+    G.say(`You gather from the ${name}: ${give(d.item, d.qty + mastery(d.id))}${b}`);
+    this.chips(tx, ty, T.FLOWERS, 4);
+    this.refreshForage();
+    return true;
   }
 
   // ---------------------------------------------------------------- break effects
@@ -530,9 +584,11 @@ abstract class PlayScene extends Phaser.Scene {
 
   investigate() {
     const a = this.creatureAhead();
-    const id = a ? a.kind : this.subjectAt();
+    const [fx, fy] = this.facingTile();
+    const spot = this.forageAt(fx, fy);
+    const id = a ? a.kind : spot ? spot.def.id : this.subjectAt();
     if (!id || !LORE[id]) { G.say("There's nothing here to investigate."); return; }
-    if (study(id)) ui(this).openLore(id);
+    if (study(id)) { ui(this).openLore(id); this.refreshForage(); }
   }
 
   /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
@@ -721,7 +777,7 @@ class FarmScene extends PlayScene {
       { ...at(18, 9), label: "Look at the olive tree", act: () => G.say("An old olive tree, Athena's gift. Its fruit ripens in late autumn.") },
       { ...at(19, 12), label: "Look at the olive tree", act: () => G.say("An old olive tree, gnarled and patient.") },
       ...signs.map((s) => ({ ...at(s.tx, s.ty), label: "Read the sign", act: () => G.say(s.text) })),
-      { x: this.manger.x, y: this.manger.y + 4, get label() { return `Fill the manger with Fiber (${G.data.manger}/${MANGER_MAX})`; }, act: () => this.fillManger() },
+      { x: this.manger.x, y: this.manger.y + 4, get label() { return `Fill the manger with fodder (${G.data.manger}/${MANGER_MAX})`; }, act: () => this.fillManger() },
       { x: this.trough.x, y: this.trough.y + 4, get label() { return `Fill the trough from your jar (${G.data.trough}/${TROUGH_MAX})`; }, act: () => this.fillTrough() },
       { x: hive.x, y: hive.y + 6, get label() { return G.dayNumber - G.data.hiveDay >= HIVE_DAYS ? "Take honey from the hive" : "Look at the hive"; }, act: () => this.tendHive() },
     ];
@@ -739,6 +795,9 @@ class FarmScene extends PlayScene {
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects);
     this.physics.add.collider(this.player, solids);
+    // Forage grows in the rough ground at the edges of the homestead.
+    this.placeForage(rng(G.data.seed ^ 0x51f0a9e), HOME_TERRAIN, 6, (x, y) =>
+      x < MW - 2 && y < MH - 2 && Math.hypot((x - 24) / 1.3, y - 14) > 9 && objs[y][x] === -1 && this.baseGround[y][x] !== T.PATH && !inPen(x, y));
     this.spawnAnimals(r, objs);
     this.cameras.main.fadeIn(250);
   }
@@ -831,10 +890,12 @@ class FarmScene extends PlayScene {
 
   fillManger() {
     if (G.data.manger >= MANGER_MAX) { G.say("The manger is full."); return; }
-    const n = G.removeItem("Fiber", MANGER_MAX - G.data.manger);
-    if (!n) { G.say("You have no Fiber for fodder. Cut brush with the sickle."); return; }
+    const fiber = G.removeItem("Fiber", MANGER_MAX - G.data.manger);
+    const oats = G.removeItem("Oats", MANGER_MAX - G.data.manger - fiber);
+    const n = fiber + oats;
+    if (!n) { G.say("You have no fodder. Cut brush with the sickle for fiber, or gather wild oats."); return; }
     G.data.manger += n;
-    G.say(`You fork ${n} Fiber into the manger. Each goat eats one a night.`);
+    G.say(`You fork ${[fiber && `${fiber} fiber`, oats && `${oats} wild oats`].filter(Boolean).join(" and ")} into the manger. Each goat eats one a night.`);
   }
 
   fillTrough() {
@@ -893,6 +954,7 @@ class FarmScene extends PlayScene {
   }
 
   openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
+  picked() { return G.data.farmPicked; }
 
   ripeAt(c: CropRec) { const d = CROPS[c.id]; return c.picks > 0 && d.regrow ? d.regrow : d.days; }
   isRipe(c: CropRec) { return !c.withered && c.growth >= this.ripeAt(c); }
@@ -992,6 +1054,7 @@ class FarmScene extends PlayScene {
     const soil = G.data.ground[`${x},${y}`];
     const isWell = x === WELL.tx && (y === WELL.ty || y === WELL.ty + 1);
     if (this.tryStrike(tool)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y)) return;
     if (this.workCrop(x, y, tool)) return;
     if (item && ITEMS[item.id].kind === "seed") {
       if (G.data.crops[`${x},${y}`]) { G.say("Something is already growing there."); return; }
@@ -1223,6 +1286,10 @@ class WildScene extends PlayScene {
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects);
     this.wolvesOut = false;
+    // Forage: placed from the screen's own seed, so the same plants are there every visit.
+    const fgen = rng(screenSeed(wx, wy) ^ 0x2545f491);
+    this.placeForage(fgen, this.rec.terrain, 4 + Math.floor(fgen() * 4), (x, y) =>
+      x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH);
     this.spawnCreatures(p, gen);
     this.cameras.main.fadeIn(250);
 
@@ -1337,6 +1404,8 @@ class WildScene extends PlayScene {
     this.rec.cleared.push(`${x},${y}`);
   }
 
+  picked() { return (this.rec.picked ??= {}); }
+
   openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
 
   useItem() {
@@ -1346,6 +1415,7 @@ class WildScene extends PlayScene {
     const tool = item && ITEMS[item.id].kind === "tool" ? item.id : null;
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     if (this.tryStrike(tool)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y)) return;
     if (tool === "hoe") { G.say("Save the hoe for your own fields."); return; }
     if (tool === "jar") { G.say("No water here. Springs and rivers come with the wider world."); return; }
     workObject(this, tool, obj, x, y, `${this.key}:${x},${y}`);
@@ -1454,6 +1524,7 @@ class UIScene extends Phaser.Scene {
       "Investigate: Q, on a creature, plant, stone or the land itself     What you know: K",
       "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
       "Handwork: C (arrows from wood and stone)",
+      "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
       "Blows cost Fatigue; fall when spent and your Life Thread frays.",
       "",

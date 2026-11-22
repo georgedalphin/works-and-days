@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { CROPS, seedId } from "./data";
+import { FORAGE } from "./forage";
 
 // Placeholder pixel art, drawn in code. Warm Mediterranean palette.
 export const T = {
@@ -253,6 +254,11 @@ export function makeTextures(scene: Phaser.Scene) {
   });
   vine.add(0, 0, 0, 0, 16, 24); vine.add(1, 0, 16, 0, 16, 24);
 
+  // Forage: each plant or deposit, and the overlay of what it bears (drawn only once you know the plant).
+  const fids = Object.keys(FORAGE);
+  const fr = canvasTex(scene, "forage", 32 * fids.length, 16, (c) => fids.forEach((id, i) => { drawForage(c, i * 32, id, false); drawForage(c, i * 32 + 16, id, true); }));
+  fids.forEach((id, i) => { fr.add(id, 0, i * 32, 0, 16, 16); fr.add(`${id}_fruit`, 0, i * 32 + 16, 0, 16, 16); });
+
   // An arrow in flight (pointing right; rotated as it flies) and one stuck in the ground.
   canvasTex(scene, "arrow", 10, 3, (c) => { px(c, 0, 1, 8, 1, "#a87443"); px(c, 8, 0, 2, 3, "#8d877b"); px(c, 0, 0, 2, 1, "#e8e2d0"); px(c, 0, 2, 2, 1, "#e8e2d0"); });
   canvasTex(scene, "arrowStuck", 5, 8, (c) => { px(c, 2, 0, 1, 7, "#a87443"); px(c, 1, 0, 1, 2, "#e8e2d0"); px(c, 3, 0, 1, 2, "#e8e2d0"); px(c, 1, 7, 3, 1, "rgba(0,0,0,0.25)"); });
@@ -261,7 +267,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -293,7 +299,36 @@ function drawCrop(c: Ctx, o: number, id: string, st: number) {
   }
 }
 
+function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
+  const leaf = "#5e7f34", leafL = "#71953f", leafD = "#4a6629";
+  if (!fruit) switch (id) {
+    case "plum": px(c, o + 3, 6, 10, 7, leafD); px(c, o + 4, 4, 8, 3, leaf); px(c, o + 5, 5, 3, 2, leafL); px(c, o + 7, 13, 2, 2, "#6b4a2b"); px(c, o + 3, 14, 10, 2, "rgba(0,0,0,0.2)"); break;
+    case "cornel": px(c, o + 5, 3, 6, 10, leafD); px(c, o + 6, 2, 4, 3, leaf); px(c, o + 6, 4, 2, 3, leafL); px(c, o + 7, 13, 2, 2, "#6b4a2b"); px(c, o + 4, 14, 8, 2, "rgba(0,0,0,0.2)"); break;
+    case "wildgrape": for (let i = 0; i < 12; i++) px(c, o + 2 + i, 11 + Math.round(Math.sin(i * 0.9) * 2), 1, 1, "#6b4a2b"); for (const x of [3, 7, 11]) { px(c, o + x, 8, 3, 3, leaf); px(c, o + x + 1, 8, 1, 1, leafL); } break;
+    case "purslane": px(c, o + 7, 9, 2, 5, "#9a5040"); for (const [x, y] of [[4, 10], [10, 10], [6, 8], [9, 12], [5, 12]]) px(c, o + x, y, 2, 2, leafL); break;
+    case "oats": for (const x of [4, 6, 8, 10, 12]) px(c, o + x, 5 + (x % 3), 1, 14 - 5 - (x % 3), "#8fa04a"); px(c, o + 3, 13, 10, 1, "#6f8a3a"); break;
+    case "thyme": px(c, o + 3, 9, 10, 5, "#7d8f6a"); px(c, o + 4, 8, 8, 2, "#8fa07a"); px(c, o + 5, 10, 2, 1, "#6b7d5a"); px(c, o + 9, 11, 2, 1, "#6b7d5a"); break;
+    case "caper": px(c, o + 2, 11, 12, 2, "#5a6b3c"); for (const [x, y] of [[3, 9], [7, 8], [11, 9], [5, 12], [10, 12]]) px(c, o + x, y, 2, 2, "#7aa04a"); break;
+    case "clay": px(c, o + 2, 10, 12, 4, "#a07a62"); px(c, o + 4, 8, 8, 3, "#b08a70"); px(c, o + 5, 9, 3, 1, "#c09a80"); break;
+    case "ochre": px(c, o + 2, 11, 12, 3, "#b08a3a"); px(c, o + 4, 10, 6, 2, "#c4a04a"); px(c, o + 10, 12, 3, 1, "#8a6a2a"); break;
+    case "mushrooms": px(c, o + 2, 11, 12, 3, "#7a5a33"); px(c, o + 4, 10, 3, 1, "#8a6a3a"); px(c, o + 9, 12, 3, 1, "#6b4a2b"); break;
+  } else switch (id) {
+    case "plum": for (const [x, y] of [[4, 6], [8, 5], [10, 8], [6, 9], [9, 11]]) { px(c, o + x, y, 2, 2, "#6a3a7a"); px(c, o + x, y, 1, 1, "#9a6aaa"); } break;
+    case "cornel": for (const [x, y] of [[5, 4], [8, 6], [6, 8], [9, 10], [6, 11]]) { px(c, o + x, y, 2, 2, "#c0302a"); px(c, o + x, y, 1, 1, "#e06050"); } break;
+    case "wildgrape": for (const x of [4, 9]) { px(c, o + x, 10, 3, 2, "#5a2d5e"); px(c, o + x + 1, 12, 1, 1, "#5a2d5e"); px(c, o + x, 10, 1, 1, "#8a5a8e"); } break;
+    case "purslane": for (const [x, y] of [[5, 9], [10, 9], [8, 11]]) px(c, o + x, y, 1, 1, "#f2d040"); break;
+    case "oats": for (const x of [4, 6, 8, 10, 12]) { px(c, o + x - 1, 4 + (x % 3), 3, 2, "#d9c27a"); } break;
+    case "thyme": for (const [x, y] of [[4, 8], [7, 7], [10, 8], [6, 10], [9, 10], [12, 10]]) px(c, o + x, y, 1, 1, "#c9a0d8"); break;
+    case "caper": for (const [x, y] of [[4, 8], [8, 7], [12, 8], [6, 11]]) { px(c, o + x, y, 2, 1, "#c8e0a0"); px(c, o + x, y + 1, 1, 1, "#e8f0d0"); } break;
+    case "clay": px(c, o + 5, 11, 1, 2, "#7a5a48"); px(c, o + 8, 10, 1, 3, "#7a5a48"); px(c, o + 11, 11, 1, 2, "#7a5a48"); px(c, o + 6, 9, 2, 1, "#d8b8a0"); break;
+    case "ochre": for (const [x, y] of [[4, 10], [8, 11], [11, 10]]) px(c, o + x, y, 2, 2, "#e8c040"); break;
+    case "mushrooms": for (const [x, y] of [[4, 9], [8, 8], [11, 10]]) { px(c, o + x, y, 3, 2, "#e8e2d0"); px(c, o + x + 1, y + 2, 1, 2, "#d8d0bc"); } break;
+  }
+}
+const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms" };
+
 function drawIcon(c: Ctx, o: number, id: string) {
+  if (FORAGE_ICON[id]) { drawForage(c, o, FORAGE_ICON[id], false); drawForage(c, o, FORAGE_ICON[id], true); return; }
   if (id.startsWith("seed_")) {
     const [a] = CROP_COL[id.slice(5)];
     px(c, o + 4, 4, 8, 10, "#c9b48f"); px(c, o + 5, 3, 6, 2, "#a99878"); px(c, o + 6, 2, 4, 1, "#8a7a5a"); px(c, o + 4, 13, 8, 1, "#a99878");
