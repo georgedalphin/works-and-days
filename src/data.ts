@@ -100,6 +100,11 @@ export const ITEMS: Record<string, ItemDef> = {
   Cornel: { id: "Cornel", value: 3, name: "Cornelian cherries", kind: "material", desc: "Tart red fruit. The wood makes the best javelins." },
   Purslane: { id: "Purslane", value: 1, name: "Purslane", kind: "material", desc: "Fleshy wild greens from the field edges." },
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
+  SeaFennel: { id: "SeaFennel", value: 3, name: "Sea fennel", greek: "krithmon", kind: "material", desc: "Salty shore greens, good pickled." },
+  Saltbush: { id: "Saltbush", value: 1, name: "Saltbush", greek: "halimos", kind: "material", desc: "Grey desert leaves; fodder for beasts." },
+  MountainTea: { id: "MountainTea", value: 4, name: "Mountain tea", greek: "sideritis", kind: "material", desc: "Woolly mountain herb, brewed for tea and medicine." },
+  Thistle: { id: "Thistle", value: 1, name: "Thistle", greek: "akantha", kind: "material", desc: "Fodder, and food when the shoots are young." },
+  Fennel: { id: "Fennel", value: 3, name: "Fennel", greek: "marathon", kind: "material", desc: "For cooking and medicine. Its hollow stalks make the thyrsus." },
   Thyme: { id: "Thyme", value: 3, name: "Thyme", greek: "thymon", kind: "material", desc: "For cooking and purifying smoke. Bees love it." },
   Capers: { id: "Capers", value: 4, name: "Caper buds", kind: "material", desc: "Pickled, they keep for a year." },
   Clay: { id: "Clay", value: 2, name: "Clay", kind: "material", desc: "For pottery, bricks and votive figurines." },
@@ -149,8 +154,8 @@ export const TERRAINS: Terrain[] = [
   { n: 12, name: "Dominating Heights", aretai: "Kratos", element: "Fire" },
 ];
 export const terrain = (n: number) => TERRAINS[n - 1];
-/** The vertical slice opens only the gentle lands around home. */
-export const SLICE_TERRAINS = [1, 2, 3, 4];
+/** Every land of the wheel can be walked to; the Deep Seas (6) wait for boats. */
+export const SLICE_TERRAINS = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12];
 export const HOME_TERRAIN = 3;
 
 const wrap = (n: number) => ((n - 1 + 120) % 12) + 1;

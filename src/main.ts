@@ -21,7 +21,7 @@ let G: GameState;
 let inDark = false;
 const darkPen = () => (inDark ? 3 : 0);
 
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
 const TREE_HITS = 3;
 
 type Dir = 0 | 1 | 2 | 3; // down, left, right, up
@@ -50,6 +50,7 @@ function labor(cost: Record<string, number>, fatigue: number, aretai: string): s
 const mastery = (id: string, n = 1) => (G.lore(id) >= 3 ? n : 0);
 const OBJ_SUBJECT: Record<number, string> = {
   [T.TREE]: "oak", [T.SAPLING]: "oak", [T.BRUSH]: "bramble", [T.STONE]: "stone", [T.BOULDER]: "stone", [T.FLOWERS]: "poppy", [T.OLIVE]: "olive",
+  [T.PINE]: "pine", [T.REEDS]: "reed", [T.THORN]: "thornscrub",
 };
 const loreName = (id: string) => (G.lore(id) >= 1 ? LORE[id].name : LORE[id].vague);
 /** A creature as you would name it: "wild boar" once you know it, "dark, bristling beast" before. */
@@ -100,6 +101,25 @@ function give(id: string, qty: number, q?: number): string {
 
 /** Work on the land's objects with whatever is in hand: the same at home and in the wild. */
 function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void }, tool: string | null, obj: number, x: number, y: number, hitKey: string): boolean {
+    // The far lands' plants: black pine falls like an oak, reeds cut like brush, thorn scrub gives kindling.
+    if (obj === T.PINE) {
+      if (tool !== "axe") { G.say(tool ? "A pine wants the axe." : "You need a tool for that. Choose one with the number keys 1–0."); return true; }
+      const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
+      const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
+      const hits = G.toolLevel("axe") >= 2 ? 2 : TREE_HITS;
+      if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The pine comes down, smelling of resin: ${give("Wood", 5 + mastery("pine", 2))}${b}`); }
+      else { G.say(`You swing the axe into the pine (${G.data.treeHits[k]} of ${hits}).${b}`); sc.cameras.main.shake(80, 0.002); (sc as unknown as PlayScene).chips(x, y, T.PINE, 4); }
+      return true;
+    }
+    if (obj === T.REEDS) {
+      const b = labor({ Earth: tool === "sickle" ? 2 : 3 }, tool === "sickle" ? 2 : 3, "Oikos"); if (b === null) return true;
+      sc.clearObject(x, y); G.say(`You ${tool === "sickle" ? "cut" : "pull"} the reeds: ${give("Fiber", (tool === "sickle" ? 2 : 1) + mastery("reed"))}${b}`); return true;
+    }
+    if (obj === T.THORN) {
+      if (tool !== "sickle" && tool !== "axe") { G.say(tool ? "Thorn scrub wants the sickle or the axe." : "The thorns tear at your hands. Use the sickle or the axe."); return true; }
+      const b = labor({ Earth: 2, Fire: 1 }, 3, "Oikos"); if (b === null) return true;
+      sc.clearObject(x, y); G.say(`You hack out the thorn scrub for kindling: ${give("Wood", 1 + mastery("thornscrub"))}, ${give("Fiber", 1)}${b}`); return true;
+    }
     switch (tool) {
       case "sickle":
         if (obj === T.BRUSH) { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2 + mastery("bramble"))}${b}`); }
@@ -194,6 +214,7 @@ abstract class PlayScene extends Phaser.Scene {
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
+    speed *= this.groundSpeed();
     const len = Math.hypot(vx, vy) || 1;
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     if (moving) {
@@ -436,6 +457,7 @@ abstract class PlayScene extends Phaser.Scene {
       [T.TREE]: [0x8a5f35, 0x5e7f34, 0x71953f], [T.SAPLING]: [0x8a5f35, 0x71953f], [T.OLIVE]: [0x8a9a6a],
       [T.STONE]: [0x9c968a, 0xc4bdae, 0x6c675e], [T.BOULDER]: [0x9c968a, 0x6c675e],
       [T.BRUSH]: [0x6f8a3a, 0x8fa04a, 0x5a6b2c], [T.FLOWERS]: [0xe85f7a, 0xf2c14e, 0xe8e2f0, 0x5e7f34],
+      [T.PINE]: [0x8a5f35, 0x2f4a2a, 0x4a6a3a], [T.REEDS]: [0x8a9a4a, 0x7a5a33], [T.THORN]: [0x7a6a3a, 0xe0d8b8],
     };
     const c = cols[tile] ?? [0x8d877b];
     const cx = tx * TILE + 8, cy = ty * TILE + 9;
@@ -453,7 +475,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (tile < 0) return;
     const x = tx * TILE + 8, y = ty * TILE + 16;
     const ghost = this.add.image(x, y, "tiles", `t${tile}`).setOrigin(0.5, 1).setDepth(y + 1);
-    if (tile === T.TREE || tile === T.SAPLING) {
+    if (tile === T.TREE || tile === T.SAPLING || tile === T.PINE) {
       // Topples away from the player and fades.
       const dir = this.player.x < x ? 1 : -1;
       this.tweens.add({ targets: ghost, angle: 85 * dir, duration: 420, ease: "Quad.easeIn",
@@ -558,6 +580,8 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Something notable happened to a creature (a cave's keeper slain or appeased). */
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
+  /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
+  groundSpeed() { return 1; }
   /** A scene may take over what happens when a creature is beaten (the dead fall apart and rise again). */
   overcome(_a: Animal) { return false; }
 
@@ -1653,6 +1677,23 @@ const PROFILES: Record<number, Profile> = {
   4: { ground: T.ROCKY, ground2: T.DIRT, objects: [[T.STONE, 5], [T.BOULDER, 3], [T.BRUSH, 2], [T.SAPLING, 1]], density: 0.32,
        creatures: [["hare", 1], ["bird", 1], ["boar", 1]], features: ["Stone outcrop", "Ore seam", "Scree slope"] },
 };
+// The rest of the wheel, from the Flora & Fauna sheet's "Found in" column.
+Object.assign(PROFILES, {
+  5: { ground: T.MUD, ground2: T.GRASS2, objects: [[T.REEDS, 7], [T.TREE, 1], [T.BRUSH, 1], [T.FLOWERS, 0.5]], density: 0.36,
+       creatures: [["bird", 3], ["boar", 1], ["hare", 1]], features: ["Reed bed", "Still pool", "Willow stand"] },
+  7: { ground: T.SAND, ground2: T.GRASS2, objects: [[T.STONE, 3], [T.BOULDER, 2], [T.BRUSH, 2], [T.FLOWERS, 0.5]], density: 0.14,
+       creatures: [["bird", 3], ["hare", 1]], features: ["Tide pools", "Driftwood beach", "Headland"] },
+  8: { ground: T.SAND, ground2: T.REDROCK, objects: [[T.THORN, 4], [T.STONE, 2], [T.BOULDER, 2]], density: 0.12,
+       creatures: [["hare", 1], ["bird", 1], ["fox", 1]], features: ["Dry wadi", "Oasis", "Sun-bleached bones"] },
+  9: { ground: T.ALPINE, ground2: T.ROCKY, objects: [[T.PINE, 6], [T.STONE, 3], [T.BOULDER, 3], [T.FLOWERS, 1]], density: 0.36,
+       creatures: [["deer", 1], ["bird", 2], ["hare", 1]], features: ["Mountain spring", "Shrine stones", "Eagle crag"] },
+  10: { ground: T.DRYGRASS, ground2: T.GRASS, objects: [[T.BRUSH, 2], [T.FLOWERS, 2], [T.STONE, 1], [T.THORN, 1], [T.TREE, 0.3]], density: 0.1,
+       creatures: [["hare", 3], ["bird", 3], ["deer", 1]], features: ["Wild herd grounds", "Lone oak", "Burial mound"] },
+  11: { ground: T.REDROCK, ground2: T.DIRT, objects: [[T.BOULDER, 4], [T.STONE, 3], [T.THORN, 3]], density: 0.34,
+       creatures: [["boar", 1], ["fox", 1], ["bird", 1]], features: ["Gully", "Old battlefield", "Thorn thicket"] },
+  12: { ground: T.LIMESTONE, ground2: T.GRASS2, objects: [[T.BOULDER, 3], [T.STONE, 3], [T.OLIVE, 1], [T.FLOWERS, 1], [T.PINE, 1]], density: 0.24,
+       creatures: [["bird", 2], ["hare", 1], ["deer", 1]], features: ["Ruined watchtower", "Eagle crag", "Acropolis ruins"] },
+} as Record<number, Profile>);
 const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
 const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 }, CAVE_AT = { x: 9, y: 7 };
 
@@ -1687,7 +1728,7 @@ class WildScene extends PlayScene {
   }
 
   create() {
-    this.leaving = false;
+    this.leaving = false; this.heatSaid = false;
     const wx = G.data.wx, wy = G.data.wy;
     this.key = `${wx},${wy}`;
     for (const sd of ["N", "S", "E", "W"] as Side[]) this.open[sd] = this.sideOpen(wx, wy, sd);
@@ -1724,6 +1765,25 @@ class WildScene extends PlayScene {
         const f = field(x, y);
         ground[y].push((1 - f) > 0.6 && gen() < 0.85 ? p.ground2 : gen() < 0.06 ? p.ground2 : p.ground);
         objs[y].push(edge ? T.EDGE : gen() < p.density * f * 2 ? pickObj() : -1);
+      }
+    }
+    // The shore: the sea fills one corner of a coastal screen (the gateways at the middle of each side stay dry).
+    if (this.rec.terrain === 7) {
+      const [kx, ky] = [gen() < 0.5 ? 0 : WW - 1, gen() < 0.5 ? 0 : WH - 1], R = 12 + gen() * 3;
+      for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+        const d = Math.hypot(x - kx, (y - ky) * 1.2) + (field(x, y) - 0.5) * 4;
+        if (d < R) { objs[y][x] = T.WATER; ground[y][x] = T.SAND; } else if (d < R + 3) { ground[y][x] = T.SAND; if (objs[y][x] !== T.EDGE) objs[y][x] = gen() < 0.08 ? T.STONE : -1; }
+      }
+    }
+    // The marsh: still pools fringed with reeds.
+    if (this.rec.terrain === 5) {
+      for (let i = 0; i < 6; i++) {
+        const px0 = 4 + Math.floor(gen() * (WW - 8)), py0 = 4 + Math.floor(gen() * (WH - 8)), r = 1.2 + gen() * 1.6;
+        for (let y = py0 - 4; y <= py0 + 4; y++) for (let x = px0 - 4; x <= px0 + 4; x++) {
+          if (x < 2 || y < 2 || x >= WW - 2 || y >= WH - 2) continue;
+          const d = Math.hypot(x - px0, y - py0);
+          if (d <= r) objs[y][x] = T.WATER; else if (d <= r + 1.2 && gen() < 0.6) objs[y][x] = T.REEDS;
+        }
       }
     }
     // Gateways on each open side, with a winding clear way from each to the middle.
@@ -1770,11 +1830,12 @@ class WildScene extends PlayScene {
 
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
-    map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(BLOCKING).setDepth(1);
     this.targets = [];
+    this.water = []; for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER) this.water.push([x, y]);
 
     this.physics.world.setBounds(0, 0, WW * TILE, WH * TILE);
     this.cameras.main.setBounds(0, 0, WW * TILE, WH * TILE);
@@ -1824,6 +1885,24 @@ class WildScene extends PlayScene {
         ring(2.5, (x, y) => (objs[y][x] = gen() < 0.5 ? (gen() < 0.4 ? T.BOULDER : T.STONE) : -1)); break;
       case "Abandoned field": ring(3, (x, y) => (objs[y][x] = gen() < 0.25 ? T.BRUSH : -1)); break;
       case "Olive grove": ring(3, (x, y) => (objs[y][x] = gen() < 0.3 ? T.OLIVE : -1)); break;
+      // The far lands.
+      case "Reed bed": ring(3, (x, y) => (objs[y][x] = gen() < 0.7 ? T.REEDS : -1)); break;
+      case "Still pool": case "Mountain spring": case "Tide pools":
+        ring(name === "Tide pools" ? 2 : 2.6, (x, y, d) => (objs[y][x] = d <= (name === "Tide pools" ? 0.8 : 1.4) ? T.WATER : name === "Still pool" && gen() < 0.5 ? T.REEDS : name === "Mountain spring" && gen() < 0.4 ? T.FLOWERS : name === "Tide pools" && gen() < 0.4 ? T.STONE : -1)); break;
+      case "Oasis": ring(3.5, (x, y, d) => (objs[y][x] = d <= 1.6 ? T.WATER : d > 2.4 && gen() < 0.45 ? T.TREE : -1)); break;
+      case "Willow stand": ring(3, (x, y) => (objs[y][x] = gen() < 0.35 ? T.TREE : -1)); break;
+      case "Driftwood beach": case "Wild herd grounds": case "Dry wadi": case "Sun-bleached bones": ring(name === "Wild herd grounds" ? 4 : 3, (x, y) => (objs[y][x] = name === "Dry wadi" && gen() < 0.15 ? T.STONE : -1)); break;
+      case "Lone oak": ring(3, (x, y) => (objs[y][x] = -1)); objs[fy][fx] = T.TREE; break;
+      case "Headland": case "Eagle crag": case "Gully": ring(2.5, (x, y) => (objs[y][x] = gen() < 0.55 ? T.BOULDER : -1)); break;
+      case "Shrine stones": ring(3, (x, y, d) => (objs[y][x] = d > 2.2 && gen() < 0.7 ? T.STONE : -1)); break;
+      case "Burial mound": ring(2.5, (x, y, d) => (objs[y][x] = d < 1 ? T.BOULDER : d > 1.8 && gen() < 0.5 ? T.STONE : -1)); break;
+      case "Old battlefield": ring(3.5, (x, y) => (objs[y][x] = gen() < 0.2 ? T.STONE : -1)); break;
+      case "Thorn thicket": ring(3, (x, y) => (objs[y][x] = gen() < 0.6 ? T.THORN : -1)); break;
+      case "Ruined watchtower": case "Acropolis ruins": {
+        const h = name === "Acropolis ruins" ? 3 : 2;
+        ring(h + 1.5, (x, y) => { const ex = Math.abs(x - fx), ey = Math.abs(y - fy); objs[y][x] = (ex === h || ey === h) && ex <= h && ey <= h && gen() < 0.75 ? (gen() < 0.6 ? T.BOULDER : T.STONE) : -1; });
+        break;
+      }
     }
   }
 
@@ -1958,6 +2037,24 @@ class WildScene extends PlayScene {
       return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- the lands themselves
+  groundLayer?: Phaser.Tilemaps.TilemapLayer;
+  water: [number, number][] = [];
+  heatSaid = false;
+  /** Mud drags at your feet; sand slows you a little. */
+  groundSpeed() {
+    const t = this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
+    return t === T.MUD ? 0.7 : t === T.SAND ? 0.88 : 1;
+  }
+  /** The desert sun wears you down by day, except in the shade by water. */
+  desertHeat(dt: number) {
+    if (this.rec.terrain !== 8 || !G.isDay) return;
+    const tx = this.player.x / TILE, ty = this.player.y / TILE;
+    if (this.water.some(([x, y]) => Math.hypot(x - tx, y - ty) < 5)) return;
+    G.addFatigue(dt * 0.05);
+    if (!this.heatSaid) { this.heatSaid = true; G.say("The sun beats down on the desert. It tires you by day; rest in the shade by water."); }
   }
 
   // ---------------------------------------------------------------- wandering monsters
@@ -2168,7 +2265,7 @@ class WildScene extends PlayScene {
   /** Wolves hunt the forests from dusk. */
   wolvesOut = false;
   maybeWolves(gen: () => number = Math.random) {
-    if (this.wolvesOut || this.rec.terrain !== 2 || (G.isDay && G.data.clock < G.daylight - 1)) return;
+    if (this.wolvesOut || (this.rec.terrain !== 2 && this.rec.terrain !== 9) || (G.isDay && G.data.clock < G.daylight - 1)) return;
     this.wolvesOut = true;
     const n = 2 + (gen() < 0.5 ? 1 : 0);
     for (let tries = 0, made = 0; tries < 60 && made < n; tries++) {
@@ -2188,6 +2285,7 @@ class WildScene extends PlayScene {
     if (!this.common(dt)) return;
     this.maybeWolves();
     this.monsterTick(dt);
+    this.desertHeat(dt);
     const px = this.player.x, py = this.player.y;
     if (this.knock > 0) return; // a blow can't throw you onto the next map
     if (px < 7 && this.open.W) this.leaveFor(-1, 0, "E");

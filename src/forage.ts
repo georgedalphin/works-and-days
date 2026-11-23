@@ -21,11 +21,17 @@ export const FORAGE: Record<string, ForageDef> = {
   plum: { id: "plum", item: "Plum", qty: 3, regrow: 4, months: SUMMER.slice(0, 2), terrains: [2, 3], bearsWhen: "summer", weight: 2 },
   cornel: { id: "cornel", item: "Cornel", qty: 3, regrow: 5, months: [1], terrains: [2], bearsWhen: "late summer (Metageitnion)", weight: 2 },
   purslane: { id: "purslane", item: "Purslane", qty: 2, regrow: 3, months: SUMMER, terrains: [3, 1], bearsWhen: "summer", weight: 3 },
-  oats: { id: "oats", item: "Oats", qty: 2, regrow: 3, months: SUMMER.slice(0, 2), terrains: [3], bearsWhen: "summer", weight: 2 },
+  oats: { id: "oats", item: "Oats", qty: 2, regrow: 3, months: SUMMER.slice(0, 2), terrains: [3, 10], bearsWhen: "summer", weight: 2 },
   thyme: { id: "thyme", item: "Thyme", qty: 2, regrow: 3, months: [10, 11, 0, 1], terrains: [4, 1], bearsWhen: "spring and summer", weight: 3 },
-  caper: { id: "caper", item: "Capers", qty: 2, regrow: 4, months: SUMMER.slice(0, 2), terrains: [4], bearsWhen: "summer", weight: 2 },
-  clay: { id: "clay", item: "Clay", qty: 2, regrow: 5, months: ALL, terrains: [4, 99], bearsWhen: "any time", weight: 2 },
+  caper: { id: "caper", item: "Capers", qty: 2, regrow: 4, months: SUMMER.slice(0, 2), terrains: [4, 12], bearsWhen: "summer", weight: 2 },
+  clay: { id: "clay", item: "Clay", qty: 2, regrow: 5, months: ALL, terrains: [4, 5, 99], bearsWhen: "any time", weight: 2 },
   ochre: { id: "ochre", item: "Ochre", qty: 1, regrow: 6, months: ALL, terrains: [4, 99], bearsWhen: "any time", weight: 1 },
+  // The far lands (Flora & Fauna): one or two plants for each.
+  seafennel: { id: "seafennel", item: "SeaFennel", qty: 2, regrow: 3, months: SUMMER, terrains: [7], bearsWhen: "summer", weight: 3 },
+  saltbush: { id: "saltbush", item: "Saltbush", qty: 2, regrow: 4, months: ALL, terrains: [8], bearsWhen: "any time", weight: 3 },
+  mountaintea: { id: "mountaintea", item: "MountainTea", qty: 2, regrow: 4, months: SUMMER, terrains: [9], bearsWhen: "summer", weight: 3 },
+  thistle: { id: "thistle", item: "Thistle", qty: 2, regrow: 3, months: SUMMER, terrains: [10, 11], bearsWhen: "summer", weight: 2 },
+  fennel: { id: "fennel", item: "Fennel", qty: 2, regrow: 3, months: SUMMER, terrains: [10], bearsWhen: "summer", weight: 2 },
   mushrooms: { id: "mushrooms", item: "Mushrooms", qty: 2, regrow: 3, months: [3, 4, 5], terrains: [2], bearsWhen: "autumn, after rain", weight: 2 },
 };
 
