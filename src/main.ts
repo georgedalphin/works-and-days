@@ -21,7 +21,14 @@ let G: GameState;
 let inDark = false;
 const darkPen = () => (inDark ? 3 : 0);
 
+/** Things that fill a tile: arrows and dropped things are lost in them. */
 const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
+/** Bushes slow you as you push through; they do not stop you. */
+const BUSHES: Record<number, number> = { [T.BRUSH]: 0.55, [T.REEDS]: 0.6, [T.THORN]: 0.45 };
+/** Trees block only at the trunk: a round trunk lets you slip between two trees that stand corner to corner. */
+const TRUNKS: Record<number, number> = { [T.TREE]: 5.75, [T.OLIVE]: 5.75, [T.PINE]: 5.75, [T.SAPLING]: 4 };
+/** What blocks a whole tile: stone, water, walls, fences. */
+const SOLID = BLOCKING.filter((t) => !(t in BUSHES) && !(t in TRUNKS));
 const TREE_HITS = 3;
 
 type Dir = 0 | 1 | 2 | 3; // down, left, right, up
@@ -180,7 +187,7 @@ abstract class PlayScene extends Phaser.Scene {
   makePlayer(x: number, y: number) {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
-    this.poseT = 0; this.poseKind = ""; this.walkT = 0;
+    this.poseT = 0; this.poseKind = ""; this.walkT = 0; this.trunks = undefined; this.trunkAt.clear(); this.rustleT = 0; this.thornSaid = false;
     this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
     this.focusMarks = this.add.graphics().setDepth(99981);
     this.focusTag = this.add.text(0, 0, "", { fontFamily: FONT, fontSize: "6px", color: "#fbe39a", stroke: "#1f1712", strokeThickness: 2 }).setOrigin(0.5, 1).setResolution(5).setAlpha(0.9).setDepth(99982).setVisible(false);
@@ -218,7 +225,7 @@ abstract class PlayScene extends Phaser.Scene {
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
-    speed *= this.groundSpeed();
+    speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     const len = Math.hypot(vx, vy) || 1;
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     if (moving) {
@@ -541,6 +548,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** A quick, simple animation of something being taken down. */
   breakFx(tx: number, ty: number, tile: number) {
+    this.removeTrunk(tx, ty);
     if (tile < 0) return;
     const x = tx * TILE + 8, y = ty * TILE + 16;
     const ghost = this.add.image(x, y, "tiles", `t${tile}`).setOrigin(0.5, 1).setDepth(y + 1);
@@ -651,6 +659,48 @@ abstract class PlayScene extends Phaser.Scene {
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
   /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
   groundSpeed() { return 1; }
+
+  // ---------------------------------------------------------------- trunks and bushes
+  trunks?: Phaser.Physics.Arcade.StaticGroup;
+  trunkAt = new Map<string, Phaser.GameObjects.Zone>();
+  rustleT = 0;
+  thornSaid = false;
+  get layer() { return (this as unknown as { objects?: Phaser.Tilemaps.TilemapLayer }).objects; }
+
+  /** Give every tree a small round trunk to bump against, instead of a whole blocked tile. */
+  buildTrunks() {
+    const layer = this.layer;
+    if (this.trunks || !layer) return;
+    this.trunks = this.physics.add.staticGroup();
+    layer.forEachTile((t) => {
+      const r = TRUNKS[t.index]; if (!r) return;
+      const z = this.add.zone(t.x * TILE + 8, t.y * TILE + 10, r * 2, r * 2);
+      this.physics.add.existing(z, true);
+      (z.body as Phaser.Physics.Arcade.StaticBody).setCircle(r);
+      this.trunks!.add(z); this.trunkAt.set(`${t.x},${t.y}`, z);
+    });
+    this.physics.add.collider(this.player, this.trunks);
+  }
+  collideTrunks(o: Phaser.GameObjects.GameObject) { this.buildTrunks(); if (this.trunks) this.physics.add.collider(o, this.trunks); }
+  removeTrunk(tx: number, ty: number) { const z = this.trunkAt.get(`${tx},${ty}`); if (z) { this.trunks?.remove(z, true, true); this.trunkAt.delete(`${tx},${ty}`); } }
+
+  /** Pushing through a bush: slower, a rustle of leaves, and thorns that snag. You wade in to the knees. */
+  bushSpeed(dt: number, moving: boolean) {
+    const layer = this.layer;
+    const t = layer?.getTileAtWorldXY(this.player.x, this.player.y + 5)?.index ?? -1;
+    const m = BUSHES[t];
+    if (!m) { if (this.player.isCropped) this.player.setCrop(); return 1; }
+    this.player.setCrop(0, 0, 16, 12);
+    if (moving && (this.rustleT -= dt) <= 0) {
+      this.rustleT = 0.28;
+      this.chips(Math.floor(this.player.x / TILE), Math.floor((this.player.y + 5) / TILE), t, 2);
+    }
+    if (t === T.THORN && moving) {
+      G.addFatigue(dt * 0.6);
+      if (!this.thornSaid) { this.thornSaid = true; G.say("The thorns snag at you as you push through."); }
+    }
+    return m;
+  }
   /** A scene may take over what happens when a creature is beaten (the dead fall apart and rise again). */
   overcome(_a: Animal) { return false; }
 
@@ -1194,7 +1244,7 @@ class FarmScene extends PlayScene {
     this.objects = this.map.createBlankLayer("objects", ts)!;
     this.groundLayer.putTilesAt(ground, 0, 0);
     this.objects.putTilesAt(objs, 0, 0);
-    this.objects.setCollision(BLOCKING);
+    this.objects.setCollision(SOLID);
     this.objects.setDepth(1);
 
     // The hut, the well, the storage jar and the signposts.
@@ -1266,7 +1316,7 @@ class FarmScene extends PlayScene {
     G.data.scene = "Farm";
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.objects);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.physics.add.collider(this.player, solids);
     // Forage grows in the rough ground at the edges of the homestead.
     this.placeForage(rng(G.data.seed ^ 0x51f0a9e), HOME_TERRAIN, 6, (x, y) =>
@@ -1290,7 +1340,7 @@ class FarmScene extends PlayScene {
     G.data.goats.forEach((g, i) => {
       const a = new Animal(this, "goat", penHome.x + 10 + i * 34, penHome.y + 12 + i * 10, penHome);
       a.sprite.setTint(g.tint);
-      this.physics.add.collider(a.sprite, this.objects);
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
       this.animals.push(a);
       const t: Target = { x: 0, y: 0, label: "", act: () => this.tendGoat(g, a) };
       this.goats.push({ a, g, t });
@@ -1307,7 +1357,7 @@ class FarmScene extends PlayScene {
     for (let i = 0; i < 3; i++) {
       const [x, y] = pick();
       const a = new Animal(this, "hare", x * TILE + 8, y * TILE + 8, new Phaser.Geom.Rectangle(x * TILE - 64, y * TILE - 64, 128, 128), free);
-      this.physics.add.collider(a.sprite, this.objects);
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
       this.animals.push(a);
     }
     for (let f = 0; f < 2; f++) {
@@ -1328,7 +1378,7 @@ class FarmScene extends PlayScene {
       const tx = 38 + Math.floor(Math.random() * 7), ty = 6 + Math.floor(Math.random() * 24);
       if (!this.free(tx * TILE + 8, ty * TILE + 8)) continue;
       const a = new Animal(this, "fox", tx * TILE + 8, ty * TILE + 8, new Phaser.Geom.Rectangle(30 * TILE, 4 * TILE, 15 * TILE, 28 * TILE), (x, y) => this.free(x, y));
-      this.physics.add.collider(a.sprite, this.objects);
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
       this.animals.push(a); this.fox = a;
       G.say("A fox slips out of the brush at the edge of the fields.");
       return;
@@ -1903,7 +1953,7 @@ class WildScene extends PlayScene {
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
-    this.objects.setCollision(BLOCKING).setDepth(1);
+    this.objects.setCollision(SOLID).setDepth(1);
     this.targets = [];
     this.water = []; for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER) this.water.push([x, y]);
 
@@ -1920,7 +1970,7 @@ class WildScene extends PlayScene {
     G.data.entry = ""; G.data.scene = "Wild";
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.objects);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.wolvesOut = false;
     // Forage: placed from the screen's own seed, so the same plants are there every visit.
     const fgen = rng(screenSeed(wx, wy) ^ 0x2545f491);
@@ -2004,7 +2054,7 @@ class WildScene extends PlayScene {
         } else {
           const range = kind === "deer" ? 110 : 70;
           const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
-          this.physics.add.collider(a.sprite, this.objects);
+          this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
           this.animals.push(a);
         }
       }
@@ -2164,7 +2214,7 @@ class WildScene extends PlayScene {
     }
     const range = kind === "centaur" ? 160 : 60;
     const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
-    this.physics.add.collider(a.sprite, this.objects);
+    this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
     this.animals.push(a); this.monster = a;
     if (kind === "centaur") a.decide = (b) => { if (!this.aggressionRoll(b)) { this.meeting = "coming"; G.say(`The ${beast("centaur")} trots toward you, curious.`); } };
     if (kind === "empousa") a.decide = () => { this.meeting = "coming"; };
@@ -2342,7 +2392,7 @@ class WildScene extends PlayScene {
       const x = 3 + Math.floor(gen() * (WW - 6)), y = 3 + Math.floor(gen() * (WH - 6));
       if (Math.hypot(x * TILE - this.player.x, y * TILE - this.player.y) < 140 || !this.free(x * TILE + 8, y * TILE + 8)) continue;
       const a = new Animal(this, "wolf", x * TILE + 8, y * TILE + 8, new Phaser.Geom.Rectangle(x * TILE - 90, y * TILE - 90, 180, 180), (px, py) => this.free(px, py));
-      this.physics.add.collider(a.sprite, this.objects);
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
       this.animals.push(a); made++;
     }
     G.say("Somewhere in the trees, a wolf howls.");
@@ -2496,7 +2546,7 @@ class CaveScene extends PlayScene {
     map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
-    this.objects.setCollision(BLOCKING).setDepth(1);
+    this.objects.setCollision(SOLID).setDepth(1);
     this.cameras.main.setBackgroundColor("#0e0c0a");
 
     this.physics.world.setBounds(0, 0, CW * TILE, CH * TILE);
@@ -2521,7 +2571,7 @@ class CaveScene extends PlayScene {
     G.data.entry = ""; G.data.scene = "Cave";
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.objects);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
 
     // Dwellers: bats in the upper level; the keeper in the deepest chamber.
     this.animals = [];
@@ -2533,7 +2583,7 @@ class CaveScene extends PlayScene {
     if (level === CAVE_LEVELS && this.rec.boss !== "slain") {
       const kind = CAVE_KINDS[this.rec.type].boss;
       const a = new Animal(this, kind, 20 * TILE + 8, 24 * TILE, new Phaser.Geom.Rectangle(16 * TILE, 21 * TILE, 8 * TILE, 5 * TILE));
-      this.physics.add.collider(a.sprite, this.objects);
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
       if (this.rec.boss === "appeased") { a.appeased = true; a.rolled = true; }
       this.animals.push(a); this.boss = a;
       const sc = this;
@@ -2664,7 +2714,7 @@ class VillageScene extends PlayScene {
     map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
-    this.objects.setCollision(BLOCKING).setDepth(1);
+    this.objects.setCollision(SOLID).setDepth(1);
 
     const solids = this.physics.add.staticGroup();
     const solid = (x: number, y: number, w: number, h: number) => {
@@ -2710,7 +2760,7 @@ class VillageScene extends PlayScene {
     G.data.entry = ""; G.data.scene = "Village";
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, this.objects);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.physics.add.collider(this.player, solids);
     // A flock of sparrows works the square for crumbs.
     const flock: Animal[] = [];
