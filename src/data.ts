@@ -107,6 +107,9 @@ export const ITEMS: Record<string, ItemDef> = {
   Mushrooms: { id: "Mushrooms", value: 4, name: "Mushrooms", kind: "material", desc: "Good eating, mostly. Some bring visions, or death." },
   Ivy: { id: "Ivy", value: 2, name: "Ivy", kind: "material", desc: "Dionysus' evergreen: for crowns and the thyrsus." },
   Syrinx: { id: "Syrinx", value: 0, name: "Reed pipes", greek: "syrinx", kind: "material", desc: "Pan's pipes, a satyr's gift. Music Arts will use them." },
+  Must: { id: "Must", value: 3, name: "Must", greek: "gleukos", kind: "material", desc: "Sweet trodden grape juice. Left to work in the vat, it becomes wine." },
+  Wine: { id: "Wine", value: 12, name: "Wine", greek: "oinos", kind: "material", desc: "Dionysus' gift: for libations to any god, for guests, and for satyrs who have waited all year." },
+  Cutting: { id: "Cutting", value: 0, name: "Vine cutting", kind: "material", desc: "A cutting from a wild vine. Plant it in tilled soil at home: in a year it will bear." },
   Milk: { id: "Milk", value: 5, name: "Goat's milk", greek: "gala", kind: "material", desc: "Fresh from your goats. Cheese comes with the dairy." },
   Honey: { id: "Honey", value: 10, name: "Honey", greek: "meli", kind: "material", desc: "Sweet and sacred: food, medicine and a fine offering." },
   Wax: { id: "Wax", value: 4, name: "Beeswax", greek: "keros", kind: "material", desc: "For candles, writing tablets and sealing jars." },
@@ -236,3 +239,10 @@ export const PEACE_FOOD: Record<string, string[]> = {
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
 export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };
+
+// ---- the vineyard and the vat ----
+export const VAT_REPAIR: [string, number][] = [["Stone", 6], ["Wood", 4]];
+export const GRAPES_PER_MUST = 3; // grapes trodden for each measure of must
+export const FERMENT_DAYS = 6; // days the must works in the vat before it is wine
+export const VINE_BEARS_AFTER = 20; // days a planted cutting needs before its first vintage
+export const YOUNG_VINE_YIELD = 6;

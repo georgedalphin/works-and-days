@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
@@ -375,11 +375,22 @@ abstract class PlayScene extends Phaser.Scene {
 
   forageAt(tx: number, ty: number) { return this.spots.find((s) => s.tx === tx && s.ty === ty); }
 
-  gather(tx: number, ty: number): boolean {
+  /** Where this map is, for remembering cuttings taken. */
+  mapKey() { return "farm"; }
+
+  gather(tx: number, ty: number, tool: string | null = null): boolean {
     const s = this.forageAt(tx, ty);
     if (!s) return false;
     const d = s.def, name = LORE[d.id].name.toLowerCase();
     if (G.lore(d.id) < 1) { G.say(`You don't know ${LORE[d.id].vague} well enough to tell whether anything on it is good to gather. Investigate it (Q).`); return true; }
+    // With the sickle, a known wild vine gives a cutting for your own vineyard (once per vine).
+    if (d.id === "wildgrape" && tool === "sickle") {
+      const ck = `${this.mapKey()}:${s.k}`;
+      if (G.data.cuttings[ck] !== undefined) { G.say("You've already taken a cutting from this vine. Let it heal."); return true; }
+      G.data.cuttings[ck] = G.dayNumber;
+      G.say(`You take a cutting from the wild vine: ${give("Cutting", 1)}. Plant it in tilled soil at home.`);
+      return true;
+    }
     const picked = this.picked();
     if (!d.months.includes(G.data.month)) { G.say(`Nothing to gather from the ${name} now. It bears in ${d.bearsWhen}.`); return true; }
     if (picked[s.k] !== undefined && G.dayNumber - picked[s.k] < d.regrow) {
@@ -695,6 +706,8 @@ class FarmScene extends PlayScene {
   beeT = 0;
   cropSprites = new Map<string, Phaser.GameObjects.Image>();
   vine!: Phaser.GameObjects.Image;
+  vat!: Phaser.GameObjects.Image;
+  youngVines = new Map<string, Phaser.GameObjects.Image>();
 
   constructor() { super("Farm"); }
 
@@ -731,6 +744,8 @@ class FarmScene extends PlayScene {
     objs[9][18] = T.OLIVE; objs[12][19] = T.OLIVE;
     for (let y = HUT.ty; y < HUT.ty + 5; y++) for (let x = HUT.tx - 2; x < HUT.tx + HUT.w + 1; x++) objs[y][x] = -1;
     for (let y = WELL.ty - 1; y <= WELL.ty + 1; y++) for (let x = WELL.tx - 1; x <= WELL.tx + 1; x++) objs[y][x] = -1;
+    for (let y = 12; y <= 13; y++) for (let x = 20; x <= 21; x++) objs[y][x] = -1; // the treading vat
+    for (const k of Object.keys(G.data.vines)) { const [x, y] = k.split(",").map(Number); if (objs[y]) objs[y][x] = -1; }
     // The goat pen west of the path, and the beehive among flowers to the east.
     for (let y = PEN.y0 - 1; y <= PEN.y1 + 1; y++) for (let x = PEN.x0 - 1; x <= PEN.x1 + 1; x++) objs[y][x] = -1;
     for (let y = HIVE.ty - 1; y <= HIVE.ty + 1; y++) for (let x = HIVE.tx - 1; x <= HIVE.tx + 1; x++) objs[y][x] = -1;
@@ -780,6 +795,10 @@ class FarmScene extends PlayScene {
     solid(this.vine.x, this.vine.y + 8, 14, 6);
     this.cropSprites.clear();
     for (const k of Object.keys(G.data.crops)) this.drawCrop(k);
+    this.vat = this.add.image(20 * TILE + 16, 13 * TILE + 2, "vat", 0).setOrigin(0.5, 1).setDepth(13 * TILE);
+    solid(this.vat.x, this.vat.y - 6, 20, 8);
+    this.youngVines.clear();
+    for (const k of Object.keys(G.data.vines)) this.drawYoungVine(k);
 
     const signs = [
       { tx: 22, ty: MH - 3, text: "South: the road to the village, and beyond it, the wild." },
@@ -791,10 +810,12 @@ class FarmScene extends PlayScene {
     }
 
     const at = (tx: number, ty: number) => ({ x: tx * TILE + 8, y: ty * TILE + 8 });
+    const farm = this;
     this.targets = [
       { x: DOOR_X, y: (DOOR.ty + 1) * TILE, label: "Enter the hut", act: () => this.enterHouse() },
       { ...at(WELL.tx, WELL.ty), label: "Look at the well", act: () => G.say("A stone-lined well. With your water jar in hand, press Space here to fill it.") },
       { x: pithos.x, y: pithos.y + 6, label: "Trade with the miller's cart", act: () => ui(this).openMarket() },
+      { x: this.vat.x, y: this.vat.y - 2, get label() { return farm.vatLabel(); }, act: () => this.useVat() },
       { x: this.vine.x, y: this.vine.y + 4, get label() { return G.data.month === 1 && G.data.vineYear !== G.data.year ? "Pick grapes" : "Look at the vine"; }, act: () => this.tendVine() },
       { ...at(18, 9), label: "Look at the olive tree", act: () => G.say("An old olive tree, Athena's gift. Its fruit ripens in late autumn.") },
       { ...at(19, 12), label: "Look at the olive tree", act: () => G.say("An old olive tree, gnarled and patient.") },
@@ -948,6 +969,9 @@ class FarmScene extends PlayScene {
     this.updateAnimals(dt);
     this.manger.setFrame(G.data.manger > 0 ? 1 : 0);
     this.vine.setFrame(G.data.month === 1 && G.data.vineYear !== G.data.year ? 1 : 0);
+    const v = G.data.vat;
+    this.vat.setFrame(!v.repaired ? 0 : v.sealed >= 0 ? 3 : v.must > 0 ? 2 : 1);
+    for (const [k, img] of this.youngVines) img.setFrame(this.vineBearing(k) ? 1 : 0);
     this.trough.setFrame(G.data.trough > 0 ? 1 : 0);
     this.drawBees(dt);
     if (!this.common(dt)) return;
@@ -1027,11 +1051,94 @@ class FarmScene extends PlayScene {
     G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.aretai === "Night" ? "the night, Hades' time" : `${d.god}'s hour`}, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
   }
 
+  /** Grapes picked in Dionysus' hour, or by one he favors, are finer. */
+  grapeQuality() { return Math.min(3, 1 + (G.patron?.aretai === "Pneuma" ? 1 : 0) + (G.boon("Dionysus") >= 1 ? 1 : 0)); }
+
+  vineBearing(k: string) { const v = G.data.vines[k]; return !!v && G.data.month === 1 && G.dayNumber - v.planted >= VINE_BEARS_AFTER && v.picked !== G.data.year; }
+
+  drawYoungVine(k: string) {
+    const [x, y] = k.split(",").map(Number);
+    const img = this.add.image(x * TILE + 8, y * TILE + 14, "vine", 0).setOrigin(0.5, 1).setScale(0.75).setDepth(y * TILE + 12);
+    this.youngVines.set(k, img);
+  }
+
+  /** Space on a young vine: pick it when it bears, otherwise say how it's doing. */
+  workVine(x: number, y: number): boolean {
+    const k = `${x},${y}`, v = G.data.vines[k];
+    if (!v) return false;
+    if (this.vineBearing(k)) { v.picked = G.data.year; G.say(`You pick your young vine: ${give("Grapes", YOUNG_VINE_YIELD + mastery("vine", 2), this.grapeQuality())}.`); return true; }
+    const left = VINE_BEARS_AFTER - (G.dayNumber - v.planted);
+    G.say(v.picked === G.data.year ? "You've picked this vine for the year." : left > 0 ? `A young vine, taking root. It needs ${left} more day${left > 1 ? "s" : ""} before it can bear, and bears only in Metageitnion.` : "A young vine, well rooted. It will bear in Metageitnion.");
+    return true;
+  }
+
+  plantCutting(x: number, y: number) {
+    const k = `${x},${y}`;
+    if (!G.data.ground[k]) { G.say("Plant the cutting in tilled soil."); return; }
+    if (G.data.crops[k] || G.data.vines[k]) { G.say("Something is already growing there."); return; }
+    const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return;
+    G.removeItem("Cutting", 1);
+    G.data.vines[k] = { planted: G.dayNumber, picked: -1 };
+    this.drawYoungVine(k);
+    G.say(`You plant the vine cutting and firm the earth around it. In ${VINE_BEARS_AFTER} days it will have rooted, and it bears in Metageitnion.${b}`);
+  }
+
+  vatLabel() {
+    const v = G.data.vat;
+    if (!v.repaired) return `Repair the treading vat (${VAT_REPAIR.map(([i, n]) => `${n} ${ITEMS[i].name.toLowerCase()}`).join(", ")})`;
+    if (v.sealed >= 0) { const left = FERMENT_DAYS - (G.dayNumber - v.sealed); return left > 0 ? `The wine is working (${left} day${left > 1 ? "s" : ""})` : "Draw off the wine"; }
+    return G.count("Grapes") + G.count("WildGrapes") >= GRAPES_PER_MUST ? "Tread your grapes in the vat" : "The treading vat (bring grapes)";
+  }
+
+  useVat() {
+    const v = G.data.vat;
+    if (!v.repaired) {
+      const missing = VAT_REPAIR.filter(([i, n]) => G.count(i) < n);
+      if (missing.length) { G.say(`An old stone treading vat, cracked and overgrown. To repair it you need ${VAT_REPAIR.map(([i, n]) => `${n} ${ITEMS[i].name.toLowerCase()}`).join(" and ")}.`); return; }
+      const b = labor({ Earth: 3, Fire: 2 }, 6, "Techne"); if (b === null) return;
+      for (const [i, n] of VAT_REPAIR) G.removeItem(i, n);
+      v.repaired = true; this.breakFx(20, 12, T.STONE);
+      G.say(`You patch the cracks and clear the drain. The treading vat is whole again.${b}`);
+      return;
+    }
+    if (v.sealed >= 0) {
+      const left = FERMENT_DAYS - (G.dayNumber - v.sealed);
+      if (left > 0) { G.say(`The must is working in the sealed jars. ${left} more day${left > 1 ? "s" : ""}. You can hear it, faintly, if you lean close.`); return; }
+      const got = give("Wine", v.must, v.q);
+      v.must = 0; v.sealed = -1;
+      G.say(`You unseal the jars and draw off the wine: ${got}. Dionysus' gift.`);
+      if (!G.data.lore.tier.vine || G.data.lore.tier.vine < 2) { G.data.lore.tier.vine = 2; G.say("You understand the vine better now: Deep."); }
+      return;
+    }
+    const grapes = G.count("Grapes"), wild = G.count("WildGrapes");
+    if (grapes + wild < GRAPES_PER_MUST) { G.say(`Tread at least ${GRAPES_PER_MUST} clusters of grapes at a time. The old vine bears in Metageitnion; wild vines too.`); return; }
+    if (G.exhausted) { G.say("You are too exhausted to tread grapes. Rest."); return; }
+    ui(this).rhythm("Treading the grapes", "Aiolos and Dionysus: stamp on the beat. Press Space as the mark crosses the gold.", 5, (score) => this.treadDone(score));
+  }
+
+  /** Must from the treading, then sealed to ferment. Quality: the grapes, the treading, and Dionysus' hour. */
+  treadDone(score: number) {
+    const v = G.data.vat;
+    // Weigh the grapes' quality: wild grapes are poor stuff for wine.
+    let n = 0, qsum = 0;
+    for (const s of G.data.slots) if (s && (s.id === "Grapes" || s.id === "WildGrapes")) { n += s.qty; qsum += s.qty * (s.id === "WildGrapes" ? 0.5 : s.q ?? 1); }
+    const must = Math.floor(n / GRAPES_PER_MUST);
+    let take = must * GRAPES_PER_MUST;
+    for (const id of ["WildGrapes", "Grapes"]) { const t = G.removeItem(id, take); take -= t; }
+    const base = qsum / Math.max(1, n);
+    const great = score >= 11, dion = G.patron?.aretai === "Pneuma";
+    const q = Math.max(1, Math.min(3, Math.round(base) + (great ? 1 : 0) + (dion ? 1 : 0) - (score <= 4 ? 1 : 0)));
+    G.addFatigue(6);
+    v.must = must; v.q = q; v.sealed = G.dayNumber;
+    G.say(`You tread the grapes until your legs are purple to the knee: ${must} measure${must > 1 ? "s" : ""} of must, sealed in jars to work for ${FERMENT_DAYS} days.${great ? " A fine treading." : score <= 4 ? " A clumsy treading; the must is muddied." : ""}${dion ? " In Dionysus' hour, the god himself seems to stamp with you." : ""} It will be ${QUALITY[q]} wine.`);
+  }
+
   tendVine() {
     if (G.data.month !== 1) { G.say(`An old vine, older than you. Its grapes ripen in Metageitnion.`); return; }
     if (G.data.vineYear === G.data.year) { G.say("You've picked the vine clean this year."); return; }
     G.data.vineYear = G.data.year;
-    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4) + 2 * Math.max(0, G.boon("Dionysus")))}. Dionysus will want his share.`);
+    const q = this.grapeQuality();
+    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4) + 2 * Math.max(0, G.boon("Dionysus")), q)}. Tread them in the vat for wine.`);
   }
 
   subjectAt(): string | null {
@@ -1039,7 +1146,7 @@ class FarmScene extends PlayScene {
     const crop = G.data.crops[`${x},${y}`];
     if (crop) return crop.id;
     if (x === HIVE.tx && (y === HIVE.ty || y === HIVE.ty + 1)) return "bees";
-    if (x === 20 && (y === 10 || y === 11)) return "vine";
+    if ((x === 20 && (y === 10 || y === 11)) || G.data.vines[`${x},${y}`]) return "vine";
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     if (OBJ_SUBJECT[obj]) return OBJ_SUBJECT[obj];
     return obj === -1 ? "t3" : null;
@@ -1085,7 +1192,9 @@ class FarmScene extends PlayScene {
     const soil = G.data.ground[`${x},${y}`];
     const isWell = x === WELL.tx && (y === WELL.ty || y === WELL.ty + 1);
     if (this.tryStrike(tool)) return;
-    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y, tool)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.workVine(x, y)) return;
+    if (item?.id === "Cutting") { this.plantCutting(x, y); return; }
     if (this.workCrop(x, y, tool)) return;
     if (item && ITEMS[item.id].kind === "seed") {
       if (G.data.crops[`${x},${y}`]) { G.say("Something is already growing there."); return; }
@@ -1539,6 +1648,7 @@ class WildScene extends PlayScene {
   }
 
   picked() { return (this.rec.picked ??= {}); }
+  mapKey() { return this.key; }
 
   openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
 
@@ -1549,7 +1659,7 @@ class WildScene extends PlayScene {
     const tool = item && ITEMS[item.id].kind === "tool" ? item.id : null;
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     if (this.tryStrike(tool)) return;
-    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y, tool)) return;
     if (tool === "hoe") { G.say("Save the hoe for your own fields."); return; }
     if (tool === "jar") {
       if (this.objects.getTileAt(x, y)?.index !== T.WATER) { G.say("No water here."); return; }
@@ -1774,7 +1884,7 @@ class UIScene extends Phaser.Scene {
     this.itemName = this.add.text(W / 2, HOTBAR_Y - 12, "", { ...font, fontSize: "14px", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5, 1);
     this.promptText = this.add.text(W / 2, HOTBAR_Y - 36, "", { ...font, fontSize: "16px", color: "#fbe39a", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5, 1);
 
-    for (let i = 0; i < 4; i++) this.log.push(this.add.text(W / 2, H - 230 + i * 22, "", { ...font, fontSize: "15px", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5).setDepth(3));
+    for (let i = 0; i < 4; i++) this.log.push(this.add.text(W / 2, H - 240 + i * 22, "", { ...font, fontSize: "15px", stroke: "#1f1712", strokeThickness: 4, align: "center", wordWrap: { width: 860 } }).setOrigin(0.5, 0).setDepth(3));
 
     // Keys: 1-0 choose a hotbar slot, the wheel cycles, I or Tab opens the inventory.
     const kb = this.input.keyboard!;
@@ -1812,6 +1922,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: your Aretai and currencies.",
+      "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
       "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
       "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
       "Blows cost Fatigue; fall when spent and your Life Thread frays.",
@@ -1882,10 +1993,15 @@ class UIScene extends Phaser.Scene {
 
     G.messages.forEach((m) => (m.t += dt));
     G.messages = G.messages.filter((m) => m.t < 6).slice(-4);
-    this.log.forEach((t, i) => {
-      const m = G.messages[i];
-      t.setText(m ? m.text : "").setAlpha(m ? Math.min(1, (6 - m.t) / 1.5) : 0);
-    });
+    // Stack the messages upward from just above the prompt, so long ones wrap instead of running off screen.
+    let y = HOTBAR_Y - 64;
+    for (let i = this.log.length - 1; i >= 0; i--) {
+      const t = this.log[i], m = G.messages[i];
+      const txt = m ? m.text : "";
+      if (t.text !== txt) t.setText(txt);
+      t.setAlpha(m ? Math.min(1, (6 - m.t) / 1.5) : 0);
+      if (txt) { y -= t.height + 2; t.setY(y); }
+    }
   }
 
   drawBars() {
@@ -2130,6 +2246,42 @@ class UIScene extends Phaser.Scene {
     G.data.stranger = { ...st, god: "", hosted: true }; // the god departs; the bench is empty in spirit
   }
 
+  // ---------------------------------------------------------------- a rhythm test (treading, and later dance and music)
+  rhythm(title: string, help: string, beats: number, done: (score: number) => void) {
+    if (this.inv) this.toggleInventory();
+    this.modal = true;
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 620, h = 190, x0 = (W - w) / 2, y0 = (H - h) / 2 - 40;
+    const root = this.add.container(0, 0).setDepth(26);
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 14, title, { ...font, fontSize: "18px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 42, help, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    const bx = x0 + 60, bw = w - 120, by = y0 + 90;
+    root.add(this.add.rectangle(bx, by, bw, 18, 0x3a2c22).setOrigin(0, 0));
+    root.add(this.add.rectangle(bx + bw / 2 - 40, by, 80, 18, 0x6a2a4a).setOrigin(0, 0));
+    root.add(this.add.rectangle(bx + bw / 2 - 12, by, 24, 18, 0xf2c14e).setOrigin(0, 0));
+    const marker = this.add.rectangle(bx, by - 4, 3, 26, 0xf2e6c9).setOrigin(0.5, 0); root.add(marker);
+    const status = this.add.text(W / 2, y0 + 128, "", { ...font, fontSize: "14px", align: "center" }).setOrigin(0.5, 0); root.add(status);
+    const key = this.input.keyboard!.addKey("SPACE");
+    let t = 0, beat = 0, score = 0, wait = 0;
+    this.ritual = { art: ARTS.hospitality, use: new Set(), step: 0, results: [], t: 0 }; // holds Space for the rhythm
+    const tick = (_: number, dms: number) => {
+      const dt = dms / 1000;
+      if (wait > 0) { wait -= dt; if (wait <= 0 && beat >= beats) finish(); return; }
+      t += dt * (1.4 + beat * 0.15);
+      marker.x = bx + ((Math.sin(t * Math.PI - Math.PI / 2) + 1) / 2) * bw;
+      if (Phaser.Input.Keyboard.JustDown(key)) {
+        const off = Math.abs(marker.x - (bx + bw / 2));
+        const pts = off <= 12 ? 3 : off <= 40 ? 1 : 0;
+        score += pts; beat++;
+        status.setText(`${"●".repeat(beat)}${"○".repeat(beats - beat)}   ${pts === 3 ? "Right on the beat!" : pts ? "Close." : "Off the beat."}   (${score} of ${beats * 3})`);
+        wait = beat >= beats ? 0.9 : 0.25;
+      }
+    };
+    const finish = () => { this.events.off("update", tick); root.destroy(); this.ritual = undefined; this.modal = false; done(score); };
+    this.events.on("update", tick);
+  }
+
   // ---------------------------------------------------------------- the Mythborn
   talkToMyth(id: string, said?: string) {
     const d = MYTH[id], m = mythRec(id), today = G.dayNumber, rung = rungOf(m.days);
@@ -2140,7 +2292,11 @@ class UIScene extends Phaser.Scene {
     const opts: { label: string; fn: () => void }[] = [];
     const held = G.selectedItem;
     if (m.last !== today) {
-      if (held && d.offers.includes(held.id)) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => { G.removeItem(held.id, 1); this.appeaseMyth(id, `You set down your ${ITEMS[held.id].name.toLowerCase()}. ${id === "satyrs" ? (held.id.includes("Grapes") ? "They fall on it with whoops: not wine, but wine-to-be!" : "They pass it round, delighted.") : "She takes it with a small, grave smile."}`); } });
+      if (held && d.offers.includes(held.id)) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
+        G.removeItem(held.id, 1);
+        if (id === "satyrs" && held.id === "Wine") { m.days++; this.appeaseMyth(id, "WINE! The satyrs fall on the jar with a roar that shakes the leaves. It counts for two days of friendship."); return; }
+        this.appeaseMyth(id, `You set down your ${ITEMS[held.id].name.toLowerCase()}. ${id === "satyrs" ? (held.id.includes("Grapes") ? "They fall on it with whoops: not wine, but wine-to-be!" : "They pass it round, delighted.") : "She takes it with a small, grave smile."}`);
+      } });
       opts.push({ label: d.check.label, fn: () => {
         const a = G.data.aretai[d.check.aretai] ?? 3, target = a + 2 + rung, roll = 1 + Math.floor(Math.random() * 12);
         const odds = `(d12 ${roll}, needed 1–${target})`;
@@ -2195,6 +2351,8 @@ class UIScene extends Phaser.Scene {
       const artemisShare = G.data.deerDebt > 0 && (held.id === "Antler" || held.id === "Meat");
       const god = artemisShare ? "Artemis" : OFFER_PATRON[held.id];
       if (god) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()} to ${CHTHONIC.includes(god) ? "the one below" : god}`, fn: () => this.offer(where, held.id, god, cap) });
+      // Wine can be poured out to any god: a libation.
+      if (held.id === "Wine") opts.push({ label: "Pour a libation to another god", fn: () => this.showTalk("A libation to whom?", "Wine poured out is welcome to every god", "", TWELVE.map((g) => ({ label: `${g} (${G.favor(g) >= 0 ? "+" : ""}${G.favor(g)})`, fn: () => this.offer(where, "Wine", g, cap) }))) });
     }
     const text = said ?? (where === "home"
       ? `The household altar in its niche, a little smoke-dark. Pray here once a day: every ${DEVOTION_STEP} days of prayer to a god earns their notice (+1), up to +${HOME_CAP}. Offerings of what belongs to a god please them too, up to +${HOME_CAP} here.${G.data.prayedDay === today ? "\n\nYou have prayed today." : ""}`

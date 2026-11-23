@@ -35,7 +35,7 @@ export const BOONS: Record<string, string> = {
 export const OFFER_PATRON: Record<string, string> = {
   Millet: "Demeter", Chickpeas: "Demeter", Melon: "Demeter", Plum: "Demeter", Purslane: "Demeter", Oats: "Demeter",
   Thyme: "Demeter", Honey: "Demeter", Wax: "Demeter", Flowers: "Demeter", Fiber: "Demeter",
-  Grapes: "Dionysus", WildGrapes: "Dionysus", Mushrooms: "Dionysus", Milk: "Dionysus",
+  Grapes: "Dionysus", WildGrapes: "Dionysus", Wine: "Dionysus", Must: "Dionysus", Mushrooms: "Dionysus", Milk: "Dionysus",
   Capers: "Aphrodite", Feather: "Aphrodite",
   Clay: "Hephaestus", Ochre: "Hephaestus", Stone: "Hephaestus",
   Wood: "Zeus", Meat: "Zeus",
@@ -89,6 +89,7 @@ export const ARTS: Record<string, Art> = {
       { item: "Flowers", label: "A garland of wildflowers" },
       { item: "Grapes", label: "Grapes for the wine" },
       { item: "Millet", label: "Grain for the hearth" },
+      { item: "Wine", label: "Wine to pour for Zeus Xenios" },
     ],
     timing: [
       { id: "zeusHour", label: "Zeus's hour (12)", cr: -2 },

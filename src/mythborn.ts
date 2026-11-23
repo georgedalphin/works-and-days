@@ -30,7 +30,7 @@ export const MYTH: Record<string, MythDef> = {
   },
   satyrs: {
     id: "satyrs", kind: "Satyrs", god: "Dionysus",
-    offers: ["Grapes", "WildGrapes", "Honey", "Milk"],
+    offers: ["Wine", "Grapes", "WildGrapes", "Honey", "Milk"],
     check: { aretai: "Aiolos", label: "Join the dance (Aiolos)" },
     lines: [
       ["Three satyrs caper round a jar, goat-legged and garlanded, singing badly. They eye your pack with interest.",

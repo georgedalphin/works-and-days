@@ -295,6 +295,20 @@ export function makeTextures(scene: Phaser.Scene) {
   });
   sat.add(0, 0, 0, 0, 16, 16); sat.add(1, 0, 16, 0, 16, 16);
 
+  // The treading vat: broken, empty, full of must, and with sealed jars working beside it.
+  const vat = canvasTex(scene, "vat", 96, 24, (c) => {
+    for (let f = 0; f < 4; f++) {
+      const o = f * 24;
+      px(c, o + 2, 20, 20, 3, "rgba(0,0,0,0.2)");
+      px(c, o + 2, 8, 20, 13, f === 0 ? "#9c968a" : "#c4bdae"); px(c, o + 4, 10, 16, 7, f === 0 ? "#6c675e" : "#8d877b");
+      px(c, o + 20, 16, 4, 3, "#a49e91"); // spout
+      if (f === 0) { px(c, o + 8, 8, 1, 6, "#4a453e"); px(c, o + 14, 12, 4, 1, "#4a453e"); px(c, o + 3, 6, 4, 3, "#6f8a3a"); px(c, o + 17, 5, 4, 4, "#5a6b2c"); }
+      if (f === 2) { px(c, o + 4, 10, 16, 7, "#6a2a4a"); px(c, o + 6, 11, 4, 1, "#8a4a6a"); }
+      if (f === 3) { px(c, o + 4, 12, 16, 5, "#5a2a3a"); for (const x of [1, 8, 15]) { px(c, o + x, 0, 6, 8, "#c4703f"); px(c, o + x + 1, 0, 4, 1, "#9c5532"); px(c, o + x + 1, 3, 4, 1, "#2a1d14"); } }
+    }
+  });
+  for (let f = 0; f < 4; f++) vat.add(f, 0, f * 24, 0, 24, 24);
+
   // The village buildings.
   canvasTex(scene, "mill", 64, 56, (c) => {
     px(c, 4, 20, 56, 34, "#d8ccb0"); px(c, 4, 48, 56, 6, "#b8a888"); for (let y = 24; y < 48; y += 6) px(c, 4, y, 56, 1, "#c4b898");
@@ -333,7 +347,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -404,6 +418,9 @@ function drawIcon(c: Ctx, o: number, id: string) {
   if (CROP_COL[id]) { drawCrop(c, o, id, 3); return; }
   const wood = "#8a5f35", bronze = "#c98a3e", bronzeD = "#9c6528";
   switch (id) {
+    case "Must": px(c, o + 4, 5, 8, 9, "#c4703f"); px(c, o + 5, 3, 6, 2, "#9c5532"); px(c, o + 5, 6, 6, 3, "#7a2a4a"); px(c, o + 4, 13, 8, 1, "#9c5532"); break;
+    case "Wine": px(c, o + 6, 1, 4, 3, "#9c5532"); px(c, o + 5, 4, 6, 8, "#c4703f"); px(c, o + 4, 6, 8, 5, "#c4703f"); px(c, o + 6, 12, 4, 2, "#9c5532"); px(c, o + 5, 7, 6, 2, "#2a1d14"); px(c, o + 6, 7, 1, 1, "#e8c86a"); px(c, o + 9, 7, 1, 1, "#e8c86a"); break;
+    case "Cutting": for (let i = 0; i < 11; i++) px(c, o + 4 + i, 13 - i, 1, 1, "#6b4a2b"); px(c, o + 9, 5, 3, 3, "#5e7f34"); px(c, o + 6, 9, 2, 2, "#71953f"); break;
     case "Ivy": for (const [x, y] of [[4, 3], [8, 5], [5, 8], [9, 10], [6, 12]]) { px(c, o + x, y, 3, 3, "#3f6a2a"); px(c, o + x + 1, y, 1, 1, "#5e8a3a"); } for (let i = 0; i < 11; i++) px(c, o + 7 + Math.round(Math.sin(i) * 2), 2 + i, 1, 1, "#4a3a22"); break;
     case "Syrinx": for (let i = 0; i < 6; i++) px(c, o + 3 + i * 2, 3, 2, 10 - i, "#c9b48f"); px(c, o + 3, 8, 12, 1, "#8a6a3a"); break;
     case "bow":
