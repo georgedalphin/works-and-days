@@ -105,6 +105,8 @@ export const ITEMS: Record<string, ItemDef> = {
   Clay: { id: "Clay", value: 2, name: "Clay", kind: "material", desc: "For pottery, bricks and votive figurines." },
   Ochre: { id: "Ochre", value: 5, name: "Ochre", kind: "material", desc: "Earth pigment for paint, and for funeral and ritual marks." },
   Mushrooms: { id: "Mushrooms", value: 4, name: "Mushrooms", kind: "material", desc: "Good eating, mostly. Some bring visions, or death." },
+  Ivy: { id: "Ivy", value: 2, name: "Ivy", kind: "material", desc: "Dionysus' evergreen: for crowns and the thyrsus." },
+  Syrinx: { id: "Syrinx", value: 0, name: "Reed pipes", greek: "syrinx", kind: "material", desc: "Pan's pipes, a satyr's gift. Music Arts will use them." },
   Milk: { id: "Milk", value: 5, name: "Goat's milk", greek: "gala", kind: "material", desc: "Fresh from your goats. Cheese comes with the dairy." },
   Honey: { id: "Honey", value: 10, name: "Honey", greek: "meli", kind: "material", desc: "Sweet and sacred: food, medicine and a fine offering." },
   Wax: { id: "Wax", value: 4, name: "Beeswax", greek: "keros", kind: "material", desc: "For candles, writing tablets and sealing jars." },

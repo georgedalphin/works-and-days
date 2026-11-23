@@ -9,13 +9,14 @@ import { Animal, SPECIES, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
 import { essencePools } from "./data";
+import { MYTH, RUNGS, RUNG_DAYS, NAIAD_NAMES, SATYR_NAMES, SPRING_SITES } from "./mythborn";
 import { VILLAGERS, REL_MIN, REL_MAX, relTier, relLabel, UPGRADES, toolName, STRANGER_KINDS, STRANGER_DAYS, GOD_CHANCE, GUEST_FOOD, type Villager } from "./village";
 import type { ScreenRec } from "./state";
 
 const W = 960, H = 640, ZOOM = 3;
 let G: GameState;
 
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER];
 const TREE_HITS = 3;
 
 type Dir = 0 | 1 | 2 | 3; // down, left, right, up
@@ -77,6 +78,10 @@ function study(id: string): boolean {
   G.say(`You study ${loreName(id)} closely, but nothing new comes clear (${odds}). Try again tomorrow.`);
   return false;
 }
+
+/** How far along the path of befriending a Mythborn neighbor is (0 Wary .. 4 Ally). */
+const rungOf = (days: number) => RUNG_DAYS.reduce((r, need, i) => (days >= need ? i : r), 0);
+const mythRec = (id: string) => (G.data.myth[id] ??= { days: 0, last: -1, gone: -1, name: id === "naiad" ? NAIAD_NAMES[G.data.seed % NAIAD_NAMES.length] : SATYR_NAMES[G.data.seed % SATYR_NAMES.length], gift: -1 });
 
 /** Poseidon's favor deepens your water jar. */
 const jarCap = () => Math.max(10, JAR_CAPACITY + 5 * G.boon("Poseidon"));
@@ -515,8 +520,12 @@ abstract class PlayScene extends Phaser.Scene {
   /** Is this spot open ground an arrow can stick in? */
   openGround(_x: number, _y: number) { return true; }
 
+  /** An arrow that falls among the Mythborn: an offense, not a hunt. */
+  mythHit(_x: number, _y: number) { return false; }
+
   /** An arrow strikes only where it falls. */
   land(x: number, y: number) {
+    if (this.mythHit(x, y)) return;
     const hit = this.animals.find((a) => a.state !== "dead" && a.state !== "gone" && a.sprite.visible && a.kind !== "goat"
       && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= QUARRY[a.kind].size + 2);
     const goat = this.animals.find((a) => a.kind === "goat" && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= 10);
@@ -990,7 +999,7 @@ class FarmScene extends PlayScene {
     const d = CROPS[c.id];
     if (c.withered) { delete G.data.crops[k]; this.drawCrop(k); G.say(`You pull up the withered ${d.name.toLowerCase()}.`); return true; }
     if (this.isRipe(c)) {
-      const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0));
+      const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0) + (c.nymph ? 1 : 0));
       const dem = G.boon("Demeter"); // Demeter's favor (or anger) at the harvest
       const extra = dem !== 0 && Math.random() < 0.15 * Math.abs(dem) ? Math.sign(dem) : 0;
       const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra), q);
@@ -1094,12 +1103,13 @@ class FarmScene extends PlayScene {
           this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); }
         return;
       case "jar":
-        if (isWell) { G.data.jarWater = jarCap(); G.say("You fill the water jar at the well."); return; }
+        if (isWell) { G.data.jarWater = jarCap(); G.data.jarSpring = false; G.say("You fill the water jar at the well."); return; }
         if (x === PEN.x1 - 1 && y === PEN.y0 + 1) { this.fillTrough(); return; }
         if (!soil) { G.say("Water only does good on tilled soil."); return; }
         if (soil === "wet") { G.say("This soil is already watered."); return; }
         if (G.data.jarWater <= 0) { G.say("The jar is empty. Fill it at the well."); return; }
         G.data.jarWater -= 1; this.setGround(x, y, "wet");
+        if (G.data.jarSpring && G.data.crops[`${x},${y}`]) { G.data.crops[`${x},${y}`].nymph = true; G.say("The Naiad's water sinks in, and the plant seems to lift."); }
         if (G.data.jarWater === 0) G.say("You water the soil. The jar is empty now.");
         return;
       default:
@@ -1199,6 +1209,7 @@ const PROFILES: Record<number, Profile> = {
        creatures: [["hare", 1], ["bird", 1], ["boar", 1]], features: ["Stone outcrop", "Ore seam", "Scree slope"] },
 };
 const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
+const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 };
 
 /** A stable seed for each screen of this save's world. */
 function screenSeed(wx: number, wy: number) {
@@ -1209,6 +1220,12 @@ function screenSeed(wx: number, wy: number) {
 
 class WildScene extends PlayScene {
   key = "";
+  hasSpring = false;
+  hasRevel = false;
+  naiad?: Phaser.GameObjects.Image;
+  satyrs: Phaser.GameObjects.Image[] = [];
+  danceT = 0;
+  satyrsNoticed = false;
   rec!: ScreenRec;
   objects!: Phaser.Tilemaps.TilemapLayer;
   open: Record<Side, boolean> = { N: true, S: true, E: true, W: true };
@@ -1286,6 +1303,16 @@ class WildScene extends PlayScene {
     const fy = 4 + Math.floor(gen() * (WH - 8));
     this.stampFeature(objs, fx, fy, this.rec.feature, gen);
     for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE) objs[y][x] = -1; }
+    // Anchors: the Naiad's spring lies at a near site fixed for this world; the satyrs revel in the first flowering valley you find.
+    if (!G.data.anchors.spring) { const r0 = rng(G.data.seed ^ 0x5eed5); const [ax, ay] = SPRING_SITES[Math.floor(r0() * SPRING_SITES.length)]; G.data.anchors.spring = `${ax},${ay}`; }
+    if (!G.data.anchors.satyrs && this.rec.terrain === 1 && Math.abs(wx) + Math.abs(wy) >= 1 && this.key !== G.data.anchors.spring) G.data.anchors.satyrs = this.key;
+    this.hasSpring = this.key === G.data.anchors.spring;
+    this.hasRevel = this.key === G.data.anchors.satyrs;
+    const ring = (cx0: number, cy0: number, rad: number, fn: (x: number, y: number, d: number) => void) => {
+      for (let y = cy0 - rad; y <= cy0 + rad; y++) for (let x = cx0 - rad; x <= cx0 + rad; x++) if (x > 1 && y > 1 && x < WW - 2 && y < WH - 2) { const d = Math.hypot(x - cx0, y - cy0); if (d <= rad + 0.3) fn(x, y, d); }
+    };
+    if (this.hasSpring) ring(SPRING.x, SPRING.y, 4, (x, y, d) => { objs[y][x] = d <= 1.5 ? T.WATER : d > 3.2 && gen() < 0.5 ? T.FLOWERS : -1; if (d <= 3) ground[y][x] = T.MEADOW; });
+    if (this.hasRevel) ring(REVEL.x, REVEL.y, 5, (x, y, d) => { objs[y][x] = d > 4.3 && gen() < 0.6 ? T.FLOWERS : -1; });
 
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
@@ -1314,6 +1341,7 @@ class WildScene extends PlayScene {
     this.placeForage(fgen, this.rec.terrain, 4 + Math.floor(fgen() * 4), (x, y) =>
       x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH);
     this.spawnCreatures(p, gen);
+    this.spawnMythborn();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -1376,6 +1404,79 @@ class WildScene extends PlayScene {
     }
   }
 
+  /** The Naiad by her pool, and the satyrs round their wine jar. */
+  spawnMythborn() {
+    this.naiad = undefined; this.satyrs = []; this.satyrsNoticed = false;
+    if (this.hasSpring) {
+      mythRec("naiad");
+      this.naiad = this.add.image(SPRING.x * TILE + 8, (SPRING.y + 2) * TILE + 10, "naiad").setDepth((SPRING.y + 3) * TILE);
+      this.tweens.add({ targets: this.naiad, alpha: 0.7, duration: 1400, yoyo: true, repeat: -1 });
+      const n = this.naiad;
+      this.targets.push({ x: n.x, y: n.y + 2, get label() { return n.visible ? (rungOf(mythRec("naiad").days) >= 1 ? `Speak with ${mythRec("naiad").name}` : "Approach the Naiad") : "The spring"; },
+        act: () => (n.visible ? ui(this).talkToMyth("naiad") : G.say(G.isDay ? "The pool is still. She has gone beneath for today." : "The pool is dark and still. She is somewhere beneath."))});
+      if (G.data.myth.naiad && G.data.myth.naiad.days === 0) G.say("A spring wells up here, clear and cold, and someone is watching you from the water.");
+    }
+    if (this.hasRevel) {
+      mythRec("satyrs");
+      this.add.image(REVEL.x * TILE + 8, REVEL.y * TILE + 6, "pithos").setDepth(REVEL.y * TILE + 12);
+      for (let i = 0; i < 3; i++) this.satyrs.push(this.add.image(REVEL.x * TILE, REVEL.y * TILE, "satyr", 0));
+      this.targets.push({ x: REVEL.x * TILE + 8, y: REVEL.y * TILE + 14, get label() { return rungOf(mythRec("satyrs").days) >= 1 ? `Join ${mythRec("satyrs").name} and the satyrs` : "Approach the satyrs"; }, act: () => ui(this).talkToMyth("satyrs") });
+      G.say(G.isDay ? "Pipes and laughter: satyrs are dancing in the meadow." : "Torchlight and drunken song: satyrs are reveling in the dark.");
+    }
+  }
+
+  updateMythborn(dt: number) {
+    const today = G.dayNumber;
+    if (this.naiad) {
+      const rec = mythRec("naiad");
+      this.naiad.setVisible(G.isDay && rec.gone !== today);
+      // Shy: running at her sends her under the water for the day.
+      const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
+      if (this.naiad.visible && rungOf(rec.days) === 0 && running && Math.hypot(this.naiad.x - this.player.x, this.naiad.y - this.player.y) < 64) {
+        rec.gone = today; G.say("The Naiad starts at your rush and slips beneath the water. Gone, for today.");
+      }
+    }
+    if (this.satyrs.length) {
+      this.danceT += dt * (G.isDay ? 0.9 : 1.6);
+      const cx = REVEL.x * TILE + 8, cy = REVEL.y * TILE + 8;
+      this.satyrs.forEach((s, i) => {
+        const a = this.danceT + (i * Math.PI * 2) / 3;
+        s.setPosition(cx + Math.cos(a) * 26, cy + Math.sin(a) * 15).setFrame(Math.floor(this.danceT * 4 + i) % 2).setDepth(cy + Math.sin(a) * 15 + 8);
+      });
+      // An unfriendly band may make mischief when you come near: a d12 against their Aggression.
+      const rec = mythRec("satyrs");
+      if (!this.satyrsNoticed && Math.hypot(cx - this.player.x, cy - this.player.y) < 72) {
+        this.satyrsNoticed = true;
+        const agg = 3 + (G.isDay ? 0 : 2), roll = 1 + Math.floor(Math.random() * 12);
+        const loot = G.data.slots.filter((s) => s && ITEMS[s.id].kind !== "tool");
+        if (rungOf(rec.days) === 0 && roll <= agg && loot.length && !rec.stolen) {
+          const s = loot[Math.floor(Math.random() * loot.length)]!;
+          G.removeItem(s.id, 1); rec.stolen = s.id;
+          this.cameras.main.shake(80, 0.002);
+          G.say(`A satyr darts in, snatches your ${ITEMS[s.id].name.toLowerCase()} and dances off laughing! (d12 ${roll}${G.lore("satyr") >= 2 ? `, Aggression ${agg}` : ""}) Win them over and they may give it back.`);
+        }
+      }
+    }
+  }
+
+  /** Arrows among the Mythborn offend them and their god. */
+  mythHit(x: number, y: number) {
+    const near = (o?: Phaser.GameObjects.Image) => !!o && o.visible && Math.hypot(o.x - x, o.y + 3 - y) < 12;
+    if (near(this.naiad)) {
+      const rec = mythRec("naiad"); rec.gone = G.dayNumber; rec.days = Math.max(0, rec.days - 2);
+      G.addFavor("Artemis", -2); G.earn("Hubris", 1, "you shot at a nymph");
+      G.say("Your arrow cuts the water where the Naiad stood. She is gone, and the spring runs cold. (Artemis -2)");
+      return true;
+    }
+    if (this.satyrs.some((s) => near(s))) {
+      const rec = mythRec("satyrs"); rec.days = Math.max(0, rec.days - 2);
+      G.addFavor("Dionysus", -2); G.earn("Hubris", 1, "you shot at the god's revelers");
+      G.say("The satyrs scatter, shrieking curses, then come creeping back to glare at you. (Dionysus -2)");
+      return true;
+    }
+    return false;
+  }
+
   /** Wolves hunt the forests from dusk. */
   wolvesOut = false;
   maybeWolves(gen: () => number = Math.random) {
@@ -1395,6 +1496,7 @@ class WildScene extends PlayScene {
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     this.updateAnimals(dt);
+    this.updateMythborn(dt);
     if (!this.common(dt)) return;
     this.maybeWolves();
     const px = this.player.x, py = this.player.y;
@@ -1406,8 +1508,13 @@ class WildScene extends PlayScene {
   }
 
   subjectAt(): string | null {
+    const [dx, dy] = DV[this.facing];
+    const fx = this.player.x + dx * 14, fy = this.player.y + 4 + dy * 14;
+    if (this.naiad?.visible && Math.hypot(this.naiad.x - fx, this.naiad.y - fy) < 24) return "naiad";
+    if (this.satyrs.some((s) => Math.hypot(s.x - fx, s.y - fy) < 30)) return "satyr";
     const [x, y] = this.facingTile();
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (obj === T.WATER) return "naiad";
     if (OBJ_SUBJECT[obj]) return OBJ_SUBJECT[obj];
     return obj === -1 ? `t${this.rec.terrain}` : null;
   }
@@ -1444,7 +1551,13 @@ class WildScene extends PlayScene {
     if (this.tryStrike(tool)) return;
     if (tool !== "hoe" && tool !== "jar" && this.gather(x, y)) return;
     if (tool === "hoe") { G.say("Save the hoe for your own fields."); return; }
-    if (tool === "jar") { G.say("No water here. Springs and rivers come with the wider world."); return; }
+    if (tool === "jar") {
+      if (this.objects.getTileAt(x, y)?.index !== T.WATER) { G.say("No water here."); return; }
+      G.data.jarWater = jarCap();
+      if (rungOf(mythRec("naiad").days) >= 1) { G.data.jarSpring = true; G.say(`You fill your jar from ${mythRec("naiad").name}'s spring, with her blessing. Her water makes crops finer.`); }
+      else { G.data.jarSpring = false; G.addFavor("Artemis", -1); G.say("You fill your jar without asking. The pool goes still and cold beneath your hands. (Artemis -1)"); }
+      return;
+    }
     workObject(this, tool, obj, x, y, `${this.key}:${x},${y}`);
   }
 }
@@ -1586,7 +1699,7 @@ class VillageScene extends PlayScene {
   useItem() {
     const [x, y] = this.facingTile();
     const tool = G.selectedItem && ITEMS[G.selectedItem.id].kind === "tool" ? G.selectedItem.id : null;
-    if (tool === "jar" && x === 16 && (y === 14 || y === 15)) { G.data.jarWater = jarCap(); G.say("You fill the water jar at the village well."); return; }
+    if (tool === "jar" && x === 16 && (y === 14 || y === 15)) { G.data.jarWater = jarCap(); G.data.jarSpring = false; G.say("You fill the water jar at the village well."); return; }
     if (tool) { G.say("Not in the village. People live here."); return; }
   }
 }
@@ -1699,6 +1812,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: your Aretai and currencies.",
+      "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
       "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
       "Blows cost Fatigue; fall when spent and your Life Thread frays.",
       "",
@@ -1719,7 +1833,7 @@ class UIScene extends Phaser.Scene {
       "Stay up past the second watch of the night and you will collapse.",
       "Watered soil dries overnight. Your life is saved each dawn.",
     ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 880, 636, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const hbg = this.add.rectangle(W / 2, H / 2, 900, 638, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
@@ -1917,7 +2031,13 @@ class UIScene extends Phaser.Scene {
         "Pray at your household altar each day and the gods will know your face. To be known by name, bring offerings here, to the village altar."])}"`);
     } });
     if (v.id === "eudora") {
-      opts.push({ label: "Any news?", fn: () => this.talkTo(v, `"${pick(v.lines[rec.rel >= 4 ? "friend" : "new"])}"`) });
+      opts.push({ label: "Any news?", fn: () => {
+        const sp = G.data.anchors.spring ?? (() => { const r0 = rng(G.data.seed ^ 0x5eed5); const [ax, ay] = SPRING_SITES[Math.floor(r0() * SPRING_SITES.length)]; return (G.data.anchors.spring = `${ax},${ay}`); })();
+        const [ax, ay] = sp.split(",").map(Number);
+        const dir = `${ay < 0 ? "north" : ay > 0 ? "south" : ""}${ax > 0 ? (ay ? "-east" : "east") : ""}`;
+        const spring = `"A herdsman told me there's a spring ${Math.abs(ax) + Math.abs(ay)} days' walk… well, ${Math.abs(ax) + Math.abs(ay)} stretches of country ${dir} of your place, with a nymph in it. Mind your manners there, and don't go charging up."`;
+        this.talkTo(v, Math.random() < 0.4 ? spring : `"${pick(v.lines[rec.rel >= 4 ? "friend" : "new"])}"`);
+      } });
       const st = G.data.stranger;
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
@@ -2008,6 +2128,57 @@ class UIScene extends Phaser.Scene {
     G.earn("Kleos", 1, `you hosted ${st.god} unknowing`);
     this.talkToStranger(`As you set the food before them, the stranger straightens, and grows tall, and the light changes. It is ${st.god}! ${boon}\n\n(Favor with ${st.god} +${2 * twice}, with Zeus +${twice}. Your Fatigue eases and your Essence fills.)`);
     G.data.stranger = { ...st, god: "", hosted: true }; // the god departs; the bench is empty in spirit
+  }
+
+  // ---------------------------------------------------------------- the Mythborn
+  talkToMyth(id: string, said?: string) {
+    const d = MYTH[id], m = mythRec(id), today = G.dayNumber, rung = rungOf(m.days);
+    const title = id === "naiad" ? (rung >= 1 ? `${m.name}, the Naiad` : "The Naiad") : rung >= 1 ? `${m.name} and the satyrs` : "The satyrs";
+    const next = RUNG_DAYS[rung + 1];
+    const sub = `${d.kind} · ${d.god}'s · ${RUNGS[rung]}${next ? ` (appeased on ${m.days} of ${next} days for ${RUNGS[rung + 1]})` : ""}`;
+    const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
+    const opts: { label: string; fn: () => void }[] = [];
+    const held = G.selectedItem;
+    if (m.last !== today) {
+      if (held && d.offers.includes(held.id)) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => { G.removeItem(held.id, 1); this.appeaseMyth(id, `You set down your ${ITEMS[held.id].name.toLowerCase()}. ${id === "satyrs" ? (held.id.includes("Grapes") ? "They fall on it with whoops: not wine, but wine-to-be!" : "They pass it round, delighted.") : "She takes it with a small, grave smile."}`); } });
+      opts.push({ label: d.check.label, fn: () => {
+        const a = G.data.aretai[d.check.aretai] ?? 3, target = a + 2 + rung, roll = 1 + Math.floor(Math.random() * 12);
+        const odds = `(d12 ${roll}, needed 1–${target})`;
+        if (roll <= target) this.appeaseMyth(id, id === "naiad" ? `You sit by the water and pray without words. After a long while she sits beside you. ${odds}` : `You leap into the ring and somehow keep the step. The satyrs roar with delight. ${odds}`);
+        else if (id === "naiad") { m.gone = today; this.closeTalk(); G.say(`Your prayer stumbles, and when you look up she is gone beneath the water. ${odds}`); }
+        else { G.addFatigue(8); m.last = today; this.talkToMyth(id, `You trip over a hoof and land in the grass. The satyrs howl with laughter and won't stop. (+8 Fatigue) ${odds}`); }
+      } });
+    }
+    if (rung >= 3 && m.gift !== today) {
+      if (id === "naiad") opts.push({ label: "Bathe in the spring", fn: () => { m.gift = today; G.addFatigue(-40); this.talkToMyth(id, "You bathe in the cold, clear water, and come out feeling new. (-40 Fatigue)"); } });
+      else opts.push({ label: "Share their feast", fn: () => {
+        m.gift = today;
+        const gifts: [string, number][] = [["WildGrapes", 3], ["Honey", 1], ["Ivy", 2]];
+        const [it, n] = gifts[Math.floor(Math.random() * gifts.length)];
+        this.talkToMyth(id, `They press food and garlands on you, and you leave with your arms full. (${give(it, n)})`);
+      } });
+    }
+    this.showTalk(title, sub, said ?? pick(d.lines[rung]), opts, undefined);
+  }
+
+  appeaseMyth(id: string, how: string) {
+    const d = MYTH[id], m = mythRec(id), before = rungOf(m.days);
+    m.last = G.dayNumber; m.days++;
+    const after = rungOf(m.days);
+    let note = "";
+    if (m.stolen && id === "satyrs") { G.addItem(m.stolen, 1); note += ` A satyr sheepishly hands back your ${ITEMS[m.stolen].name.toLowerCase()}.`; m.stolen = undefined; }
+    if (after > before) {
+      note += `\n\n${id === "naiad" ? m.name : `${m.name} and the satyrs`}: ${RUNGS[after]}.`;
+      if (after === 1) note += ` ${id === "naiad" ? `She tells you her name: ${m.name}. You may draw from her spring now.` : `Their leader is ${m.name}.`}`;
+      if (after === 2 || after === 4) { G.addFavor(d.god, 1); note += ` ${d.god} is pleased with you. (+1)`; }
+      if (after === 3) note += id === "naiad" ? " She invites you to bathe in her spring." : " They'll share their feasts with you now.";
+      if (after === 4) {
+        G.earn("Kleos", 1, `friend of the ${d.kind.toLowerCase()}`);
+        if (id === "satyrs") { G.addItem("Syrinx", 1); note += " They give you reed pipes of your own."; }
+        note += ` (Ally: one day, one of your line could live among the ${d.kind === "Naiad" ? "nymphs" : "satyrs"}. Playable Mythborn come later.)`;
+      }
+    }
+    this.talkToMyth(id, how + note);
   }
 
   // ---------------------------------------------------------------- the gods

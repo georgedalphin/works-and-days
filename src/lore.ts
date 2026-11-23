@@ -110,6 +110,15 @@ export const LORE: Record<string, LoreDef> = {
   mushrooms: L({ id: "mushrooms", name: "Mushrooms", vague: "a ring of pale growths", category: "Wild plant", rarity: "Common", found: "Wild Forests", patron: "Dionysus", season: "Autumn after rain",
     mundane: "Food", magical: "Some cause visions or death",
     habits: "They come up in the forests in autumn, after rain.", full: "2 a gathering; more come up after 3 days.", perk: "Mushroom rings give 1 more." }),
+  // ---- mythborn ----
+  naiad: L({ id: "naiad", name: "Naiad", vague: "a woman made of light on water", category: "Mythic creature", rarity: "Rare", found: "Springs, in any terrain", patron: "Artemis", season: "Always, by day",
+    mundane: "—", magical: "Spring blessings; her water gladdens fields and heals the weary",
+    habits: "Shy: she slips into the pool if you come running. Honey, milk, flowers and thyme please her, or quiet prayer (Pneuma).",
+    full: "Appeased on 1 day, Familiar after 3, Trusted after 6, Ally after 10. Trusted, she lets you bathe (Fatigue -40) and her water makes crops finer.", perk: "—" }),
+  satyr: L({ id: "satyr", name: "Satyr", vague: "goat-legged dancers", category: "Mythic creature", rarity: "Rare", found: "Flowering Valleys, Wild Forests, Sacred Mountains", patron: "Dionysus", season: "Always; loudest at night",
+    mundane: "—", magical: "Satyr-blessed wine: supernatural (+3), revelry (+2)",
+    habits: "Mischievous: an unfriendly band may snatch something from your pack. Wine and music win them; until there is wine, grapes and a turn in the dance (Aiolos) will do.",
+    full: "Aggression 3 (+2 at night), but they steal rather than fight. Appeased on 1 day, Familiar after 3, Trusted after 6, Ally after 10.", perk: "—" }),
   // ---- the land ----
   olive: L({ id: "olive", name: "Olive", vague: "a gnarled grey-green tree", category: "Orchard & vine", rarity: "Common", found: "Homestead", patron: "Athena", season: "Harvest late autumn, winter",
     mundane: "Oil for food, lamps, skin; trade", magical: "Anointing and blessing (+2 Athena connection)",
