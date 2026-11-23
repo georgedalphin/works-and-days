@@ -24,8 +24,8 @@ export const FORAGE: Record<string, ForageDef> = {
   oats: { id: "oats", item: "Oats", qty: 2, regrow: 3, months: SUMMER.slice(0, 2), terrains: [3], bearsWhen: "summer", weight: 2 },
   thyme: { id: "thyme", item: "Thyme", qty: 2, regrow: 3, months: [10, 11, 0, 1], terrains: [4, 1], bearsWhen: "spring and summer", weight: 3 },
   caper: { id: "caper", item: "Capers", qty: 2, regrow: 4, months: SUMMER.slice(0, 2), terrains: [4], bearsWhen: "summer", weight: 2 },
-  clay: { id: "clay", item: "Clay", qty: 2, regrow: 5, months: ALL, terrains: [4], bearsWhen: "any time", weight: 2 },
-  ochre: { id: "ochre", item: "Ochre", qty: 1, regrow: 6, months: ALL, terrains: [4], bearsWhen: "any time", weight: 1 },
+  clay: { id: "clay", item: "Clay", qty: 2, regrow: 5, months: ALL, terrains: [4, 99], bearsWhen: "any time", weight: 2 },
+  ochre: { id: "ochre", item: "Ochre", qty: 1, regrow: 6, months: ALL, terrains: [4, 99], bearsWhen: "any time", weight: 1 },
   mushrooms: { id: "mushrooms", item: "Mushrooms", qty: 2, regrow: 3, months: [3, 4, 5], terrains: [2], bearsWhen: "autumn, after rain", weight: 2 },
 };
 

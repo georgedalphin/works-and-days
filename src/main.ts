@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, T, TILE } from "./textures";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
@@ -15,8 +15,11 @@ import type { ScreenRec } from "./state";
 
 const W = 960, H = 640, ZOOM = 3;
 let G: GameState;
+/** Underground without a torch: every action is at -3 (World & Wilderness). */
+let inDark = false;
+const darkPen = () => (inDark ? 3 : 0);
 
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE];
 const TREE_HITS = 3;
 
 type Dir = 0 | 1 | 2 | 3; // down, left, right, up
@@ -63,7 +66,7 @@ function study(id: string): boolean {
   const gnosis = G.data.aretai.Gnosis ?? 3;
   const hera = G.patron?.aretai === "Gnosis" ? HERA_HOUR_BONUS : 0;
   const fails = Math.min(MAX_PERSEVERANCE, G.data.lore.fails[id] ?? 0);
-  const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails + G.boon("Hera");
+  const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails + G.boon("Hera") - darkPen();
   if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
   const b = labor({ Water: 3 }, 1, "Gnosis"); if (b === null) return false;
   G.data.lore.studied[id] = G.dayNumber;
@@ -140,7 +143,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
-    this.spots = [];
+    this.spots = []; inDark = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
@@ -292,9 +295,12 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Space with a tool (or bare hands) at a creature right in front of you: a Thymos check to land a blow. */
   tryStrike(tool: string | null): boolean {
+    const torch = G.selectedItem?.id === "Torch";
     if (tool && !(tool in MELEE)) return false;
     const a = this.creatureAhead();
     if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > 26) return false;
+    if (torch) tool = "torch";
+    if (a.kind === "eidolon" && tool !== "torch") { G.say("Your blow passes through the shade like smoke. Only fire touches the dead."); return true; }
     const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return true;
     const name = beast(a.kind);
     if (!tool) { // a shove
@@ -303,14 +309,14 @@ abstract class PlayScene extends Phaser.Scene {
       return true;
     }
     const thymos = G.data.aretai.Thymos ?? 3;
-    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares");
+    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
     const q = QUARRY[a.kind];
     if (a.hp < 0) a.hp = q.hp;
-    a.hp -= MELEE[tool];
+    a.hp -= tool === "torch" ? (a.kind === "eidolon" ? 1 : 1) : MELEE[tool];
     this.chips(Math.floor(a.sprite.x / TILE), Math.floor(a.sprite.y / TILE), -1, 4);
-    if (a.hp <= 0) { this.kill(a); return true; }
+    if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return true; }
     a.sprite.setTint(0xff8080); this.time.delayedCall(250, () => a.sprite.clearTint());
     G.say(`You strike the ${name}! (d12 ${roll}, needed 1–${target})`);
     if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player);
@@ -328,7 +334,7 @@ abstract class PlayScene extends Phaser.Scene {
     const food = (PEACE_FOOD[a.kind] ?? []).includes(held);
     if (food) G.removeItem(held, 1);
     const kardia = G.data.aretai.Kardia ?? 3;
-    const target = kardia + 2 + (food ? 3 : 0) + (G.patron?.aretai === "Kardia" ? 2 : 0) - Math.floor(SPECIES[a.kind].aggression / 2) + G.boon("Athena");
+    const target = kardia + 2 + (food ? 3 : 0) + (G.patron?.aretai === "Kardia" ? 2 : 0) - Math.floor(SPECIES[a.kind].aggression / 2) + G.boon("Athena") - darkPen();
     const roll = 1 + Math.floor(Math.random() * 12);
     const odds = `d12 ${roll}, needed 1–${Math.max(0, target)}${food ? `, ${ITEMS[held].name.toLowerCase()} offered +3` : ""}`;
     if (roll <= target) {
@@ -336,6 +342,7 @@ abstract class PlayScene extends Phaser.Scene {
       const t = this.add.text(a.sprite.x, a.sprite.y - 12, "♥", { fontFamily: FONT, fontSize: "9px", color: "#9ad07a" }).setOrigin(0.5).setResolution(3).setDepth(99999);
       this.tweens.add({ targets: t, y: t.y - 10, alpha: 0, duration: 1100, onComplete: () => t.destroy() });
       G.say(`You speak low and hold still. The ${name} calms and lets you be (${odds}).`);
+      this.creatureEvent(a, "appeased");
     } else {
       a.charge(4);
       G.say(`The ${name} won't be calmed (${odds}).${PEACE_FOOD[a.kind] && !food ? ` Try holding out ${PEACE_FOOD[a.kind][0].toLowerCase()}.` : ""}`);
@@ -480,6 +487,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (G.patron?.aretai === "Ourania") r *= 0.75;
     r *= Math.max(0.5, 1 - 0.08 * G.boon("Apollo"));
     if (G.exhausted) r *= 1.4;
+    if (inDark) r *= 1.6;
     return r;
   }
 
@@ -531,6 +539,9 @@ abstract class PlayScene extends Phaser.Scene {
   /** Is this spot open ground an arrow can stick in? */
   openGround(_x: number, _y: number) { return true; }
 
+  /** Something notable happened to a creature (a cave's keeper slain or appeased). */
+  creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
+
   /** An arrow that falls among the Mythborn: an offense, not a hunt. */
   mythHit(_x: number, _y: number) { return false; }
 
@@ -541,13 +552,14 @@ abstract class PlayScene extends Phaser.Scene {
       && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= QUARRY[a.kind].size + 2);
     const goat = this.animals.find((a) => a.kind === "goat" && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= 10);
     let broke = Math.random() < 0.1;
-    if (hit) {
+    if (hit && hit.kind === "eidolon") { G.say("Your arrow passes through the shade and clatters on the stone."); hit.charge(5); }
+    else if (hit) {
       const q = QUARRY[hit.kind];
       if (hit.hp < 0) hit.hp = q.hp;
       hit.hp--; broke = Math.random() < 0.3;
       const before = G.archery; G.data.archeryXp += ARCHERY.perHit;
       if (G.archery > before) G.say(`Your archery improves to ${G.archery}: your arrows fly truer.`);
-      if (hit.hp <= 0) this.kill(hit);
+      if (hit.hp <= 0) { this.kill(hit); this.creatureEvent(hit, "slain"); }
       else {
         hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
         if (this.aggressionRoll(hit, 3)) G.say(`A hit! The wounded ${beast(hit.kind)} turns on you!`);
@@ -1318,7 +1330,7 @@ const PROFILES: Record<number, Profile> = {
        creatures: [["hare", 1], ["bird", 1], ["boar", 1]], features: ["Stone outcrop", "Ore seam", "Scree slope"] },
 };
 const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
-const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 };
+const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 }, CAVE_AT = { x: 9, y: 7 };
 
 /** A stable seed for each screen of this save's world. */
 function screenSeed(wx: number, wy: number) {
@@ -1331,6 +1343,7 @@ class WildScene extends PlayScene {
   key = "";
   hasSpring = false;
   hasRevel = false;
+  hasCave = false;
   naiad?: Phaser.GameObjects.Image;
   satyrs: Phaser.GameObjects.Image[] = [];
   danceT = 0;
@@ -1412,9 +1425,17 @@ class WildScene extends PlayScene {
     const fy = 4 + Math.floor(gen() * (WH - 8));
     this.stampFeature(objs, fx, fy, this.rec.feature, gen);
     for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE) objs[y][x] = -1; }
+    const ring0 = (cx0: number, cy0: number, rad: number, fn: (x: number, y: number) => void) => {
+      for (let y = cy0 - rad; y <= cy0 + rad; y++) for (let x = cx0 - rad; x <= cx0 + rad; x++) if (x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && Math.hypot(x - cx0, y - cy0) <= rad + 0.3) fn(x, y);
+    };
     // Anchors: the Naiad's spring lies at a near site fixed for this world; the satyrs revel in the first flowering valley you find.
     if (!G.data.anchors.spring) { const r0 = rng(G.data.seed ^ 0x5eed5); const [ax, ay] = SPRING_SITES[Math.floor(r0() * SPRING_SITES.length)]; G.data.anchors.spring = `${ax},${ay}`; }
     if (!G.data.anchors.satyrs && this.rec.terrain === 1 && Math.abs(wx) + Math.abs(wy) >= 1 && this.key !== G.data.anchors.spring) G.data.anchors.satyrs = this.key;
+    // The first cave: in the first mineral hills at least two screens out, or by three screens out, wherever you are.
+    const dist0 = Math.abs(wx) + Math.abs(wy);
+    if (!G.data.anchors.cave && this.key !== G.data.anchors.spring && this.key !== G.data.anchors.satyrs && ((this.rec.terrain === 4 && dist0 >= 2) || dist0 >= 3)) G.data.anchors.cave = this.key;
+    this.hasCave = this.key === G.data.anchors.cave;
+    if (this.hasCave) ring0(CAVE_AT.x, CAVE_AT.y + 1, 3, (x, y) => { objs[y][x] = -1; });
     this.hasSpring = this.key === G.data.anchors.spring;
     this.hasRevel = this.key === G.data.anchors.satyrs;
     const ring = (cx0: number, cy0: number, rad: number, fn: (x: number, y: number, d: number) => void) => {
@@ -1440,6 +1461,7 @@ class WildScene extends PlayScene {
     if (e === "E") { sx = (WW - 1.5) * TILE; sy = cy * TILE + 8; }
     if (e === "N") { sx = cx * TILE + 8; sy = 1.5 * TILE; }
     if (e === "S") { sx = cx * TILE + 8; sy = (WH - 1.5) * TILE; }
+    if (e === "C") { sx = CAVE_AT.x * TILE + 8; sy = (CAVE_AT.y + 1.6) * TILE; }
     G.data.entry = ""; G.data.scene = "Wild";
     this.makePlayer(sx, sy);
     this.player.setCollideWorldBounds(true);
@@ -1451,6 +1473,7 @@ class WildScene extends PlayScene {
       x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH);
     this.spawnCreatures(p, gen);
     this.spawnMythborn();
+    if (this.hasCave) this.placeCaveMouth();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -1511,6 +1534,31 @@ class WildScene extends PlayScene {
         }
       }
     }
+  }
+
+  placeCaveMouth() {
+    const mx = CAVE_AT.x * TILE + 8, my = CAVE_AT.y * TILE + 8;
+    this.add.image(mx, my, "cavemouth").setDepth(my + 4);
+    const blocks = this.physics.add.staticGroup();
+    const b = blocks.create(mx, my - 2, "") as Phaser.Physics.Arcade.Sprite; b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(30, 14);
+    this.physics.add.collider(this.player, blocks);
+    this.targets.push({ x: mx, y: my + 12, label: "Enter the cave", act: () => this.enterCave() });
+    if (!G.data.caves[this.key]) G.say("A cave mouth opens in the rock here, breathing cold air.");
+  }
+
+  enterCave() {
+    if (this.leaving) return;
+    if (!G.data.caves[this.key]) {
+      // The cave's kind is rolled when it is found (a d12: common 1-6, sacred 7-9, chthonic 10-12), then fixed.
+      const roll = 1 + Math.floor(rng(screenSeed(G.data.wx, G.data.wy) ^ 0xc4fe)() * 12);
+      const type: CaveType = roll <= 6 ? "common" : roll <= 9 ? "sacred" : "chthonic";
+      G.data.caves[this.key] = { type, boss: "alive", hoard: false, mined: {} };
+    }
+    G.data.torchLit = G.count("Torch") > 0;
+    if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
+    else G.say("You have no torch. You feel your way into the dark: every action is at -3. (Make torches with C.)");
+    G.data.cave = { key: this.key, level: 1 }; G.data.entry = "N"; G.data.scene = "Cave";
+    this.goTo("Cave");
   }
 
   /** The Naiad by her pool, and the satyrs round their wine jar. */
@@ -1672,6 +1720,208 @@ class WildScene extends PlayScene {
   }
 }
 
+
+
+// ------------------------------------------------------------------ the cave
+const CW = 40, CH = 30;
+
+class CaveScene extends PlayScene {
+  objects!: Phaser.Tilemaps.TilemapLayer;
+  dark!: Phaser.GameObjects.Image;
+  boss?: Animal;
+  rec!: { type: CaveType; boss: "alive" | "appeased" | "slain"; hoard: boolean; mined: Record<string, string[]> };
+  level = 1;
+  exitUp = { x: 20, y: 1 };
+  exitDown = { x: 20, y: 27 };
+  hoardAt = { x: 20, y: 27 };
+
+  constructor() { super("Cave"); }
+
+  create() {
+    this.leaving = false;
+    const { key, level } = G.data.cave;
+    this.level = level;
+    this.rec = G.data.caves[key];
+    const [cwx, cwy] = key.split(",").map(Number);
+    // Each level is the same every visit: it comes from the cave's own seed.
+    const gen = rng(screenSeed(cwx, cwy) ^ (0x9a7e + level * 7919));
+    let grid: number[][] = [];
+    for (let y = 0; y < CH; y++) { grid.push([]); for (let x = 0; x < CW; x++) grid[y].push(x === 0 || y === 0 || x === CW - 1 || y === CH - 1 || gen() < 0.44 ? 1 : 0); }
+    const start = { x: 20, y: 2 };
+    const end = level < CAVE_LEVELS ? { x: 6 + Math.floor(gen() * 28), y: 26 } : { x: 20, y: 24 };
+    const path: [number, number][] = [];
+    let px = start.x, py = start.y;
+    for (let i = 0; i < 400 && (px !== end.x || py !== end.y); i++) {
+      path.push([px, py]);
+      if (gen() < 0.6) { if (gen() < 0.5 && px !== end.x) px += Math.sign(end.x - px); else if (py !== end.y) py += Math.sign(end.y - py); else px += Math.sign(end.x - px); }
+      else { px += gen() < 0.5 ? -1 : 1; px = Math.max(2, Math.min(CW - 3, px)); }
+    }
+    path.push([end.x, end.y]);
+    for (let it = 0; it < 4; it++) {
+      const next = grid.map((row) => [...row]);
+      for (let y = 1; y < CH - 1; y++) for (let x = 1; x < CW - 1; x++) {
+        let n = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) n += grid[y + dy][x + dx];
+        next[y][x] = n >= 5 ? 1 : n <= 2 ? 0 : grid[y][x];
+      }
+      grid = next;
+    }
+    const open = (x: number, y: number, r: number) => { for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (xx > 0 && yy > 0 && xx < CW - 1 && yy < CH - 1) grid[yy][xx] = 0; };
+    for (const [x, y] of path) open(x, y, 1);
+    open(start.x, start.y, 1);
+    if (level === CAVE_LEVELS) {
+      for (let y = 19; y <= 28; y++) for (let x = 14; x <= 26; x++) if (Math.hypot((x - 20) / 1.3, y - 24) <= 4.6 && y < CH - 1) grid[y][x] = 0;
+    } else open(end.x, end.y, 1);
+    this.exitDown = { x: end.x, y: end.y + (level < CAVE_LEVELS ? 1 : 0) };
+    this.hoardAt = { x: 20, y: 27 };
+    if (level === CAVE_LEVELS) grid[27][20] = 0;
+    else grid[end.y + 1][end.x] = 0;
+    // Ore in the walls' edges, mined once and gone for good.
+    const mined = (this.rec.mined[level] ??= []);
+    const objs: number[][] = [], ground: number[][] = [];
+    for (let y = 0; y < CH; y++) {
+      objs.push([]); ground.push([]);
+      for (let x = 0; x < CW; x++) {
+        ground[y].push(T.CAVEFLOOR);
+        let o = grid[y][x] ? T.CAVEWALL : -1;
+        if (o === -1 && Math.abs(x - start.x) + Math.abs(y - start.y) > 4) {
+          let walls = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) walls += grid[y + dy]?.[x + dx] ?? 1;
+          if (walls >= 2 && gen() < 0.07 && !path.some(([a, b]) => a === x && b === y)) o = T.ORE;
+        }
+        if (mined.includes(`${x},${y}`)) o = -1;
+        objs[y].push(o);
+      }
+    }
+    const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: CW, height: CH });
+    const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
+    map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    this.objects = map.createBlankLayer("objects", ts)!;
+    this.objects.putTilesAt(objs, 0, 0);
+    this.objects.setCollision(BLOCKING).setDepth(1);
+    this.cameras.main.setBackgroundColor("#0e0c0a");
+
+    this.physics.world.setBounds(0, 0, CW * TILE, CH * TILE);
+    this.cameras.main.setBounds(0, 0, CW * TILE, CH * TILE);
+    this.setupInput();
+    inDark = !G.data.torchLit;
+    this.targets = [];
+    // The way up, and the way down (or the keeper's chamber and its hoard).
+    this.add.image(start.x * TILE + 8, 1 * TILE + 8, "ladder").setDepth(TILE * 2);
+    this.targets.push({ x: start.x * TILE + 8, y: 2 * TILE, label: level === 1 ? "Climb out of the cave" : "Climb back up", act: () => this.climb(-1) });
+    if (level < CAVE_LEVELS) {
+      this.add.image(this.exitDown.x * TILE + 8, this.exitDown.y * TILE + 8, "hole").setDepth(this.exitDown.y * TILE);
+      this.targets.push({ x: this.exitDown.x * TILE + 8, y: this.exitDown.y * TILE + 4, label: "Go deeper", act: () => this.climb(1) });
+    } else {
+      this.add.image(this.hoardAt.x * TILE + 8, this.hoardAt.y * TILE + 8, "hoard").setDepth(this.hoardAt.y * TILE + 10);
+      const sc = this;
+      this.targets.push({ x: this.hoardAt.x * TILE + 8, y: this.hoardAt.y * TILE + 4, get label() { return sc.rec.hoard ? "The emptied hoard" : "Search the hoard"; }, act: () => this.searchHoard() });
+    }
+    let sx = start.x * TILE + 8, sy = 2.6 * TILE;
+    if (G.data.entry === "U") { sx = this.exitDown.x * TILE + 8; sy = (this.exitDown.y - 1) * TILE + 8; }
+    if (G.data.entry === "" && G.data.px > 0) { sx = G.data.px; sy = G.data.py; }
+    G.data.entry = ""; G.data.scene = "Cave";
+    this.makePlayer(sx, sy);
+    this.player.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, this.objects);
+
+    // Dwellers: bats in the upper level; the keeper in the deepest chamber.
+    this.animals = [];
+    if (level === 1) for (let i = 0; i < 4; i++) {
+      const [bx, by] = path[Math.floor(path.length * (0.3 + gen() * 0.6))];
+      this.animals.push(new Animal(this, "bat", bx * TILE + 8, by * TILE + 8, new Phaser.Geom.Rectangle(bx * TILE - 40, by * TILE - 40, 80, 80)));
+    }
+    this.boss = undefined;
+    if (level === CAVE_LEVELS && this.rec.boss !== "slain") {
+      const kind = CAVE_KINDS[this.rec.type].boss;
+      const a = new Animal(this, kind, 20 * TILE + 8, 24 * TILE, new Phaser.Geom.Rectangle(16 * TILE, 21 * TILE, 8 * TILE, 5 * TILE));
+      this.physics.add.collider(a.sprite, this.objects);
+      if (this.rec.boss === "appeased") { a.appeased = true; a.rolled = true; }
+      this.animals.push(a); this.boss = a;
+      const sc = this;
+      this.targets.push({ get x() { return a.sprite.x; }, get y() { return a.sprite.y + 2; }, get label() { return a.state === "dead" ? "" : `Approach the ${beast(a.kind)}`; }, act: () => (a.appeased ? G.say(`The ${beast(a.kind)} lets you be.`) : sc.appease(a)) } as unknown as Target);
+    }
+    // Clay and ochre in the cave floor.
+    this.placeForage(rng(screenSeed(cwx, cwy) ^ (0x51 + level)), 99, 3, (x, y) => x > 1 && y > 3 && x < CW - 2 && y < CH - 2 && objs[y][x] === -1 && !path.some(([a, b]) => a === x && b === y));
+
+    this.dark = this.add.image(sx, sy, inDark ? "dark0" : "dark1").setDepth(99990);
+    this.cameras.main.fadeIn(300);
+    if (level === 1 && !this.rec.mined.seen) { this.rec.mined.seen = ["1"]; G.say(CAVE_KINDS[this.rec.type].signs); }
+    if (level === CAVE_LEVELS && this.rec.boss === "alive") G.say("The passage opens into a chamber. Something here is awake.");
+  }
+
+  picked() { const k = `${G.data.cave.key}:${this.level}`; return ((G.data as unknown as { cavePicked?: Record<string, Record<string, number>> }).cavePicked ??= {})[k] ??= {}; }
+  mapKey() { return `cave:${G.data.cave.key}:${this.level}`; }
+
+  climb(dir: number) {
+    if (this.leaving) return;
+    if (dir < 0 && this.level === 1) { G.data.entry = "C"; G.data.scene = "Wild"; G.data.torchLit = false; this.goTo("Wild"); return; }
+    G.data.cave.level += dir; G.data.entry = dir > 0 ? "" : "U"; G.data.px = -1;
+    this.goTo("Cave");
+  }
+
+  searchHoard() {
+    if (this.rec.hoard) { G.say("You've taken what was here."); return; }
+    if (this.rec.boss === "alive" && this.boss && this.boss.state !== "dead") { G.say(`The ${beast(this.boss.kind)} guards it. Win it over, or overcome it.`); return; }
+    this.rec.hoard = true;
+    const kind = CAVE_KINDS[this.rec.type];
+    const got = this.rec.type === "common" ? `${give("GoldDust", 2)}, ${give("Copper", 2)}` : this.rec.type === "sacred" ? (() => { G.data.silver += 30; return "30 silver among the votive offerings"; })() : (() => { G.data.silver += 40; return "40 silver in grave goods"; })();
+    G.say(`You search ${kind.hoard}: ${got}.`);
+    G.earn("Kleos", 1, "you went to the bottom of the cave and came back");
+  }
+
+  /** The keeper of the deep chamber, slain or won over. */
+  creatureEvent(a: Animal, what: "slain" | "appeased") {
+    if (a !== this.boss) return;
+    this.rec.boss = what;
+    const k = a.kind;
+    if (what === "appeased") {
+      if (k === "eidolon") { G.data.currencies.Pathos += 2; G.addFavor("Hades", 1, 3); G.say("The shade drinks the offering, sighs, and is still. It is at rest at last. (+2 Pathos; something below is grateful.)"); }
+      if (k === "lampad") { G.data.currencies.Ambrosia += 1; G.addFavor("Hecate", 1, 3); G.say("The lampad raises her torch, and for a moment you see every hidden thing in the cave. (+1 Ambrosia; Hecate's hidden favor stirs.)"); }
+      if (k === "myrmex") G.say("The great ant tastes the honey, clicks its jaws, and lets you pass.");
+    } else {
+      if (k === "lampad") { G.addFavor("Hecate", -3); G.earn("Hubris", 2, "you struck down Hecate's torch-bearer"); }
+      if (k === "eidolon") G.say("The shade comes apart in the torchlight like mist. It will not trouble the living again.");
+      if (k === "myrmex") G.earn("Kleos", 1, "you slew a giant ant of the deep");
+    }
+  }
+
+  update(_t: number, dms: number) {
+    const dt = dms / 1000;
+    this.updateAnimals(dt);
+    if (!this.common(dt)) { this.dark.setPosition(this.player.x, this.player.y); return; }
+    this.dark.setPosition(this.player.x, this.player.y);
+  }
+
+  subjectAt(): string | null {
+    const [x, y] = this.facingTile();
+    const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (obj === T.ORE) return null;
+    return obj === T.CAVEWALL || obj === -1 ? "cave" : null;
+  }
+
+  openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
+
+  clearObject(x: number, y: number) {
+    this.breakFx(x, y, T.STONE);
+    this.objects.putTileAt(-1, x, y);
+    this.rec.mined[this.level].push(`${x},${y}`);
+  }
+
+  useItem() {
+    const [x, y] = this.facingTile();
+    const tool = G.selectedItem && ITEMS[G.selectedItem.id].kind === "tool" ? G.selectedItem.id : null;
+    if (this.tryStrike(tool)) return;
+    if (tool !== "hoe" && tool !== "jar" && this.gather(x, y, tool)) return;
+    const obj = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (obj === T.ORE) {
+      if (tool !== "mattock") { G.say("Green-stained stone: copper ore. You'll need the mattock."); return; }
+      const b = labor({ Earth: 3, Fire: 2 }, 5 + darkPen(), "Techne"); if (b === null) return;
+      this.clearObject(x, y);
+      G.say(`You break out the ore: ${give("Copper", 1 + (Math.random() < 0.4 ? 1 : 0))}${inDark ? " (by feel, in the dark)" : ""}${b}`);
+      return;
+    }
+    if (obj === T.CAVEWALL) { G.say("Solid rock."); return; }
+  }
+}
 
 // ------------------------------------------------------------------ the village
 const VW = 40, VH = 30;
@@ -1922,6 +2172,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: your Aretai and currencies.",
+      "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
       "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
       "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
       "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
@@ -2859,7 +3110,7 @@ class UIScene extends Phaser.Scene {
   pixelArt: true,
   physics: { default: "arcade", arcade: { debug: false } },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, TitleScene, FarmScene, HouseScene, WildScene, VillageScene, UIScene],
+  scene: [BootScene, TitleScene, FarmScene, HouseScene, WildScene, VillageScene, CaveScene, UIScene],
 });
 
 (window as unknown as { WHEEL: typeof WHEEL }).WHEEL = WHEEL;

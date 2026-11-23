@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf";
+export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad";
 
 interface SpeciesDef {
   name: string;
@@ -13,6 +13,7 @@ interface SpeciesDef {
   aggression: number; // a d12 at or under this when it notices you means it comes at you
   charge: number; // charging speed, px/s
   damage: number; // Fatigue dealt by a blow
+  notice?: number; // how far off it notices you (default: its scare distance, at least 40)
 }
 
 export const SPECIES: Record<Species, SpeciesDef> = {
@@ -22,6 +23,10 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   wolf: { name: "wolf", walk: 30, flee: 100, scare: 80, idle: [0.6, 2], body: [11, 4, 2, 10], frameRate: 7, aggression: 6, charge: 108, damage: 10 },
   deer: { name: "deer", walk: 20, flee: 110, scare: 72, idle: [1.5, 4], body: [10, 4, 3, 11], frameRate: 7, aggression: 1, charge: 95, damage: 8 },
   boar: { name: "boar", walk: 16, flee: 80, scare: 48, idle: [1, 3.5], body: [11, 5, 2, 10], frameRate: 6, aggression: 5, charge: 100, damage: 15 },
+  bat: { name: "bat", walk: 40, flee: 90, scare: 30, idle: [0.2, 0.8], body: [6, 4, 5, 6], frameRate: 14, aggression: 0, charge: 0, damage: 0 },
+  myrmex: { name: "myrmex", walk: 16, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 1, 9], frameRate: 8, aggression: 8, charge: 92, damage: 12, notice: 84 },
+  eidolon: { name: "eidolon", walk: 10, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 6, 4, 9], frameRate: 3, aggression: 6, charge: 68, damage: 10, notice: 80 },
+  lampad: { name: "lampad", walk: 6, flee: 0, scare: 0, idle: [2, 5], body: [8, 6, 4, 9], frameRate: 3, aggression: 1, charge: 50, damage: 5, notice: 70 },
   bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0 },
 };
 
@@ -75,7 +80,7 @@ export class Animal {
     const dist = Phaser.Math.Distance.Between(s.x, s.y, player.x, player.y);
     if (this.rolled && this.state !== "charge" && this.state !== "recoil" && (this.rerollT -= dt) <= 0 && dist > d.scare * 2) this.rolled = false;
     // Noticing you: the creature rolls its Aggression (the scene decides: charge, or flee as usual).
-    if (d.aggression > 0 && !this.rolled && !this.appeased && this.state !== "flee" && dist < Math.max(d.scare, 40) * scareMult && this.decide) {
+    if (d.aggression > 0 && !this.rolled && !this.appeased && this.state !== "flee" && dist < (d.notice ?? Math.max(d.scare, 40)) * scareMult && this.decide) {
       this.rolled = true; this.rerollT = 25;
       this.decide(this);
     }

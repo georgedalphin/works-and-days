@@ -8,10 +8,10 @@ export const T = {
   GRASS: 0, GRASS2: 1, DIRT: 2, PATH: 3,
   BRUSH: 4, SAPLING: 5, STONE: 6, TREE: 7, BOULDER: 8, EDGE: 9,
   FLOOR: 10, WALL: 11, FLOWERS: 12, OLIVE: 13, TILLED: 14, WET: 15, FENCE: 16,
-  MEADOW: 17, FOREST: 18, ROCKY: 19, WATER: 20,
+  MEADOW: 17, FOREST: 18, ROCKY: 19, WATER: 20, CAVEWALL: 21, CAVEFLOOR: 22, ORE: 23,
 };
 export const TILE = 16;
-const COUNT = 21;
+const COUNT = 24;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -69,6 +69,12 @@ function drawTile(c: Ctx, i: number) {
     case T.WATER:
       px(c, o, 0, 16, 16, "#3f7fa0"); px(c, o, 0, 16, 2, "#5a9ab8");
       for (const [x, y] of [[2, 4], [9, 7], [4, 11], [11, 13]]) { px(c, o + x, y, 4, 1, "#8fc4dc"); px(c, o + x + 1, y + 1, 2, 1, "#6aa8c8"); }
+      break;
+    case T.CAVEWALL: speckle(c, o, "#3a332c", ["#4a4238", "#2a241e", "#524a40"], 26, 61); px(c, o, 13, 16, 3, "#2a241e"); break;
+    case T.CAVEFLOOR: speckle(c, o, "#5a5046", ["#4a4238", "#6a6054", "#544a40"], 16, 67); break;
+    case T.ORE:
+      px(c, o + 2, 5, 12, 9, "#6c675e"); px(c, o + 3, 4, 10, 2, "#8d877b"); px(c, o + 2, 13, 12, 2, "rgba(0,0,0,0.3)");
+      for (const [x, y] of [[4, 7], [9, 6], [7, 10], [11, 11]]) { px(c, o + x, y, 2, 2, "#3a9a7a"); px(c, o + x, y, 1, 1, "#7ad0a8"); }
       break;
     case T.FENCE:
       px(c, o, 5, 16, 2, "#8a5f35"); px(c, o, 10, 16, 2, "#8a5f35"); px(c, o, 7, 16, 1, "#5a3d22");
@@ -295,6 +301,52 @@ export function makeTextures(scene: Phaser.Scene) {
   });
   sat.add(0, 0, 0, 0, 16, 16); sat.add(1, 0, 16, 0, 16, 16);
 
+  // The cave: its mouth, the way down, a hoard, and its dwellers.
+  canvasTex(scene, "cavemouth", 32, 24, (c) => {
+    px(c, 0, 6, 32, 18, "#8d877b"); px(c, 2, 2, 28, 6, "#9c968a"); px(c, 6, 0, 20, 4, "#a49e91");
+    px(c, 8, 8, 16, 16, "#1a1612"); px(c, 10, 6, 12, 3, "#1a1612"); px(c, 6, 20, 20, 4, "#2a241e");
+    px(c, 3, 9, 3, 2, "#6c675e"); px(c, 26, 12, 3, 2, "#6c675e"); px(c, 1, 16, 5, 6, "#6f8a3a");
+  });
+  canvasTex(scene, "ladder", 16, 16, (c) => { px(c, 4, 0, 2, 16, "#8a5f35"); px(c, 10, 0, 2, 16, "#8a5f35"); for (let y = 2; y < 16; y += 4) px(c, 4, y, 8, 2, "#a87443"); px(c, 3, 0, 10, 1, "#f2e6c9"); });
+  canvasTex(scene, "hole", 16, 16, (c) => { px(c, 2, 4, 12, 10, "#0e0c0a"); px(c, 4, 2, 8, 3, "#0e0c0a"); px(c, 1, 12, 14, 3, "#2a241e"); px(c, 3, 3, 1, 1, "#6c675e"); });
+  canvasTex(scene, "hoard", 20, 16, (c) => {
+    px(c, 2, 13, 16, 3, "rgba(0,0,0,0.3)"); px(c, 1, 6, 8, 8, "#9c5532"); px(c, 2, 4, 6, 3, "#7a4a2a");
+    px(c, 10, 9, 9, 5, "#6b4a2b"); px(c, 11, 8, 7, 2, "#8a5f35");
+    for (const [x, y] of [[4, 12], [12, 7], [15, 8], [8, 13], [17, 12]]) px(c, x, y, 2, 1, "#f2c14e");
+  });
+  const bat = canvasTex(scene, "bat", 32, 16, (c) => { for (const o of [0, 16]) { px(c, o + 6, 7, 4, 3, "#2a241e"); px(c, o + 6, 6, 1, 1, "#2a241e"); px(c, o + 9, 6, 1, 1, "#2a241e"); if (o) { px(c, o + 1, 5, 5, 2, "#3a332c"); px(c, o + 10, 5, 5, 2, "#3a332c"); } else { px(c, o + 2, 8, 4, 3, "#3a332c"); px(c, o + 10, 8, 4, 3, "#3a332c"); } } });
+  bat.add(0, 0, 0, 0, 16, 16); bat.add(1, 0, 16, 0, 16, 16);
+  const myr = canvasTex(scene, "myrmex", 32, 16, (c) => {
+    for (const o of [0, 16]) {
+      const f = o ? 1 : 0, D = "#2a1d14", B = "#5a3a1a";
+      px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.25)");
+      for (const x of [4, 7, 10]) { px(c, o + x - f, 11, 1, 3, D); px(c, o + x + 1 + f, 11, 1, 3, D); }
+      px(c, o + 1, 7, 5, 5, B); px(c, o + 6, 8, 3, 3, B); px(c, o + 9, 6, 5, 5, B); px(c, o + 13, 7, 2, 2, "#e8c86a");
+      px(c, o + 12, 3, 1, 3, D); px(c, o + 14, 2, 1, 3, D); px(c, o + 14, 10, 2, 1, D); px(c, o + 2, 8, 2, 1, "#7a5a3a");
+    }
+  });
+  myr.add(0, 0, 0, 0, 16, 16); myr.add(1, 0, 16, 0, 16, 16);
+  const eid = canvasTex(scene, "eidolon", 32, 16, (c) => {
+    for (const o of [0, 16]) { const f = o ? 1 : 0;
+      px(c, o + 5, 5, 6, 8 + f, "rgba(200,205,220,0.55)"); px(c, o + 6, 1, 4, 4, "rgba(220,225,235,0.7)"); px(c, o + 7, 2, 1, 1, "#1a1a2a"); px(c, o + 8, 2, 1, 1, "#1a1a2a");
+      px(c, o + 4, 6, 1, 5, "rgba(200,205,220,0.4)"); px(c, o + 11, 6, 1, 5, "rgba(200,205,220,0.4)"); px(c, o + 6, 13 + f, 4, 2, "rgba(200,205,220,0.25)"); }
+  });
+  eid.add(0, 0, 0, 0, 16, 16); eid.add(1, 0, 16, 0, 16, 16);
+  const lam = canvasTex(scene, "lampad", 32, 16, (c) => {
+    for (const o of [0, 16]) { const f = o ? 1 : 0;
+      px(c, o + 5, 6, 6, 8, "#4a3a6a"); px(c, o + 6, 1, 4, 5, "#d8c8e8"); px(c, o + 5, 1, 6, 2, "#1a1a2a"); px(c, o + 7, 3, 1, 1, "#1a1a2a"); px(c, o + 8, 3, 1, 1, "#1a1a2a");
+      px(c, o + 12, 3, 1, 8, "#6b4a2b"); px(c, o + 11, 1 - f, 3, 3, "#f2c14e"); px(c, o + 12, 0, 1, 2, "#e0703a"); }
+  });
+  lam.add(0, 0, 0, 0, 16, 16); lam.add(1, 0, 16, 0, 16, 16);
+  // Darkness: a black field with a soft hole of light, small without a torch, larger with one.
+  for (const [key, r] of [["dark0", 30], ["dark1", 78]] as [string, number][]) {
+    canvasTex(scene, key, 640, 640, (c) => {
+      const g = c.createRadialGradient(320, 320, r * 0.4, 320, 320, r);
+      g.addColorStop(0, "rgba(8,6,4,0)"); g.addColorStop(1, "rgba(8,6,4,0.97)");
+      c.fillStyle = g; c.fillRect(0, 0, 640, 640);
+    });
+  }
+
   // The treading vat: broken, empty, full of must, and with sealed jars working beside it.
   const vat = canvasTex(scene, "vat", 96, 24, (c) => {
     for (let f = 0; f < 4; f++) {
@@ -347,7 +399,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -418,6 +470,9 @@ function drawIcon(c: Ctx, o: number, id: string) {
   if (CROP_COL[id]) { drawCrop(c, o, id, 3); return; }
   const wood = "#8a5f35", bronze = "#c98a3e", bronzeD = "#9c6528";
   switch (id) {
+    case "Torch": px(c, o + 7, 5, 2, 10, "#8a5f35"); px(c, o + 6, 4, 4, 2, "#5a3d22"); px(c, o + 6, 1, 4, 3, "#e0703a"); px(c, o + 7, 0, 2, 2, "#f2c14e"); break;
+    case "Copper": px(c, o + 3, 5, 10, 8, "#6c675e"); for (const [x, y] of [[4, 6], [8, 8], [10, 6], [6, 10]]) px(c, o + x, y, 2, 2, "#3a9a7a"); break;
+    case "GoldDust": px(c, o + 4, 6, 8, 7, "#c9b48f"); px(c, o + 5, 4, 6, 3, "#a99878"); px(c, o + 6, 7, 4, 3, "#f2c14e"); px(c, o + 7, 6, 2, 1, "#ffe08a"); break;
     case "Must": px(c, o + 4, 5, 8, 9, "#c4703f"); px(c, o + 5, 3, 6, 2, "#9c5532"); px(c, o + 5, 6, 6, 3, "#7a2a4a"); px(c, o + 4, 13, 8, 1, "#9c5532"); break;
     case "Wine": px(c, o + 6, 1, 4, 3, "#9c5532"); px(c, o + 5, 4, 6, 8, "#c4703f"); px(c, o + 4, 6, 8, 5, "#c4703f"); px(c, o + 6, 12, 4, 2, "#9c5532"); px(c, o + 5, 7, 6, 2, "#2a1d14"); px(c, o + 6, 7, 1, 1, "#e8c86a"); px(c, o + 9, 7, 1, 1, "#e8c86a"); break;
     case "Cutting": for (let i = 0; i < 11; i++) px(c, o + 4 + i, 13 - i, 1, 1, "#6b4a2b"); px(c, o + 9, 5, 3, 3, "#5e7f34"); px(c, o + 6, 9, 2, 2, "#71953f"); break;

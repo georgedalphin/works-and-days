@@ -107,6 +107,9 @@ export const ITEMS: Record<string, ItemDef> = {
   Mushrooms: { id: "Mushrooms", value: 4, name: "Mushrooms", kind: "material", desc: "Good eating, mostly. Some bring visions, or death." },
   Ivy: { id: "Ivy", value: 2, name: "Ivy", kind: "material", desc: "Dionysus' evergreen: for crowns and the thyrsus." },
   Syrinx: { id: "Syrinx", value: 0, name: "Reed pipes", greek: "syrinx", kind: "material", desc: "Pan's pipes, a satyr's gift. Music Arts will use them." },
+  Torch: { id: "Torch", value: 0, name: "Torches", kind: "material", desc: "Pitch-soaked wood. One burns for a whole visit underground; without light, every action is at -3." },
+  Copper: { id: "Copper", value: 6, name: "Copper ore", kind: "material", desc: "Green-stained stone. Lykos will want it, once there is tin to marry it to." },
+  GoldDust: { id: "GoldDust", value: 20, name: "Gold dust", kind: "material", desc: "Dug by the giant ants of the deep places. Worth a gold coin a pinch." },
   Must: { id: "Must", value: 3, name: "Must", greek: "gleukos", kind: "material", desc: "Sweet trodden grape juice. Left to work in the vat, it becomes wine." },
   Wine: { id: "Wine", value: 12, name: "Wine", greek: "oinos", kind: "material", desc: "Dionysus' gift: for libations to any god, for guests, and for satyrs who have waited all year." },
   Cutting: { id: "Cutting", value: 0, name: "Vine cutting", kind: "material", desc: "A cutting from a wild vine. Plant it in tilled soil at home: in a year it will bear." },
@@ -223,12 +226,17 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   deer: { hp: 2, size: 8, drops: [["Meat", 3], ["Hide", 1], ["Antler", 1]] },
   boar: { hp: 3, size: 7, drops: [["Meat", 3], ["Hide", 1], ["Tusk", 1]] },
   wolf: { hp: 2, size: 7, drops: [["Hide", 1]] },
+  bat: { hp: 1, size: 4, drops: [] },
+  myrmex: { hp: 5, size: 8, drops: [["GoldDust", 1]] },
+  eidolon: { hp: 3, size: 6, drops: [] },
+  lampad: { hp: 2, size: 6, drops: [] },
 };
 /** Practice makes the archer: experience per shot and per hit, and how much a level is. */
 export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
 export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string }[] = [
   { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
   { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
+  { out: "Torch", qty: 2, needs: [["Wood", 1], ["Fiber", 1]], desc: "Wood wrapped in fiber and pitch, for the dark places." },
 ];
 
 // ---- danger ----
@@ -236,6 +244,7 @@ export const START_LIFE_THREAD = 8; // a Young Adult's thread
 /** Food a creature will take as a peace offering when you try to calm it. */
 export const PEACE_FOOD: Record<string, string[]> = {
   boar: ["Millet", "Chickpeas", "Melon"], deer: ["Millet", "Chickpeas", "Melon"], wolf: ["Meat"], fox: ["Meat"],
+  myrmex: ["Honey"], eidolon: ["Wine", "Milk", "Honey", "Mint"], lampad: ["Honey", "Milk", "Mint"],
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
 export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };
@@ -246,3 +255,13 @@ export const GRAPES_PER_MUST = 3; // grapes trodden for each measure of must
 export const FERMENT_DAYS = 6; // days the must works in the vat before it is wine
 export const VINE_BEARS_AFTER = 20; // days a planted cutting needs before its first vintage
 export const YOUNG_VINE_YIELD = 6;
+
+// ---- caves ----
+export type CaveType = "common" | "sacred" | "chthonic";
+/** What waits at the bottom of each kind of cave (World & Wilderness: the Core Rules' three kinds). */
+export const CAVE_KINDS: Record<CaveType, { boss: "myrmex" | "lampad" | "eidolon"; signs: string; hoard: string }> = {
+  common: { boss: "myrmex", signs: "Old fire-scars and gnawed bones: beasts and bandits have sheltered here.", hoard: "a heap of earth the ants have sifted, glinting with gold" },
+  sacred: { boss: "lampad", signs: "Dripping water, a worn stone ledge, little clay offerings: a holy place.", hoard: "a niche of old votive offerings, coins among them" },
+  chthonic: { boss: "eidolon", signs: "A cold that is not the cold of stone, and something like whispering.", hoard: "grave goods, laid with someone long dead" },
+};
+export const CAVE_LEVELS = 2;
