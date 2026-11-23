@@ -10,6 +10,7 @@ import { Animal, SPECIES, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
 import { essencePools } from "./data";
+import { MONSTERS, isMonster, monsterFor, wanderTarget, WANDER_MIN_DEPTH, GRAVE_OFFERINGS } from "./monsters";
 import { MYTH, RUNGS, RUNG_DAYS, NAIAD_NAMES, SATYR_NAMES, SPRING_SITES } from "./mythborn";
 import { VILLAGERS, REL_MIN, REL_MAX, relTier, relLabel, UPGRADES, toolName, STRANGER_KINDS, STRANGER_DAYS, GOD_CHANCE, GUEST_FOOD, type Villager } from "./village";
 import type { ScreenRec } from "./state";
@@ -215,6 +216,7 @@ abstract class PlayScene extends Phaser.Scene {
     const fx = this.player.x + dx * 10, fy = this.player.y + 4 + dy * 10;
     let best: Target | null = null, bestD = 22;
     for (const t of this.targets) {
+      if (!t.label) continue;
       const d = Math.min(Math.hypot(t.x - fx, t.y - fy), Math.hypot(t.x - this.player.x, t.y - this.player.y - 4) + 6);
       if (d < bestD) { bestD = d; best = t; }
     }
@@ -228,8 +230,8 @@ abstract class PlayScene extends Phaser.Scene {
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
     G.data.px = this.player.x; G.data.py = this.player.y;
     this.current = this.findTarget();
-    const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56);
-    if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
+    const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56 && !(isMonster(a.kind) && !MONSTERS[a.kind].calm));
+    if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: isMonster(angry.kind) && G.lore(angry.kind) >= 1 ? MONSTERS[angry.kind].calm : `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E) && this.current) this.current.act();
     const bow = G.selectedItem?.id === "bow";
@@ -255,14 +257,19 @@ abstract class PlayScene extends Phaser.Scene {
   aggressionRoll(a: Animal, bonus = 0): boolean {
     const d = SPECIES[a.kind];
     if (d.aggression <= 0 || a.appeased) return false;
-    const agg = d.aggression + (G.isDay ? 0 : 2) + (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2) + bonus;
+    // Beasts answer to Artemis and the hunter's hour; a monster to the god whose domain it is.
+    const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
+    const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus;
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > agg) return false;
-    a.charge(a.kind === "wolf" ? 7 : 5);
+    a.charge(a.kind === "wolf" ? 7 : a.kind === "skeleton" ? 40 : a.kind === "centaur" ? 12 : 5);
     this.alarm(a);
+    if (a.kind === "empousa") a.sprite.setTexture("empousaTrue", 0);
     const name = loreName(a.kind);
-    const how: Record<string, string> = { boar: "lowers its tusks and charges", wolf: "bares its teeth and comes for you", fox: "snarls and darts at you", deer: "lowers its antlers and charges" };
-    G.say(`${name[0].toUpperCase() + name.slice(1)} ${how[a.kind] ?? "comes at you"}! (d12 ${roll}${G.lore(a.kind) >= 2 ? `, Aggression ${agg}` : ""}) Run, fight, or calm it (E).`);
+    const how: Record<string, string> = { boar: "lowers its tusks and charges", wolf: "bares its teeth and comes for you", fox: "snarls and darts at you", deer: "lowers its antlers and charges",
+      centaur: "throws back its head, laughs, and comes on at the gallop", skeleton: "lifts its corroded blade and marches at you", empousa: "shows her true face, a grin too wide for any mouth, and springs at you" };
+    const what = a.kind === "skeleton" ? "Run, or break it." : a.kind === "empousa" ? `Run, fight, or ${G.lore("empousa") >= 1 ? "mock her" : "do something"} (E).` : "Run, fight, or calm it (E).";
+    G.say(`${name[0].toUpperCase() + name.slice(1)} ${how[a.kind] ?? "comes at you"}! (d12 ${roll}${G.lore(a.kind) >= 2 ? `, Aggression ${agg}` : ""}) ${what}`);
     return true;
   }
 
@@ -279,10 +286,12 @@ abstract class PlayScene extends Phaser.Scene {
     G.addFatigue(dmg);
     this.invuln = 1; this.knock = 0.22;
     const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
-    this.player.setVelocity(Math.cos(ang) * 170, Math.sin(ang) * 170);
+    const throwV = a.kind === "centaur" ? 280 : 170; // the hooved charge knocks you sprawling
+    this.player.setVelocity(Math.cos(ang) * throwV, Math.sin(ang) * throwV); if (a.kind === "centaur") this.knock = 0.35;
     this.cameras.main.shake(140, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts" };
+    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites" };
+    if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${dmg} Fatigue)`);
     if (G.data.fatigue >= 100) this.struckDown(a);
   }
@@ -303,6 +312,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > 26) return false;
     if (torch) tool = "torch";
     if (a.kind === "eidolon" && tool !== "torch") { G.say("Your blow passes through the shade like smoke. Only fire touches the dead."); return true; }
+    if (a.kind === "skeleton" && a.state === "dead") return false;
     const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return true;
     const name = beast(a.kind);
     if (!tool) { // a shove
@@ -316,12 +326,16 @@ abstract class PlayScene extends Phaser.Scene {
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
     const q = QUARRY[a.kind];
     if (a.hp < 0) a.hp = q.hp;
-    a.hp -= tool === "torch" ? (a.kind === "eidolon" ? 1 : 1) : MELEE[tool];
+    // Bare bone shrugs off cuts and shatters under crushing blows (Terata).
+    const dmg = tool === "torch" ? 1 : a.kind === "skeleton" ? ({ mattock: 2, axe: 1, sickle: 0 } as Record<string, number>)[tool] ?? 1 : MELEE[tool];
+    if (dmg === 0) { G.say(`Your ${tool} skitters off bare bone. It needs a crushing blow.`); return true; }
+    a.hp -= dmg;
+    if (a.kind === "empousa" && a.state !== "charge" && a.state !== "recoil") { a.charge(6); a.sprite.setTexture("empousaTrue", 0); }
     this.chips(Math.floor(a.sprite.x / TILE), Math.floor(a.sprite.y / TILE), -1, 4);
     if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return true; }
     a.sprite.setTint(0xff8080); this.time.delayedCall(250, () => a.sprite.clearTint());
     G.say(`You strike the ${name}! (d12 ${roll}, needed 1–${target})`);
-    if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player);
+    if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) { if (isMonster(a.kind)) a.charge(6); else a.bolt(this.player); }
     return true;
   }
 
@@ -330,6 +344,7 @@ abstract class PlayScene extends Phaser.Scene {
    * The first step of befriending: a calmed creature lets you be.
    */
   appease(a: Animal) {
+    if (a.kind === "empousa") { this.mock(a); return; }
     const b = labor({ Water: 2 }, 1, "Kardia"); if (b === null) return;
     const name = beast(a.kind);
     const held = G.selectedItem?.id ?? "";
@@ -458,7 +473,7 @@ abstract class PlayScene extends Phaser.Scene {
   aiming = false;
   aimGfx!: Phaser.GameObjects.Graphics;
   cooldown = 0;
-  arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number }[] = [];
+  arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number; from?: Animal }[] = [];
   pickups: { id: string; qty: number; img: Phaser.GameObjects.Image }[] = [];
   get canHunt() { return true; }
 
@@ -534,7 +549,7 @@ abstract class PlayScene extends Phaser.Scene {
       const z = 4 * a.h * u * (1 - u), dz = (4 * a.h * (1 - 2 * u)) / a.T;
       a.img.setPosition(gx, gy - z).setRotation(Math.atan2((a.ly - a.sy) / a.T - dz, (a.lx - a.sx) / a.T));
       a.shadow.setPosition(gx, gy);
-      if (u >= 1) { this.arrows.splice(this.arrows.indexOf(a), 1); a.img.destroy(); a.shadow.destroy(); this.land(a.lx, a.ly); }
+      if (u >= 1) { this.arrows.splice(this.arrows.indexOf(a), 1); a.img.destroy(); a.shadow.destroy(); if (a.from) this.arrowAtYou(a.lx, a.ly, a.from); else this.land(a.lx, a.ly); }
     }
   }
 
@@ -543,6 +558,48 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Something notable happened to a creature (a cave's keeper slain or appeased). */
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
+  /** A scene may take over what happens when a creature is beaten (the dead fall apart and rise again). */
+  overcome(_a: Animal) { return false; }
+
+  /** A creature's arrow falls: only where it lands, as with yours. Keep moving. */
+  arrowAtYou(x: number, y: number, from: Animal) {
+    if (Math.hypot(this.player.x - x, this.player.y + 4 - y) > 9 || this.invuln > 0 || this.leaving) {
+      if (this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
+      return;
+    }
+    const dmg = Math.max(1, 8 - (G.data.health - 4));
+    G.addFatigue(dmg); this.invuln = 0.8;
+    this.cameras.main.shake(100, 0.004);
+    this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
+    G.say(`An arrow from the ${beast(from.kind)} finds you! (+${dmg} Fatigue)`);
+    if (G.data.fatigue >= 100) this.struckDown(from);
+  }
+
+  /** A creature looses an arrow at where you will be, leading you a little. */
+  shootAt(a: Animal) {
+    const sx = a.sprite.x, sy = a.sprite.y - 4;
+    const v = this.player.body!.velocity, d = Math.hypot(this.player.x - sx, this.player.y - sy);
+    const T = 0.12 + d / ARROW_SPEED, lead = 0.7;
+    const ang = Math.random() * Math.PI * 2, rr = 14 * Math.sqrt(Math.random());
+    const lx = this.player.x + v.x * T * lead + Math.cos(ang) * rr, ly = this.player.y + 4 + v.y * T * lead + Math.sin(ang) * rr;
+    const img = this.add.image(sx, sy, "arrow").setDepth(100001);
+    const shadow = this.add.ellipse(sx, sy + 4, 6, 2, 0x000000, 0.25).setDepth(1);
+    this.arrows.push({ img, shadow, sx, sy, lx, ly, t: 0, T, h: d * 0.22 + 6, from: a });
+  }
+
+  /** Sincere mockery routs an empousa: a Logos or Phoenix check against CR 8 (d12 + the better of the two). */
+  mock(a: Animal) {
+    const b = labor({ Water: 1 }, 0.5, "Logos"); if (b === null) return;
+    const best = Math.max(G.data.aretai.Logos ?? 3, G.data.aretai.Phoenix ?? 3), roll = 1 + Math.floor(Math.random() * 12);
+    const odds = `d12 ${roll} + ${best} vs 8`;
+    if (roll + best >= 8) {
+      G.say(`You laugh at her: the bronze leg, the ass's hoof, the borrowed face. She shrieks, a terrible cry, and flees into the dark (${odds}).`);
+      G.earn("Kleos", 1, "you laughed an empousa off the road");
+      a.state = "dead"; a.sprite.setVelocity(0, 0);
+      this.tweens.add({ targets: a.sprite, alpha: 0, y: a.sprite.y - 10, duration: 600, onComplete: () => { a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1); } });
+      if (G.lore("empousa") < 1) G.data.lore.tier.empousa = 1;
+    } else { G.say(`Your mockery comes out thin and frightened, and she only smiles wider (${odds}).`); if (a.state !== "charge") a.charge(6); }
+  }
 
   /** An arrow that falls among the Mythborn: an offense, not a hunt. */
   mythHit(_x: number, _y: number) { return false; }
@@ -555,6 +612,7 @@ abstract class PlayScene extends Phaser.Scene {
     const goat = this.animals.find((a) => a.kind === "goat" && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= 10);
     let broke = Math.random() < 0.1;
     if (hit && hit.kind === "eidolon") { G.say("Your arrow passes through the shade and clatters on the stone."); hit.charge(5); }
+    else if (hit && hit.kind === "skeleton") { G.say("Your arrow rattles through its ribs and does nothing. Bone wants a crushing blow."); if (hit.state !== "charge") hit.charge(40); }
     else if (hit) {
       const q = QUARRY[hit.kind];
       if (hit.hp < 0) hit.hp = q.hp;
@@ -565,6 +623,7 @@ abstract class PlayScene extends Phaser.Scene {
       else {
         hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
         if (this.aggressionRoll(hit, 3)) G.say(`A hit! The wounded ${beast(hit.kind)} turns on you!`);
+        else if (isMonster(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`A hit! The ${beast(hit.kind)} turns on you!`); }
         else { hit.bolt({ x, y: y - 20 }); G.say(`A hit! The ${beast(hit.kind)} is wounded and runs.`); }
       }
     } else {
@@ -578,12 +637,14 @@ abstract class PlayScene extends Phaser.Scene {
   }
 
   kill(a: Animal) {
+    if (this.overcome(a)) return;
     const known = G.lore(a.kind) >= 1;
     a.state = "dead"; a.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
     const name = beast(a.kind);
     G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: offer her a share (antler or meat) at an altar before you sleep." : ""}`);
     if (a.kind === "deer") G.data.deerDebt++;
-    if (a.kind === "boar" || a.kind === "wolf") G.earn("Kleos", 1, `you brought down a ${name}`);
+    if (a.kind === "boar" || a.kind === "wolf" || a.kind === "centaur") G.earn("Kleos", 1, `you brought down a ${name}`);
+    if (a.kind === "empousa") { G.say("She collapses into foul ash, and the meadow smells of flowers again."); G.earn("Kleos", 1, "you destroyed an empousa"); }
     if (!known && LORE[a.kind]) { G.data.lore.tier[a.kind] = 1; G.say(`Up close, you know it now: a ${LORE[a.kind].name.toLowerCase()}.`); }
     if (a.flock.length) for (const b of a.flock) if (b !== a && b.state !== "dead" && b.state !== "gone") b.bolt(a.sprite);
     this.time.delayedCall(700, () => {
@@ -1737,6 +1798,8 @@ class WildScene extends PlayScene {
     this.spawnCreatures(p, gen);
     this.spawnMythborn();
     if (this.hasCave) this.placeCaveMouth();
+    this.setupBarrow();
+    this.maybeMonster();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -1897,6 +1960,211 @@ class WildScene extends PlayScene {
     return false;
   }
 
+  // ---------------------------------------------------------------- wandering monsters
+  monster?: Animal;
+  bones?: Phaser.GameObjects.Image;
+  riseT = 0;
+  shootT = 0;
+  meeting: "" | "coming" | "talking" | "done" = "";
+
+  /** How far out this screen lies: the larger of its distances from home east-west and north-south. */
+  get depth() { return Math.max(Math.abs(G.data.wx), Math.abs(G.data.wy)); }
+
+  /** On arrival far from home, a d12: on a high roll, this terrain's monster is here (if it is its hour). */
+  maybeMonster() {
+    this.monster = undefined; this.meeting = ""; this.shootT = 1.5;
+    const m = monsterFor(this.rec.terrain);
+    if (!m || (m.kind === "skeleton" && this.rec.barrow)) return; // a known barrow keeps its own dead
+    if (this.depth < WANDER_MIN_DEPTH || !this.monsterHour(m.when)) return;
+    const roll = 1 + Math.floor(Math.random() * 12);
+    if (roll < wanderTarget(this.depth)) return;
+    this.spawnMonster(m.kind);
+  }
+
+  monsterHour(when: "any" | "night" | "dusk") { return when === "any" || (when === "night" ? !G.isDay : G.data.clock >= G.daylight - 1); }
+
+  spawnMonster(kind: "centaur" | "skeleton" | "empousa") {
+    const m = MONSTERS[kind], free = (x: number, y: number) => this.free(x, y);
+    let x = WW * 8, y = WH * 8;
+    if (kind === "skeleton") {
+      if (!this.rec.barrow) { this.rec.barrow = this.barrowSpot(); this.setupBarrow(); }
+      [x, y] = [this.rec.barrow[0] * TILE + 8, this.rec.barrow[1] * TILE + 8];
+    } else {
+      for (let i = 0; i < 80; i++) {
+        const tx = 3 + Math.floor(Math.random() * (WW - 6)), ty = 3 + Math.floor(Math.random() * (WH - 6));
+        if (Math.hypot(tx * TILE - this.player.x, ty * TILE - this.player.y) > 170 && free(tx * TILE + 8, ty * TILE + 8)) { x = tx * TILE + 8; y = ty * TILE + 8; break; }
+      }
+    }
+    const range = kind === "centaur" ? 160 : 60;
+    const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
+    this.physics.add.collider(a.sprite, this.objects);
+    this.animals.push(a); this.monster = a;
+    if (kind === "centaur") a.decide = (b) => { if (!this.aggressionRoll(b)) { this.meeting = "coming"; G.say(`The ${beast("centaur")} trots toward you, curious.`); } };
+    if (kind === "empousa") a.decide = () => { this.meeting = "coming"; };
+    if (kind === "skeleton") {
+      a.decide = (b) => { if (!this.aggressionRoll(b)) b.rerollT = 4; }; // the dead keep looking for the living
+      if (this.bones) this.bones.setVisible(false);
+      a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 1, duration: 900 });
+    }
+    const sc = this;
+    if (kind !== "skeleton") this.targets.push({ get x() { return a.sprite.x; }, get y() { return a.sprite.y + 2; },
+      get label() { return a.state === "dead" || a.state === "charge" || a.state === "recoil" || !a.sprite.active ? "" : kind === "centaur" ? (a.appeased ? "" : "Speak with the centaur") : "Speak with the stranger"; },
+      act: () => (kind === "centaur" ? sc.talkCentaur(a) : sc.meetEmpousa(a)) });
+    const met = G.data.met[kind] ?? 0; G.data.met[kind] = met + 1;
+    G.say(met ? m.again : m.first);
+  }
+
+  /** A grave among the stones, chosen once for the screen. */
+  barrowSpot(): [number, number] {
+    const r = rng(screenSeed(G.data.wx, G.data.wy) ^ 0xb0e5);
+    for (let i = 0; i < 200; i++) {
+      const tx = 4 + Math.floor(r() * (WW - 8)), ty = 4 + Math.floor(r() * (WH - 8));
+      if (this.free(tx * TILE + 8, ty * TILE + 8) && Math.hypot(tx * TILE - this.player.x, ty * TILE - this.player.y) > 120) return [tx, ty];
+    }
+    return [Math.floor(WW / 2), Math.floor(WH / 2)];
+  }
+
+  /** A known barrow: the bones lie there by day and stand at night, until they are given their rites. */
+  setupBarrow() {
+    if (!this.rec.barrow || this.bones?.active) return;
+    const [bx, by] = this.rec.barrow, x = bx * TILE + 8, y = by * TILE + 10;
+    this.bones = this.add.image(x, y, "bones").setDepth(y - 6);
+    if (this.rec.laid) { this.bones.setAlpha(0.55); this.add.image(x + 9, y - 6, "items", "Stone").setDepth(y - 2).setScale(0.6); }
+    const sc = this;
+    this.targets.push({ get x() { return sc.bones!.x; }, get y() { return sc.bones!.y; },
+      get label() { return !sc.bones!.visible ? "" : sc.rec.laid ? "A grave, at rest" : "Give the bones their rites"; }, act: () => sc.rite() });
+  }
+
+  /** The dead fall apart, and unless the bones are given their rites, they gather and rise again. */
+  overcome(a: Animal) {
+    if (a.kind !== "skeleton") return false;
+    a.state = "dead"; a.sprite.setVelocity(0, 0).setVisible(false);
+    this.bones?.setPosition(a.sprite.x, a.sprite.y + 2).setVisible(true).setDepth(a.sprite.y - 4);
+    this.chips(Math.floor(a.sprite.x / TILE), Math.floor(a.sprite.y / TILE), -1, 6);
+    this.riseT = 20;
+    G.say("It falls apart in a clatter of bones. Give them their rites (E, with a libation in hand) before they gather again.");
+    if (G.lore("skeleton") < 1) { G.data.lore.tier.skeleton = 1; G.say("Up close, you know it now: the restless dead, a skeleton."); }
+    return true;
+  }
+
+  /** A libation and a Pneuma check (d12 at or under Pneuma + 3, Hades' favor helping) lays the dead to rest. */
+  rite() {
+    const sk = this.monster?.kind === "skeleton" ? this.monster : undefined;
+    if (this.rec.laid) { G.say("The grave is quiet. Whoever lies here is at rest."); return; }
+    if (sk && sk.state !== "dead") { G.say("It is standing. Break it first."); return; }
+    const held = G.selectedItem?.id ?? "";
+    if (!GRAVE_OFFERINGS.includes(held)) { G.say(`Old bones, scattered among the stones, unburied. ${G.lore("skeleton") >= 1 ? "Hold out a libation (wine, milk or honey) to give them their rites." : "They seem to want something."}`); return; }
+    const b = labor({ Water: 2 }, 1, "Pneuma"); if (b === null) return;
+    G.removeItem(held, 1);
+    const target = (G.data.aretai.Pneuma ?? 3) + 3 + G.boon("Hades"), roll = 1 + Math.floor(Math.random() * 12);
+    const odds = `d12 ${roll}, needed 1–${target}`;
+    if (roll > target) { G.say(`You pour the ${ITEMS[held].name.toLowerCase()} over the bones and speak the words, but they will not settle (${odds}).`); return; }
+    this.rec.laid = true; this.riseT = 0;
+    if (sk) { sk.sprite.destroy(); this.animals.splice(this.animals.indexOf(sk), 1); this.monster = undefined; }
+    this.bones?.setAlpha(0.55);
+    if (this.bones) this.add.image(this.bones.x + 9, this.bones.y - 6, "items", "Stone").setDepth(this.bones.y - 2).setScale(0.6);
+    G.addFavor("Hades", 1, 3); G.data.currencies.Pathos += 1; G.data.silver += 15;
+    G.say(`You pour the ${ITEMS[held].name.toLowerCase()} over the bones, heap stones above them and speak the old words. They are still (${odds}). Among them, 15 silver in old grave goods. (+1 Pathos; the dead remember you.)`);
+  }
+
+  monsterTick(dt: number) {
+    // The barrow's dead stand at nightfall, gather again if broken, and lie down at dawn.
+    if (this.rec.barrow && !this.rec.laid) {
+      const sk = this.monster?.kind === "skeleton" ? this.monster : undefined;
+      if (!sk && !G.isDay) this.spawnMonster("skeleton");
+      else if (sk && sk.state === "dead" && (this.riseT -= dt) <= 0) {
+        if (G.isDay) { this.riseT = 1; }
+        else {
+          sk.state = "idle"; sk.hp = QUARRY.skeleton.hp; sk.rolled = false; sk.appeased = false;
+          sk.sprite.setPosition(this.bones!.x, this.bones!.y - 2).setVisible(true).setAlpha(0);
+          this.tweens.add({ targets: sk.sprite, alpha: 1, duration: 900 });
+          this.bones!.setVisible(false);
+          G.say("Dry clicks: the bones gather themselves and stand again.");
+        }
+      } else if (sk && sk.state !== "dead" && G.isDay) {
+        sk.state = "dead"; sk.sprite.setVisible(false).setVelocity(0, 0); this.riseT = 1;
+        this.bones!.setPosition(sk.sprite.x, sk.sprite.y + 2).setVisible(true);
+        G.say("Dawn: the bones fall where they stand and lie still.");
+      }
+    }
+    const a = this.monster;
+    if (!a || !a.sprite.active || a.state === "dead") return;
+    const dist = Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y);
+    // The centaur shoots when it cannot reach you, then comes on again.
+    if (a.kind === "centaur" && a.state === "charge" && dist > 70 && dist < 230 && (this.shootT -= dt) <= 0) {
+      this.shootT = 2.2 + Math.random();
+      a.state = "recoil"; a.timer = 0.6; a.sprite.setVelocity(0, 0);
+      this.time.delayedCall(250, () => { if (a.sprite.active && a.state !== "dead") this.shootAt(a); });
+    }
+    // A curious centaur, or the stranger, walks up to you.
+    if (this.meeting === "coming" && a.state !== "charge" && a.state !== "recoil" && !a.appeased) {
+      if (dist > 26) { a.state = "walk"; a.tx = this.player.x; a.ty = this.player.y + 2; a.timer = 1; }
+      else { a.state = "idle"; a.timer = 2; a.sprite.setVelocity(0, 0); if (a.kind === "empousa") this.meetEmpousa(a); else this.meeting = "done"; }
+    }
+    // Walking away from the stranger's invitation is declining it.
+    if (a.kind === "empousa" && this.meeting === "talking" && !ui(this).talkPanel) { this.meeting = "done"; this.declineEmpousa(a); }
+  }
+
+  /** A centaur that chose conversation: wine, a contest of strength, or leave it be. */
+  talkCentaur(a: Animal) {
+    const u = ui(this), name = G.lore("centaur") >= 1 ? "The centaur" : "The horse-man";
+    a.state = "idle"; a.timer = 6; a.sprite.setVelocity(0, 0); this.meeting = "done";
+    const wine = G.count("Wine") > 0;
+    const leave = (msg: string) => { a.appeased = true; u.closeTalk(); G.say(msg); this.time.delayedCall(1500, () => { if (a.sprite.active) { a.state = "walk"; a.tx = a.sprite.x < WW * 8 ? -40 : WW * TILE + 40; a.ty = a.sprite.y; a.timer = 12; } }); };
+    const opts: { label: string; fn: () => void }[] = [];
+    if (wine) opts.push({ label: "Offer him wine, with respect", fn: () => {
+      G.removeItem("Wine", 1);
+      G.data.archeryXp += 20; G.addFavor("Poseidon", 1, 3);
+      if (G.lore("centaur") < 2) G.data.lore.tier.centaur = Math.max(1, G.lore("centaur"));
+      leave(`${name} drinks deep, wipes his beard and laughs. In thanks he shows you how his people draw and loose at the gallop. (Archery practice +20; Poseidon is pleased.)`);
+    } });
+    opts.push({ label: "Wrestle him for honor (Kratos)", fn: () => {
+      const k = G.data.aretai.Kratos ?? 3, roll = 1 + Math.floor(Math.random() * 12);
+      if (roll <= k) { G.earn("Kleos", 1, "you threw a centaur"); leave(`You catch him off balance and throw him on his flank! ${name} roars with laughter and gives you the win (d12 ${roll}, needed 1–${k}).`); }
+      else { G.addFatigue(15); leave(`${name} lifts you off your feet and drops you in the bracken, laughing (d12 ${roll}, needed 1–${k}; +15 Fatigue). "Another day, little two-legs."`); }
+    } });
+    opts.push({ label: "Nod, and let him go his way", fn: () => leave(`${name} tosses his head and canters off among the trees.`) });
+    u.showTalk(G.lore("centaur") >= 1 ? "A centaur" : "A horse-man", "Half man, half stallion, sharp-eyed and half-amused",
+      wine ? "\"Two-legs! I smell wine on you. Or is it only hope?\"" : "\"Two-legs. Have you anything to drink, or only questions?\"", opts);
+  }
+
+  /** The stranger at dusk. A Gnosis check (d12 + Gnosis vs CR 10) may show you what she is. */
+  pierced = false;
+  meetEmpousa(a: Animal) {
+    if (this.meeting === "talking" || a.state === "charge" || a.state === "recoil") return;
+    const u = ui(this);
+    this.meeting = "talking"; a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0);
+    const g = (G.data.aretai.Gnosis ?? 3) + (G.lore("empousa") >= 2 ? 2 : 0), roll = 1 + Math.floor(Math.random() * 12);
+    this.pierced = roll + g >= 10;
+    const seen = this.pierced ? ` But as she turns, the last light catches her legs: one of bronze, one the hoof of an ass. (Gnosis: d12 ${roll} + ${g} vs 10.)` : "";
+    if (this.pierced && G.lore("empousa") < 1) G.data.lore.tier.empousa = 1;
+    const opts: { label: string; fn: () => void }[] = [
+      { label: "Go with her", fn: () => { this.meeting = "done"; u.closeTalk(); this.drained(a); } },
+    ];
+    if (this.pierced) opts.push({ label: "Laugh at her (Logos or Phoenix)", fn: () => { this.meeting = "done"; u.closeTalk(); this.mock(a); } });
+    opts.push({ label: "Thank her, and decline", fn: () => { this.meeting = "done"; u.closeTalk(); this.declineEmpousa(a); } });
+    u.showTalk("A beautiful stranger", this.pierced ? "An empousa, Hecate's night-demon" : "Lovely, and alone, at dusk",
+      `"You look tired, traveler. Come and rest with me a while, just over there, where the flowers are thickest."${seen}`, opts);
+  }
+
+  /** Seduced: she feeds, and you wake alone among the flowers. */
+  drained(a: Animal) {
+    G.addFatigue(30);
+    this.tweens.add({ targets: a.sprite, alpha: 0, duration: 800, onComplete: () => { a.state = "dead"; a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1); } });
+    this.cameras.main.flash(500, 120, 20, 30);
+    G.say(`You wake alone among the trampled flowers, cold and weak, with two small wounds at your throat. (+30 Fatigue)${G.lore("empousa") < 1 ? "" : " An empousa."}`);
+    if (G.data.fatigue >= 100) this.struckDown(a);
+  }
+
+  /** Refused, she may let you go, or show her true face (her Aggression roll). */
+  declineEmpousa(a: Animal) {
+    if (!this.aggressionRoll(a)) {
+      G.say("She smiles, a little too long, and walks away into the dusk. You do not see where she goes.");
+      a.appeased = true; a.state = "walk"; a.tx = a.sprite.x + 200; a.ty = a.sprite.y - 120; a.timer = 6;
+      this.tweens.add({ targets: a.sprite, alpha: 0, delay: 2500, duration: 1500, onComplete: () => { a.state = "dead"; a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } });
+    }
+  }
+
   /** Wolves hunt the forests from dusk. */
   wolvesOut = false;
   maybeWolves(gen: () => number = Math.random) {
@@ -1919,6 +2187,7 @@ class WildScene extends PlayScene {
     this.updateMythborn(dt);
     if (!this.common(dt)) return;
     this.maybeWolves();
+    this.monsterTick(dt);
     const px = this.player.x, py = this.player.y;
     if (this.knock > 0) return; // a blow can't throw you onto the next map
     if (px < 7 && this.open.W) this.leaveFor(-1, 0, "E");
@@ -2435,6 +2704,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
+      "Far from home (4+ screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
       "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
       "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
       "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",

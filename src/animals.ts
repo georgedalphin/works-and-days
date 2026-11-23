@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad";
+export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad" | "centaur" | "skeleton" | "empousa";
 
 interface SpeciesDef {
   name: string;
@@ -14,6 +14,7 @@ interface SpeciesDef {
   charge: number; // charging speed, px/s
   damage: number; // Fatigue dealt by a blow
   notice?: number; // how far off it notices you (default: its scare distance, at least 40)
+  giveUp?: number; // how far you must get before a charge is abandoned (default 230)
 }
 
 export const SPECIES: Record<Species, SpeciesDef> = {
@@ -27,6 +28,10 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   myrmex: { name: "myrmex", walk: 16, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 1, 9], frameRate: 8, aggression: 8, charge: 92, damage: 12, notice: 84 },
   eidolon: { name: "eidolon", walk: 10, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 6, 4, 9], frameRate: 3, aggression: 6, charge: 68, damage: 10, notice: 80 },
   lampad: { name: "lampad", walk: 6, flee: 0, scare: 0, idle: [2, 5], body: [8, 6, 4, 9], frameRate: 3, aggression: 1, charge: 50, damage: 5, notice: 70 },
+  // Wandering monsters (AEGIS Terata). The centaur gallops; the dead march and never tire.
+  centaur: { name: "centaur", walk: 26, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 5, 16], frameRate: 8, aggression: 5, charge: 118, damage: 13, notice: 120, giveUp: 320 },
+  skeleton: { name: "skeleton", walk: 12, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 5, 4, 11], frameRate: 5, aggression: 6, charge: 36, damage: 10, notice: 96, giveUp: 600 },
+  empousa: { name: "empousa", walk: 18, flee: 0, scare: 0, idle: [1, 3], body: [8, 5, 4, 11], frameRate: 4, aggression: 6, charge: 74, damage: 12, notice: 110, giveUp: 300 },
   bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0 },
 };
 
@@ -132,7 +137,7 @@ export class Animal {
       if (this.timer <= 0) { this.state = "charge"; }
       return;
     }
-    if (this.chaseT <= 0 || dist > 230) { this.state = "idle"; this.timer = 2; s.setVelocity(0, 0); return; } // it gives up
+    if (this.chaseT <= 0 || dist > (d.giveUp ?? 230)) { this.state = "idle"; this.timer = 2; s.setVelocity(0, 0); return; } // it gives up
     const ang = Math.atan2(player.y + 3 - s.y, player.x - s.x);
     s.setVelocity(Math.cos(ang) * d.charge, Math.sin(ang) * d.charge);
     if (dist < 10) {

@@ -230,6 +230,10 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   myrmex: { hp: 5, size: 8, drops: [["GoldDust", 1]] },
   eidolon: { hp: 3, size: 6, drops: [] },
   lampad: { hp: 2, size: 6, drops: [] },
+  // Wandering monsters: Terata Vitality scaled to hits (a boar's 18 Vitality = 3 hits).
+  centaur: { hp: 4, size: 10, drops: [["Hide", 1], ["Arrow", 3]] },
+  skeleton: { hp: 3, size: 7, drops: [] },
+  empousa: { hp: 3, size: 6, drops: [] },
 };
 /** Practice makes the archer: experience per shot and per hit, and how much a level is. */
 export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
@@ -245,6 +249,7 @@ export const START_LIFE_THREAD = 8; // a Young Adult's thread
 export const PEACE_FOOD: Record<string, string[]> = {
   boar: ["Millet", "Chickpeas", "Melon"], deer: ["Millet", "Chickpeas", "Melon"], wolf: ["Meat"], fox: ["Meat"],
   myrmex: ["Honey"], eidolon: ["Wine", "Milk", "Honey", "Mint"], lampad: ["Honey", "Milk", "Mint"],
+  centaur: ["Wine"], // Terata: "wine offered with respect, not mockery"
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
 export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };

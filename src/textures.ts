@@ -323,6 +323,49 @@ export function makeTextures(scene: Phaser.Scene) {
       px(c, o + 12, 3, 1, 8, "#6b4a2b"); px(c, o + 11, 1 - f, 3, 3, "#f2c14e"); px(c, o + 12, 0, 1, 2, "#e0703a"); }
   });
   lam.add(0, 0, 0, 0, 16, 16); lam.add(1, 0, 16, 0, 16, 16);
+  // Wandering monsters (AEGIS Terata).
+  const cen = canvasTex(scene, "centaur", 48, 24, (c) => {
+    for (const o of [0, 24]) { const f = o ? 1 : 0, H = "#7a4a2a", D = "#4a2c18";
+      px(c, o + 3, 21, 18, 3, "rgba(0,0,0,0.25)");
+      px(c, o + 2, 11, 14, 7, H); px(c, o + 1, 12, 2, 4, D); px(c, o + 0, 13, 2, 6, D); // body and tail
+      for (const [x, k] of [[3, f], [6, -f], [12, -f], [15, f]] as [number, number][]) px(c, o + x + k, 18, 2, 4, D);
+      px(c, o + 13, 4, 6, 8, "#c98e62"); px(c, o + 14, 0, 4, 4, "#c98e62"); px(c, o + 14, 0, 4, 1, "#2a1d14"); px(c, o + 13, 1, 1, 3, "#2a1d14");
+      px(c, o + 17, 2, 1, 1, "#1a1210"); px(c, o + 13, 7, 6, 2, "#5e7f34"); // eye, fillet of leaves
+      px(c, o + 19, 3 + f, 1, 10, "#8a5f35"); px(c, o + 20, 4 + f, 1, 8, "#e9e1cf"); // bow
+      px(c, o + 11, 5, 2, 4, "#6b4a2b"); // quiver
+    }
+  });
+  cen.add(0, 0, 0, 0, 24, 24); cen.add(1, 0, 24, 0, 24, 24);
+  const skel = canvasTex(scene, "skeleton", 32, 16, (c) => {
+    for (const o of [0, 16]) { const f = o ? 1 : 0, B = "#e4dcc4", S = "#9c947c";
+      px(c, o + 4, 14, 8, 2, "rgba(0,0,0,0.25)");
+      px(c, o + 6, 1, 4, 4, B); px(c, o + 7, 2, 1, 1, "#1a1210"); px(c, o + 9, 2, 1, 1, "#1a1210"); px(c, o + 7, 4, 2, 1, S);
+      px(c, o + 7, 5, 2, 5, B); for (const y of [6, 8]) px(c, o + 5, y, 6, 1, S);
+      px(c, o + 4, 6, 1, 4 + f, B); px(c, o + 11, 6, 1, 4 - f, B);
+      px(c, o + 6 - f, 10, 1, 5, B); px(c, o + 9 + f, 10, 1, 5, B);
+      px(c, o + 12, 3 - f, 1, 7, "#7a8a6a"); px(c, o + 12, 10 - f, 1, 1, "#5a4a3a"); // a corroded blade
+    }
+  });
+  skel.add(0, 0, 0, 0, 16, 16); skel.add(1, 0, 16, 0, 16, 16);
+  canvasTex(scene, "bones", 16, 10, (c) => {
+    px(c, 2, 8, 12, 2, "rgba(0,0,0,0.2)"); px(c, 3, 4, 4, 3, "#e4dcc4"); px(c, 4, 5, 1, 1, "#1a1210");
+    px(c, 7, 6, 7, 1, "#d8d0b8"); px(c, 8, 3, 1, 5, "#d8d0b8"); px(c, 10, 2, 4, 1, "#c4bca4"); px(c, 1, 7, 5, 1, "#c4bca4"); px(c, 11, 4, 1, 4, "#7a8a6a");
+  });
+  for (const [key, trueForm] of [["empousa", false], ["empousaTrue", true]] as [string, boolean][]) {
+    const t = canvasTex(scene, key, 32, 16, (c) => {
+      for (const o of [0, 16]) { const f = o ? 1 : 0;
+        px(c, o + 4, 14, 8, 2, "rgba(0,0,0,0.25)");
+        px(c, o + 5, 5, 6, 8, trueForm ? "#7a2030" : "#c24a5a"); px(c, o + 5, 7, 6, 1, "#f2c14e");
+        px(c, o + 6, 1, 4, 4, trueForm ? "#e86a4a" : "#e0b090"); px(c, o + 5, 0, 6, 2, "#1a1210"); px(c, o + 4, 2, 1, 5, "#1a1210"); px(c, o + 11, 2, 1, 5, "#1a1210");
+        px(c, o + 7, 2, 1, 1, trueForm ? "#f2e030" : "#2a1d14"); px(c, o + 9, 2, 1, 1, trueForm ? "#f2e030" : "#2a1d14");
+        if (trueForm) px(c, o + 6, 4, 4, 1, "#fff6e0"); // a grin too wide for any mouth
+        px(c, o + 6, 13, 1, 2 + f, trueForm ? "#d8a040" : "#e0b090"); // one leg of bronze...
+        px(c, o + 9, 13, 2, 2 - f, trueForm ? "#5a4a3a" : "#e0b090"); // ...and one of an ass
+      }
+    });
+    t.add(0, 0, 0, 0, 16, 16); t.add(1, 0, 16, 0, 16, 16);
+  }
+
   // Darkness: a black field with a soft hole of light, small without a torch, larger with one.
   for (const [key, r] of [["dark0", 30], ["dark1", 78]] as [string, number][]) {
     canvasTex(scene, key, 640, 640, (c) => {
