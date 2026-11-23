@@ -7,6 +7,8 @@ import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
+import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
+import { essencePools } from "./data";
 import { VILLAGERS, REL_MIN, REL_MAX, relTier, relLabel, UPGRADES, toolName, STRANGER_KINDS, STRANGER_DAYS, GOD_CHANCE, GUEST_FOOD, type Villager } from "./village";
 import type { ScreenRec } from "./state";
 
@@ -33,7 +35,8 @@ function labor(cost: Record<string, number>, fatigue: number, aretai: string): s
   const c: Record<string, number> = {};
   for (const [k, v] of Object.entries(cost)) c[k] = v * disc;
   if (!G.spend(c)) { G.say("You need a moment to catch your breath."); return null; }
-  G.addFatigue(fatigue * disc);
+  const zeus = aretai === "Kratos" ? 1 - 0.08 * G.boon("Zeus") : 1; // Zeus eases heavy labor
+  G.addFatigue(fatigue * disc * zeus);
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
@@ -59,7 +62,7 @@ function study(id: string): boolean {
   const gnosis = G.data.aretai.Gnosis ?? 3;
   const hera = G.patron?.aretai === "Gnosis" ? HERA_HOUR_BONUS : 0;
   const fails = Math.min(MAX_PERSEVERANCE, G.data.lore.fails[id] ?? 0);
-  const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails;
+  const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails + G.boon("Hera");
   if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
   const b = labor({ Water: 3 }, 1, "Gnosis"); if (b === null) return false;
   G.data.lore.studied[id] = G.dayNumber;
@@ -74,6 +77,9 @@ function study(id: string): boolean {
   G.say(`You study ${loreName(id)} closely, but nothing new comes clear (${odds}). Try again tomorrow.`);
   return false;
 }
+
+/** Poseidon's favor deepens your water jar. */
+const jarCap = () => Math.max(10, JAR_CAPACITY + 5 * G.boon("Poseidon"));
 
 function give(id: string, qty: number, q?: number): string {
   const left = G.addItem(id, qty, q);
@@ -174,7 +180,7 @@ abstract class PlayScene extends Phaser.Scene {
     let speed = 70;
     const moving = vx !== 0 || vy !== 0;
     if (moving && k.SHIFT.isDown) {
-      const cost = 3 * dt * G.hourDiscount("Aiolos");
+      const cost = 3 * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
@@ -240,7 +246,7 @@ abstract class PlayScene extends Phaser.Scene {
   aggressionRoll(a: Animal, bonus = 0): boolean {
     const d = SPECIES[a.kind];
     if (d.aggression <= 0 || a.appeased) return false;
-    const agg = d.aggression + (G.isDay ? 0 : 2) + (G.patron?.aretai === "Kardia" ? -2 : 0) + bonus;
+    const agg = d.aggression + (G.isDay ? 0 : 2) + (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2) + bonus;
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > agg) return false;
     a.charge(a.kind === "wolf" ? 7 : 5);
@@ -273,6 +279,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   struckDown(a: Animal) {
     G.data.lifeThread = Math.max(0, G.data.lifeThread - 1);
+    G.data.currencies.Pathos++; // what suffering teaches
     for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); }
     if (G.data.lifeThread <= 0) { ui(this).death(`${LORE[a.kind]?.name ?? a.kind}`); return; }
     ui(this).sleep(this, true, `You are struck down by the ${beast(a.kind)}. A shepherd finds you and carries you home.\nYour Life Thread frays: ${G.data.lifeThread} of ${START_LIFE_THREAD} remain.`);
@@ -291,7 +298,7 @@ abstract class PlayScene extends Phaser.Scene {
       return true;
     }
     const thymos = G.data.aretai.Thymos ?? 3;
-    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0);
+    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares");
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
     const q = QUARRY[a.kind];
@@ -316,7 +323,7 @@ abstract class PlayScene extends Phaser.Scene {
     const food = (PEACE_FOOD[a.kind] ?? []).includes(held);
     if (food) G.removeItem(held, 1);
     const kardia = G.data.aretai.Kardia ?? 3;
-    const target = kardia + 2 + (food ? 3 : 0) + (G.patron?.aretai === "Kardia" ? 2 : 0) - Math.floor(SPECIES[a.kind].aggression / 2);
+    const target = kardia + 2 + (food ? 3 : 0) + (G.patron?.aretai === "Kardia" ? 2 : 0) - Math.floor(SPECIES[a.kind].aggression / 2) + G.boon("Athena");
     const roll = 1 + Math.floor(Math.random() * 12);
     const odds = `d12 ${roll}, needed 1–${Math.max(0, target)}${food ? `, ${ITEMS[held].name.toLowerCase()} offered +3` : ""}`;
     if (roll <= target) {
@@ -455,6 +462,7 @@ abstract class PlayScene extends Phaser.Scene {
     const our = G.data.aretai.Ourania ?? 3;
     let r = Math.max(2, 26 - 2 * our - 2 * G.archery) * (0.45 + dist / BOW_RANGE);
     if (G.patron?.aretai === "Ourania") r *= 0.75;
+    r *= Math.max(0.5, 1 - 0.08 * G.boon("Apollo"));
     if (G.exhausted) r *= 1.4;
     return r;
   }
@@ -539,7 +547,9 @@ abstract class PlayScene extends Phaser.Scene {
     const known = G.lore(a.kind) >= 1;
     a.state = "dead"; a.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
     const name = beast(a.kind);
-    G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: remember her share." : ""}`);
+    G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: offer her a share (antler or meat) at an altar before you sleep." : ""}`);
+    if (a.kind === "deer") G.data.deerDebt++;
+    if (a.kind === "boar" || a.kind === "wolf") G.earn("Kleos", 1, `you brought down a ${name}`);
     if (!known && LORE[a.kind]) { G.data.lore.tier[a.kind] = 1; G.say(`Up close, you know it now: a ${LORE[a.kind].name.toLowerCase()}.`); }
     if (a.flock.length) for (const b of a.flock) if (b !== a && b.state !== "dead" && b.state !== "gone") b.bolt(a.sprite);
     this.time.delayedCall(700, () => {
@@ -597,7 +607,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
   updateAnimals(dt: number) {
     const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
-    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1);
+    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis"));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     if (!this.paused) for (const a of this.animals) a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
@@ -981,7 +991,10 @@ class FarmScene extends PlayScene {
     if (c.withered) { delete G.data.crops[k]; this.drawCrop(k); G.say(`You pull up the withered ${d.name.toLowerCase()}.`); return true; }
     if (this.isRipe(c)) {
       const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0));
-      const got = give(d.id, d.yield + mastery(d.id), q);
+      const dem = G.boon("Demeter"); // Demeter's favor (or anger) at the harvest
+      const extra = dem !== 0 && Math.random() < 0.15 * Math.abs(dem) ? Math.sign(dem) : 0;
+      const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra), q);
+      if (extra > 0) G.say("Demeter is generous: an extra measure.");
       if (d.regrow) { c.picks++; c.growth = 0; c.dryNights = 0; c.dryStreak = 0; G.say(`You pick the ${d.name.toLowerCase()}: ${got}. It will be ready again in ${d.regrow} nights.`); }
       else { delete G.data.crops[k]; G.say(`You harvest the ${d.name.toLowerCase()}: ${got}${q === 3 ? ". A splendid crop!" : ""}`); }
       this.drawCrop(k);
@@ -1009,7 +1022,7 @@ class FarmScene extends PlayScene {
     if (G.data.month !== 1) { G.say(`An old vine, older than you. Its grapes ripen in Metageitnion.`); return; }
     if (G.data.vineYear === G.data.year) { G.say("You've picked the vine clean this year."); return; }
     G.data.vineYear = G.data.year;
-    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4))}. Dionysus will want his share.`);
+    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4) + 2 * Math.max(0, G.boon("Dionysus")))}. Dionysus will want his share.`);
   }
 
   subjectAt(): string | null {
@@ -1081,7 +1094,7 @@ class FarmScene extends PlayScene {
           this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); }
         return;
       case "jar":
-        if (isWell) { G.data.jarWater = JAR_CAPACITY; G.say("You fill the water jar at the well."); return; }
+        if (isWell) { G.data.jarWater = jarCap(); G.say("You fill the water jar at the well."); return; }
         if (x === PEN.x1 - 1 && y === PEN.y0 + 1) { this.fillTrough(); return; }
         if (!soil) { G.say("Water only does good on tilled soil."); return; }
         if (soil === "wet") { G.say("This soil is already watered."); return; }
@@ -1127,8 +1140,8 @@ class HouseScene extends PlayScene {
 
     this.targets = [
       { x: 1.5 * TILE + 8, y: 4.5 * TILE, label: "Sleep", act: () => this.askSleep() },
-      { x: 6 * TILE, y: 4.6 * TILE, label: "Tend the hearth", act: () => this.tendHearth() },
-      { x: 10.5 * TILE, y: 2.4 * TILE, label: "The household altar", act: () => G.say("The household altar. Offerings and favor come in Milestone 5.") },
+      { x: 6 * TILE, y: 4.6 * TILE, get label() { return G.data.arts.length ? "The hearth" : "Tend the hearth"; }, act: () => (G.data.arts.length ? ui(this).hearthMenu(() => this.tendHearth()) : this.tendHearth()) },
+      { x: 10.5 * TILE, y: 2.4 * TILE, label: "The household altar", act: () => ui(this).openAltar("home") },
       { x: 9.5 * TILE, y: 7 * TILE, label: "Look in the storage jar", act: () => G.say("A pithos for grain and oil. Empty, for now.") },
     ];
 
@@ -1165,7 +1178,7 @@ class HouseScene extends PlayScene {
   tendHearth() {
     if (G.data.tendedHearthDay === G.dateKey) { G.say("The hearth burns steady. You have already tended it today."); return; }
     G.data.tendedHearthDay = G.dateKey;
-    G.say("You feed the hearth and give its first portion to Hestia. (Daily worship and Demeter's favor come in Milestone 5.)");
+    G.say("You feed the hearth and give its first portion to Hestia, the hearth's own goddess, who answers to Demeter here.");
   }
 }
 
@@ -1410,9 +1423,12 @@ class WildScene extends PlayScene {
   }
 
   clearObject(x: number, y: number) {
-    this.breakFx(x, y, this.objects.getTileAt(x, y)?.index ?? -1);
+    const tile = this.objects.getTileAt(x, y)?.index ?? -1;
+    this.breakFx(x, y, tile);
     this.objects.putTileAt(-1, x, y);
     this.rec.cleared.push(`${x},${y}`);
+    // Artemis keeps count of the wild oaks you fell (Demeter vs Artemis: field against forest).
+    if (tile === T.TREE && ++G.data.wildOaks % 4 === 0) { G.addFavor("Artemis", -1); G.say("The forest is thinner for your axe. Artemis notices."); }
   }
 
   picked() { return (this.rec.picked ??= {}); }
@@ -1502,7 +1518,7 @@ class VillageScene extends PlayScene {
     this.add.image(31 * TILE + 8, 25 * TILE + 8, "altar").setDepth(25 * TILE + 12); solid(31 * TILE + 8, 25 * TILE + 10, 12, 6);
     this.targets.push(
       { x: 16 * TILE + 8, y: 15 * TILE, label: "The village well", act: () => G.say("The village well. With your water jar in hand, press Space here to fill it.") },
-      { x: 31 * TILE + 8, y: 25 * TILE + 12, label: "The altar", act: () => G.say("The village altar, black with old offerings. Offerings and favor come with the gods (Milestone 5).") },
+      { x: 31 * TILE + 8, y: 25 * TILE + 12, label: "The village altar", act: () => ui(this).openAltar("shrine") },
     );
     // A stranger may be resting on the inn's bench.
     this.rollStranger();
@@ -1570,7 +1586,7 @@ class VillageScene extends PlayScene {
   useItem() {
     const [x, y] = this.facingTile();
     const tool = G.selectedItem && ITEMS[G.selectedItem.id].kind === "tool" ? G.selectedItem.id : null;
-    if (tool === "jar" && x === 16 && (y === 14 || y === 15)) { G.data.jarWater = JAR_CAPACITY; G.say("You fill the water jar at the village well."); return; }
+    if (tool === "jar" && x === 16 && (y === 14 || y === 15)) { G.data.jarWater = jarCap(); G.say("You fill the water jar at the village well."); return; }
     if (tool) { G.say("Not in the village. People live here."); return; }
   }
 }
@@ -1611,7 +1627,8 @@ class UIScene extends Phaser.Scene {
   create() {
     // A scene object is reused when it restarts: start every list and panel fresh.
     this.hotbar = []; this.labels = {}; this.log = []; this.modal = false;
-    this.inv = undefined; this.market = undefined; this.loreBook = undefined; this.craft = undefined; this.talkPanel = undefined; this.talkOpts = []; this.dialog = undefined; this.held = null;
+    this.inv = undefined; this.market = undefined; this.loreBook = undefined; this.craft = undefined; this.talkPanel = undefined; this.talkOpts = [];
+    this.sheetPanel = undefined; this.sheet = ""; this.ritual = undefined; this.dialog = undefined; this.held = null;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     this.shade = this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0, 0);
 
@@ -1656,6 +1673,8 @@ class UIScene extends Phaser.Scene {
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
       if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
       if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook) { if (this.craft) this.closeCraft(); else this.openCraft(); }
+      if ((e.key === "f" || e.key === "F") && !this.talkPanel) { if (this.sheet === "gods") this.closeSheet(); else this.openSheet("gods"); }
+      if ((e.key === "p" || e.key === "P") && !this.talkPanel) { if (this.sheet === "self") this.closeSheet(); else this.openSheet("self"); }
     });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
       if (this.modal) return;
@@ -1679,6 +1698,7 @@ class UIScene extends Phaser.Scene {
       "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
+      "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: your Aretai and currencies.",
       "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
       "Blows cost Fatigue; fall when spent and your Life Thread frays.",
       "",
@@ -1699,7 +1719,7 @@ class UIScene extends Phaser.Scene {
       "Stay up past the second watch of the night and you will collapse.",
       "Watered soil dries overnight. Your life is saved each dawn.",
     ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 860, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const hbg = this.add.rectangle(W / 2, H / 2, 880, 636, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
@@ -1709,7 +1729,7 @@ class UIScene extends Phaser.Scene {
       this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
     });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.talkPanel && k === "ESC") this.closeTalk(); else if (this.craft && k === "ESC") this.closeCraft(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && k === "ESC") this.closeCraft(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); else if (this.talkPanel) this.closeTalk(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -1788,7 +1808,7 @@ class UIScene extends Phaser.Scene {
     }
     const s = G.selectedItem;
     const d = s ? ITEMS[s.id] : null;
-    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${toolName(d.id, G.toolLevel(d.id), d.name)}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${JAR_CAPACITY} water` : ""}${s!.id === "bow" ? ` · ${G.count("Arrow")} arrows · Archery ${G.archery} · hold Space to aim, click to loose` : ""}` : "Bare hands");
+    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${toolName(d.id, G.toolLevel(d.id), d.name)}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${jarCap()} water` : ""}${s!.id === "bow" ? ` · ${G.count("Arrow")} arrows · Archery ${G.archery} · hold Space to aim, click to loose` : ""}` : "Bare hands");
   }
 
   toggleInventory() {
@@ -1834,7 +1854,10 @@ class UIScene extends Phaser.Scene {
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     opts = [...opts, { label: "Goodbye", fn: () => this.closeTalk() }];
     this.talkOpts = opts;
-    const w = 680, h = 168 + opts.length * 24, x0 = (W - w) / 2, y0 = H - h - 90;
+    // Size the card to its words: measure the text first, then lay out the options beneath it.
+    const long = text.length > 500;
+    const body = this.add.text(0, 0, text, { ...font, fontSize: long ? "13px" : "15px", wordWrap: { width: (long ? 760 : 680) - 40 }, lineSpacing: 2 });
+    const w = long ? 760 : 680, h = Math.min(H - 20, 100 + body.height + 14 + opts.length * 24 + 10), x0 = (W - w) / 2, y0 = Math.max(10, Math.min(H - h - 90, (H - h) / 2 + 60));
     const root = this.add.container(0, 0).setDepth(24);
     this.talkPanel = root;
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
@@ -1842,7 +1865,7 @@ class UIScene extends Phaser.Scene {
     if (img) { root.add(this.add.rectangle(x0 + 16, y0 + 16, 56, 56, 0x3a2c22).setOrigin(0, 0)); root.add(this.add.image(x0 + 44, y0 + 44, "people", img).setScale(3)); tx = x0 + 86; }
     root.add(this.add.text(tx, y0 + 14, title, { ...font, fontSize: "20px" }));
     root.add(this.add.text(tx, y0 + 42, sub, { ...font, fontSize: "13px", color: "#fbe39a" }));
-    root.add(this.add.text(x0 + 20, y0 + 86, text, { ...font, fontSize: "15px", wordWrap: { width: w - 40 }, lineSpacing: 2 }));
+    body.setPosition(x0 + 20, y0 + 86); root.add(body);
     opts.forEach((o, i) => {
       const t = this.add.text(x0 + 24, y0 + h - 14 - (opts.length - i) * 24, `${i + 1}.  ${o.label}`, { ...font, fontSize: "15px" })
         .setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => o.fn());
@@ -1858,11 +1881,13 @@ class UIScene extends Phaser.Scene {
     const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
     const line = said ?? `"${pick(v.lines[relTier(rec.rel)])}"`;
     const sub = `${v.household[0].toUpperCase() + v.household.slice(1)} · ${v.patron}'s household · ${relLabel(rec.rel)} (${rec.rel >= 0 ? "+" : ""}${rec.rel})`;
-    const phoenix = G.patron?.aretai === "Phoenix" ? 1 : 0; // Aphrodite's hour: gifts and conversations go better
+    const aph = G.boon("Aphrodite");
+    const phoenix = (G.patron?.aretai === "Phoenix" ? 1 : 0) + (aph >= 2 ? 1 : aph <= -2 ? -1 : 0); // Aphrodite's hour and favor
+    const welcome = G.blessed("hospitality") ? 1 : 0;
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
-      rec.talked = today; const r = this.changeRel(v.id, 1 + phoenix);
-      this.talkTo(v, `"${pick(v.lines[relTier(r)])}"\n\n(${v.name} warms to you: +${1 + phoenix}${phoenix ? ", Aphrodite's hour" : ""}.)`);
+      rec.talked = today; const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
+      this.talkTo(v, `"${pick(v.lines[relTier(r)])}"\n\n(${v.name} warms to you: +${gain}${phoenix > 0 ? ", Aphrodite smiles on it" : ""}${welcome ? ", the Hospitality Blessing" : ""}.)`);
     } });
     const held = G.selectedItem;
     if (held && ITEMS[held.id].kind !== "tool" && rec.gifted !== today) opts.push({ label: `Give ${v.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
@@ -1878,12 +1903,18 @@ class UIScene extends Phaser.Scene {
     } });
     if (v.id === "theron") opts.push({ label: "Trade at the mill", fn: () => this.openMarket("mill") });
     if (v.id === "lykos") this.smithOptions(v, opts);
+    if (v.id === "myrrhine" && !G.data.arts.includes("hospitality")) opts.push({ label: "Ask her to teach you an Art", fn: () => {
+      if (rec.rel < ARTS.hospitality.teachAt) { this.talkTo(v, `"The Arts are not for strangers. Come to know me better first." (Friendship +${ARTS.hospitality.teachAt} needed)`); return; }
+      G.data.arts.push("hospitality");
+      this.talkTo(v, `"Then learn the Hospitality Blessing, Zeus's own. Perform it at your hearth: honey, milk, flowers, grapes and grain make it easier, and his hour and the full moon easier still. Done well, every guest and neighbor will feel welcome at your door."\n\n(You learn the Hospitality Blessing. Perform it at your hearth.)`);
+    } });
     if (v.id === "myrrhine") opts.push({ label: "Ask about the gods", fn: () => {
       const p = G.patron;
       this.talkTo(v, `"${p ? `This is ${p.god}'s hour, the hour of ${p.aretai}. ${p.benefit}.` : "The night is not ours."} ${pick([
         "Each god gives most to those who work in step with them.",
         "The Twelve notice who honors them. So do the ones beneath the earth.",
-        "Bring the first of anything to the altar, and you will not be forgotten."])}"\n\n(Offerings and favor come with the gods, Milestone 5.)`);
+        "Bring the first of anything to the altar, and you will not be forgotten.",
+        "Pray at your household altar each day and the gods will know your face. To be known by name, bring offerings here, to the village altar."])}"`);
     } });
     if (v.id === "eudora") {
       opts.push({ label: "Any news?", fn: () => this.talkTo(v, `"${pick(v.lines[rec.rel >= 4 ? "friend" : "new"])}"`) });
@@ -1933,7 +1964,7 @@ class UIScene extends Phaser.Scene {
     const opts: { label: string; fn: () => void }[] = [];
     if (!st.sensed) opts.push({ label: "Look closely at them (Pneuma)", fn: () => {
       st.sensed = true;
-      const target = Math.max(1, (G.data.aretai.Pneuma ?? 3) - 2), roll = 1 + Math.floor(Math.random() * 12);
+      const target = Math.max(1, (G.data.aretai.Pneuma ?? 3) - 2 + G.boon("Dionysus")), roll = 1 + Math.floor(Math.random() * 12);
       const odds = `(Pneuma: d12 ${roll}, needed 1–${target})`;
       this.talkToStranger(st.god && roll <= target ? `Something shines behind their eyes, old as the hills and bright as noon. This is no ordinary traveler. ${odds}` : `A traveler, tired and dusty, as far as you can tell. ${odds}`);
     } });
@@ -1947,8 +1978,9 @@ class UIScene extends Phaser.Scene {
 
   hostStranger(food: string) {
     const st = G.data.stranger!; st.hosted = true;
-    G.removeItem(food, 1);
-    const favor = (god: string, d: number) => { G.data.favor[god] = Math.max(-12, Math.min(12, (G.data.favor[god] ?? 0) + d)); };
+    G.removeItem(food, 1); G.data.hostedDay = G.dayNumber;
+    const twice = G.blessed("hospitality") ? 2 : 1;
+    const favor = (god: string, d: number) => { G.addFavor(god, d * twice); };
     if (!st.god) {
       favor("Zeus", 1);
       const gifts = [
@@ -1956,7 +1988,7 @@ class UIScene extends Phaser.Scene {
         () => { G.addItem(seedId("Melon"), 1); return `They give you a melon seed from their pack. "It grew well where I come from."`; },
         () => `"Wolves in the eastern forests come out at dusk. And the boar there: hold out grain, and he'll often leave you be."`,
       ];
-      this.talkToStranger(`${gifts[Math.floor(Math.random() * gifts.length)]()}\n\n(Zeus, god of guests and hosts, sees your xenia: favor with Zeus +1.)`);
+      this.talkToStranger(`${gifts[Math.floor(Math.random() * gifts.length)]()}\n\n(Zeus, god of guests and hosts, sees your xenia: favor with Zeus +${twice}.)`);
       return;
     }
     favor(st.god, 2); favor("Zeus", 1);
@@ -1973,8 +2005,269 @@ class UIScene extends Phaser.Scene {
       Hephaestus: () => { G.addItem("Ochre", 3); G.addItem("Clay", 3); return "Hephaestus, limping and sooty, smiling. He leaves earth for pigment and for the kiln."; },
     };
     const boon = (boons[st.god] ?? boons.Zeus)();
-    this.talkToStranger(`As you set the food before them, the stranger straightens, and grows tall, and the light changes. It is ${st.god}! ${boon}\n\n(Favor with ${st.god} +2, with Zeus +1. Your Fatigue eases and your Essence fills.)`);
+    G.earn("Kleos", 1, `you hosted ${st.god} unknowing`);
+    this.talkToStranger(`As you set the food before them, the stranger straightens, and grows tall, and the light changes. It is ${st.god}! ${boon}\n\n(Favor with ${st.god} +${2 * twice}, with Zeus +${twice}. Your Fatigue eases and your Essence fills.)`);
     G.data.stranger = { ...st, god: "", hosted: true }; // the god departs; the bench is empty in spirit
+  }
+
+  // ---------------------------------------------------------------- the gods
+  /** An altar: pray once a day at home, and offer what belongs to a god. The village altar can raise favor further. */
+  openAltar(where: "home" | "shrine", said?: string) {
+    const today = G.dayNumber;
+    const cap = where === "home" ? HOME_CAP : SHRINE_CAP;
+    const opts: { label: string; fn: () => void }[] = [];
+    if (where === "home") {
+      if (G.data.prayedDay !== today) opts.push({ label: "Pray to one of the Twelve", fn: () => this.chooseGod() });
+    }
+    const held = G.selectedItem;
+    if (held && ITEMS[held.id].kind !== "tool") {
+      const artemisShare = G.data.deerDebt > 0 && (held.id === "Antler" || held.id === "Meat");
+      const god = artemisShare ? "Artemis" : OFFER_PATRON[held.id];
+      if (god) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()} to ${CHTHONIC.includes(god) ? "the one below" : god}`, fn: () => this.offer(where, held.id, god, cap) });
+    }
+    const text = said ?? (where === "home"
+      ? `The household altar in its niche, a little smoke-dark. Pray here once a day: every ${DEVOTION_STEP} days of prayer to a god earns their notice (+1), up to +${HOME_CAP}. Offerings of what belongs to a god please them too, up to +${HOME_CAP} here.${G.data.prayedDay === today ? "\n\nYou have prayed today." : ""}`
+      : `The village altar, black with old offerings. Gifts brought here can make you known by name to a god, up to +${SHRINE_CAP}. Hold what you would offer.`);
+    if (!opts.length && !said) opts.push({ label: "(Hold something to offer: grain to Demeter, grapes to Dionysus, wood or meat to Zeus…)", fn: () => this.closeTalk() });
+    this.showTalk(where === "home" ? "The household altar" : "The village altar", "Pray, and offer the first of what you have", text, opts);
+  }
+
+  chooseGod() {
+    const opts = TWELVE.map((god) => ({
+      label: `${god} (${G.favor(god) >= 0 ? "+" : ""}${G.favor(god)}, devotion ${G.data.devotion[god] ?? 0})`,
+      fn: () => {
+        G.data.prayedDay = G.dayNumber;
+        const n = (G.data.devotion[god] = (G.data.devotion[god] ?? 0) + 1);
+        let note = `${DEVOTION_STEP - (n % DEVOTION_STEP)} more day${DEVOTION_STEP - (n % DEVOTION_STEP) > 1 ? "s" : ""} of prayer to be noticed further.`;
+        if (n % DEVOTION_STEP === 0) {
+          if (G.favor(god) < HOME_CAP) { G.addFavor(god, 1, HOME_CAP); note = `${god} has noticed your devotion: favor +1.`; }
+          else note = `${god} knows your household well. To be known by name, bring offerings to the village altar.`;
+        }
+        if (n % DEVOTION_STEP === 0 && G.favor(god) >= HOME_CAP) note = note;
+        this.openAltar("home", `You light the lamp, pour a little water, and pray to ${god}.\n\n${note}`);
+      },
+    }));
+    this.showTalk("Pray to whom?", "Choose one god today. Each day of prayer counts toward their notice.", "", opts);
+  }
+
+  offer(where: "home" | "shrine", item: string, god: string, cap: number) {
+    const today = G.dayNumber;
+    const name = ITEMS[item].name.toLowerCase();
+    // The chthonic powers take nothing by daylight, and only in the old ways.
+    if (CHTHONIC.includes(god)) {
+      if (G.isDay) { this.openAltar(where, `You hold out the ${name}, but it belongs to the one below, and he takes nothing by daylight.`); return; }
+      if (G.data.offered[god] === today) { this.openAltar(where, "The earth has already drunk your offering tonight."); return; }
+      G.removeItem(item, 1); G.data.offered[god] = today;
+      G.addFavor(god, 1, 3);
+      this.openAltar(where, `In the dark you crush the ${name} and let it fall. The earth drinks it. Something below has noticed you. (A hidden favor stirs: ${god} +1.)`);
+      return;
+    }
+    if (G.data.offered[god] === today) { this.openAltar(where, `${god} has already received your offering today. Come again tomorrow.`); return; }
+    if (god === "Artemis" && G.data.deerDebt > 0) {
+      G.removeItem(item, 1); G.data.deerDebt--; G.data.offered[god] = today;
+      this.openAltar(where, `You set aside the ${name} for Artemis, mistress of beasts. Her share is given; she is satisfied.`);
+      return;
+    }
+    if (G.favor(god) >= cap) {
+      this.openAltar(where, where === "home" ? `${god} already knows your household. To be known by name, bring your offerings to the village altar.` : `${god} knows you well. Greater favor comes from deeds, festivals and the gods' own tests.`);
+      return;
+    }
+    const slot = G.data.slots.find((s) => s && s.id === item && s.q === 3) ?? G.data.slots.find((s) => s && s.id === item);
+    const fine = slot?.q === 3;
+    G.removeItem(item, 1); G.data.offered[god] = today;
+    const after = G.addFavor(god, fine ? 2 : 1, cap);
+    this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after})`);
+  }
+
+  hearthMenu(tend: () => void) {
+    const opts = [{ label: "Tend the hearth", fn: () => { this.closeTalk(); tend(); } }];
+    for (const id of G.data.arts) opts.push({ label: `Plan the ${ARTS[id].name}`, fn: () => this.planRitual(ARTS[id]) });
+    this.showTalk("The hearth", "Hestia's fire, the heart of the household", "The fire burns low and steady. Here the household's rites are done.", opts);
+  }
+
+  // ---- the gods and the self: two reference sheets
+  sheet: "" | "gods" | "self" = "";
+  sheetPanel?: Phaser.GameObjects.Container;
+  openSheet(which: "gods" | "self") {
+    if (this.market || this.dialog || this.craft || this.loreBook) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.sheet = which; this.modal = true;
+    which === "gods" ? this.buildGods() : this.buildSelf();
+  }
+  closeSheet() { this.sheetPanel?.destroy(); this.sheetPanel = undefined; this.sheet = ""; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft || !!this.talkPanel; }
+
+  sheetFrame(title: string, sub: string, h = 520) {
+    this.sheetPanel?.destroy();
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 820, x0 = (W - w) / 2, y0 = (H - h) / 2 - 10;
+    const root = this.add.container(0, 0).setDepth(23);
+    this.sheetPanel = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 12, title, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 38, sub, { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    return { root, font, w, h, x0, y0 };
+  }
+
+  buildGods() {
+    const { root, font, x0, y0, h } = this.sheetFrame("The Twelve", "Favor runs from -12 to +12. Each tier of three brings more of a god's boon, or more of their anger.", 540);
+    const g = this.add.graphics(); root.add(g);
+    TWELVE.forEach((god, i) => {
+      const y = y0 + 64 + i * 34, f = G.favor(god), w = WHEEL[i];
+      root.add(this.add.rectangle(x0 + 20, y + 3, 10, 10, Phaser.Display.Color.HexStringToColor(w.color).color).setOrigin(0, 0));
+      root.add(this.add.text(x0 + 38, y, `${god}`, { ...font, fontSize: "14px" }));
+      root.add(this.add.text(x0 + 130, y + 1, `${w.aretai}`, { ...font, fontSize: "11px", color: "#c9b48f" }));
+      const bx = x0 + 200, bw = 180, mid = bx + bw / 2;
+      g.fillStyle(0x3a2c22).fillRect(bx, y + 4, bw, 8);
+      g.fillStyle(f >= 0 ? 0xc9a35a : 0xb02a3a).fillRect(f >= 0 ? mid : mid + (f / 12) * (bw / 2), y + 4, Math.abs(f / 12) * (bw / 2), 8);
+      g.fillStyle(0xf2e6c9).fillRect(mid, y + 2, 1, 12);
+      root.add(this.add.text(bx + bw + 10, y, `${f >= 0 ? "+" : ""}${f}  ${favorLabel(f)}`, { ...font, fontSize: "13px", color: f > 0 ? "#fbe39a" : f < 0 ? "#e09080" : "#8d877b" }));
+      root.add(this.add.text(x0 + 560, y + 1, BOONS[god], { ...font, fontSize: "11px", color: f !== 0 ? "#e8e2d0" : "#8d877b", wordWrap: { width: 240 } }));
+    });
+    const below = CHTHONIC.filter((c) => G.favor(c) !== 0);
+    const y = y0 + 64 + 12 * 34 + 4;
+    root.add(this.add.text(x0 + 20, y, below.length ? `Beneath the earth: ${below.map((c) => `${c} ${G.favor(c) >= 0 ? "+" : ""}${G.favor(c)}`).join(", ")}` : "Beneath the earth: silence.", { ...font, fontSize: "13px", color: "#a8a0c0" }));
+    root.add(this.add.text(x0 + 20, y + 22, CURRENCIES.map((c) => `${c} ${G.data.currencies[c]}`).join("   ·   "), { ...font, fontSize: "14px", color: "#fbe39a" }));
+    root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "F or Esc to close   ·   P for your Aretai", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+
+  buildSelf() {
+    const { root, font, x0, y0, h } = this.sheetFrame("Your Aretai", "Twelve excellences, in the order of the Cosmic Wheel. Spend Ambrosia to raise them.", 520);
+    WHEEL.forEach((w, i) => {
+      const col = i < 6 ? 0 : 1, row = i % 6;
+      const x = x0 + 24 + col * 400, y = y0 + 66 + row * 40;
+      const v = G.data.aretai[w.aretai] ?? 0, cost = raiseCost(v);
+      root.add(this.add.rectangle(x, y + 4, 10, 10, Phaser.Display.Color.HexStringToColor(w.color).color).setOrigin(0, 0));
+      root.add(this.add.text(x + 18, y, `${w.aretai}  ${v}`, { ...font, fontSize: "16px" }));
+      root.add(this.add.text(x + 18, y + 19, `${w.god} · ${w.benefit}`, { ...font, fontSize: "10px", color: "#c9b48f", wordWrap: { width: 230 } }));
+      const ok = G.data.currencies.Ambrosia >= cost && v < 12;
+      const t = this.add.text(x + 260, y + 2, v >= 12 ? "at its peak" : `raise: ${cost} Ambrosia`, { ...font, fontSize: "13px", color: ok ? "#f2e6c9" : "#8d877b" });
+      if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => {
+        G.data.currencies.Ambrosia -= cost; G.data.aretai[w.aretai] = v + 1;
+        G.essenceMax = essencePools(G.data.aretai);
+        G.say(`Your ${w.aretai} rises to ${v + 1}.`);
+        this.buildSelf();
+      });
+      root.add(t);
+    });
+    let y = y0 + 66 + 6 * 40 + 10;
+    for (const c of CURRENCIES) {
+      root.add(this.add.text(x0 + 24, y, `${c}  ${G.data.currencies[c]}`, { ...font, fontSize: "15px", color: c === "Hubris" ? "#e09080" : "#fbe39a" }));
+      root.add(this.add.text(x0 + 160, y + 2, CURRENCY_DESC[c], { ...font, fontSize: "12px", color: "#c9b48f" }));
+      y += 24;
+    }
+    root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "P or Esc to close   ·   F for the gods", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+
+  // ---- rituals: plan, then perform
+  ritual?: { art: Art; use: Set<string>; step: number; results: { label: string; roll: number; bonus: number; need: number; ok: boolean }[]; marker?: Phaser.GameObjects.Rectangle; t: number; panel?: Phaser.GameObjects.Container };
+
+  ritualConditions(art: Art) {
+    const moonFull = G.moon === "Full moon";
+    const met: Record<string, boolean> = { zeusHour: G.patron?.aretai === "Kratos", fullMoon: moonFull, hosted: G.dayNumber - G.data.hostedDay <= 3 };
+    return art.timing.map((t) => ({ ...t, ok: !!met[t.id] }));
+  }
+
+  /** The CR of each check after components, timing and place. */
+  ritualCRs(art: Art, use: Set<string>) {
+    const timing = this.ritualConditions(art).filter((t) => t.ok).reduce((n, t) => n + t.cr, 0);
+    const reduce = -use.size + timing + art.location.cr;
+    return art.checks.map((c) => ({ ...c, cr: Math.max(2, c.cr + reduce) }));
+  }
+
+  /** A d12 plus your Aretai (plus performance) must meet the CR. */
+  odds(aretai: number, cr: number) { return Math.max(0, Math.min(1, (13 - (cr - aretai)) / 12)); }
+
+  planRitual(art: Art, use?: Set<string>) {
+    const sel = use ?? new Set(art.components.filter((c) => G.count(c.item) > 0).map((c) => c.item));
+    const crs = this.ritualCRs(art, sel);
+    const exact = (G.data.aretai.Gnosis ?? 3) >= 4; // Gnosis reveals the true odds
+    const rough = (p: number) => (p >= 0.85 ? "near certain" : p >= 0.6 ? "likely" : p >= 0.35 ? "a fair chance" : p >= 0.15 ? "unlikely" : "nearly impossible");
+    const lines: string[] = [];
+    lines.push(`${art.requirement}  Cost: ${Object.entries(art.cost).map(([k, v]) => `${v} ${k}`).join(", ")} (you have ${Object.entries(art.cost).map(([k]) => G.data.currencies[k as keyof typeof G.data.currencies]).join(", ")}).`);
+    lines.push("Conditions: " + this.ritualConditions(art).map((t) => `${t.ok ? "✓" : "·"} ${t.label} (${t.cr})`).join("   ") + `   ✓ ${art.location.label} (${art.location.cr})`);
+    lines.push("Checks (each: d12 + Aretai + performance must meet the CR):");
+    for (const c of crs) { const a = G.data.aretai[c.aretai] ?? 3, p = this.odds(a, c.cr); lines.push(`   ${c.label} · ${c.aretai} ${a} · ${exact ? `CR ${c.cr} (${Math.round(p * 100)}% before performance)` : rough(p)}`); }
+    lines.push(`Effect: ${art.effect}`);
+    lines.push(`On failure: Likelihood ${art.failure.likelihood} of 12: ${art.failure.text}${exact ? "" : "   (Gnosis 4+ shows exact odds.)"}`);
+    const opts: { label: string; fn: () => void }[] = art.components.map((c) => {
+      const have = G.count(c.item) > 0, on = sel.has(c.item);
+      return { label: `${on ? "[x]" : "[ ]"} ${c.label}${have ? "" : " (you have none)"}  -1 CR`, fn: () => { if (!have) return; const n = new Set(sel); on ? n.delete(c.item) : n.add(c.item); this.planRitual(art, n); } };
+    });
+    const canPay = Object.entries(art.cost).every(([k, v]) => G.data.currencies[k as keyof typeof G.data.currencies] >= (v ?? 0));
+    opts.push({ label: canPay ? "Perform the rite now" : "Perform the rite (you can't pay its cost)", fn: () => { if (canPay) this.performRitual(art, sel); } });
+    this.showTalk(art.name, `An Art of ${art.patron} · plan the rite: components, timing and place lower every CR`, lines.join("\n"), opts);
+  }
+
+  performRitual(art: Art, use: Set<string>) {
+    for (const [k, v] of Object.entries(art.cost)) G.data.currencies[k as keyof typeof G.data.currencies] -= v ?? 0;
+    for (const item of use) G.removeItem(item, 1);
+    this.closeTalk();
+    this.modal = true;
+    this.ritual = { art, use, step: 0, results: [], t: 0 };
+    this.ritualStep();
+  }
+
+  /** One step of the rite: a short timing test, then the roll. Hitting the gold adds performance bonus. */
+  ritualStep() {
+    const r = this.ritual!; r.panel?.destroy();
+    const crs = this.ritualCRs(r.art, r.use);
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 620, h = 200, x0 = (W - w) / 2, y0 = (H - h) / 2 - 40;
+    const root = this.add.container(0, 0).setDepth(26);
+    r.panel = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    if (r.step >= crs.length) { this.ritualEnd(); return; }
+    const c = crs[r.step];
+    root.add(this.add.text(W / 2, y0 + 14, `${r.art.name} · step ${r.step + 1} of ${crs.length}`, { ...font, fontSize: "14px", color: "#fbe39a" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 38, c.label, { ...font, fontSize: "18px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 66, `${c.aretai}: press Space as the mark crosses the gold`, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    const bx = x0 + 60, bw = w - 120, by = y0 + 110;
+    root.add(this.add.rectangle(bx, by, bw, 18, 0x3a2c22).setOrigin(0, 0));
+    root.add(this.add.rectangle(bx + bw / 2 - 40, by, 80, 18, 0x8a6a2a).setOrigin(0, 0));
+    root.add(this.add.rectangle(bx + bw / 2 - 12, by, 24, 18, 0xf2c14e).setOrigin(0, 0));
+    r.marker = this.add.rectangle(bx, by - 4, 3, 26, 0xf2e6c9).setOrigin(0.5, 0);
+    root.add(r.marker);
+    r.t = 0;
+    const speed = 1.3 + r.step * 0.25;
+    const key = this.input.keyboard!.addKey("SPACE");
+    const tick = (_: number, dms: number) => {
+      if (!this.ritual || !r.marker) return;
+      r.t += (dms / 1000) * speed;
+      const u = (Math.sin(r.t * Math.PI - Math.PI / 2) + 1) / 2;
+      r.marker.x = bx + u * bw;
+      if (Phaser.Input.Keyboard.JustDown(key)) {
+        this.events.off("update", tick);
+        const off = Math.abs(r.marker.x - (bx + bw / 2));
+        const bonus = off <= 12 ? 3 : off <= 40 ? 1 : 0;
+        const a = G.data.aretai[c.aretai] ?? 3, roll = 1 + Math.floor(Math.random() * 12);
+        const ok = roll + a + bonus >= c.cr;
+        r.results.push({ label: c.label, roll, bonus, need: c.cr, ok });
+        root.add(this.add.text(W / 2, y0 + 146, `${bonus === 3 ? "A fine performance (+3)." : bonus ? "A fair performance (+1)." : "A stumble (+0)."}  d12 ${roll} + ${c.aretai} ${a} + ${bonus} = ${roll + a + bonus} against CR ${c.cr}: ${ok ? "it holds." : "it falters."}`, { ...font, fontSize: "13px", color: ok ? "#9ad07a" : "#e09080", wordWrap: { width: w - 40 }, align: "center" }).setOrigin(0.5, 0));
+        this.time.delayedCall(1400, () => { r.step++; this.ritualStep(); });
+      }
+    };
+    this.events.on("update", tick);
+  }
+
+  ritualEnd() {
+    const r = this.ritual!, art = r.art;
+    const ok = r.results.every((x) => x.ok);
+    let text: string;
+    if (ok) {
+      G.data.blessing = { id: art.id, until: G.dayNumber + art.days - 1 };
+      G.addFavor(art.patron, 1);
+      text = `The rite is complete. The fire leaps once, and settles warm. ${art.effect}\n\n(Favor with ${art.patron} +1.)`;
+    } else {
+      const roll = 1 + Math.floor(Math.random() * 12);
+      const bad = roll <= art.failure.likelihood;
+      if (bad && art.id === "hospitality") G.addFavor("Zeus", -1);
+      text = `The rite falters at "${r.results.find((x) => !x.ok)!.label.split(":")[0]}". ${bad ? art.failure.text : "No harm done, this time."} (Likelihood ${art.failure.likelihood}: d12 ${roll}.) The components and cost are spent.`;
+    }
+    r.panel?.destroy();
+    this.ritual = undefined;
+    this.modal = false;
+    this.showTalk(art.name, ok ? "The rite holds" : "The rite fails", text, []);
   }
 
   openCraft() {
@@ -2006,8 +2299,9 @@ class UIScene extends Phaser.Scene {
       if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => {
         if (labor({}, 1, "Techne") === null) return;
         for (const [id, n] of r.needs) G.removeItem(id, n);
-        const left = G.addItem(r.out, r.qty);
-        G.say(`You make ${r.qty - left} ${ITEMS[r.out].name.toLowerCase()}.${left ? " Your pack is full." : ""}`);
+        const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
+        const left = G.addItem(r.out, qty);
+        G.say(`You make ${qty - left} ${ITEMS[r.out].name.toLowerCase()}.${left ? " Your pack is full." : ""}${qty > r.qty ? " Hephaestus guides your hands." : ""}`);
         this.buildCraft();
       });
     });
@@ -2089,7 +2383,8 @@ class UIScene extends Phaser.Scene {
       root.add(tx);
     };
     const name = (s: { id: string; q?: number }) => `${s.q && s.q > 1 ? QUALITY[s.q] + " " : ""}${ITEMS[s.id].name}`;
-    const each = (s: { id: string; q?: number }) => Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1]);
+    const hermes = Math.max(0.5, 1 + 0.05 * G.boon("Hermes"));
+    const each = (s: { id: string; q?: number }) => Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1] * hermes);
 
     // Left: your goods, then what's already in the pithos.
     const lx = x0 + 24; let y = y0 + 74;

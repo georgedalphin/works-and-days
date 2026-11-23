@@ -1,3 +1,4 @@
+import { START_CURRENCIES, type Currency, favorLabel } from "./gods";
 import {
   MONTHS, WHEEL, START_ARETAI, essencePools, DAYLIGHT_REAL_SECONDS,
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
@@ -54,7 +55,17 @@ export interface SaveData {
   stranger: { kind: number; god: string; arrived: number; hosted: boolean; sensed: boolean } | null;
   tools: Record<string, number>; // tool levels from the smith (1 = as you started)
   smithJob: { tool: string; level: number; ready: number } | null;
-  favor: Record<string, number>; // divine favor, -12 to +12 (the gods milestone builds on this) // forage gathered on the homestead: "x,y" -> day number
+  favor: Record<string, number>; // divine favor, -12 to +12
+  currencies: Record<Currency, number>;
+  devotion: Record<string, number>; // days of household prayer per god
+  prayedDay: number;
+  offered: Record<string, number>; // god -> day of the last offering they noticed
+  knownByName: Record<string, boolean>; // gods who have reached +4 (each gives Ambrosia once)
+  deerDebt: number; // deer taken today without Artemis' share
+  wildOaks: number; // oaks felled in the wild (Artemis keeps count)
+  arts: string[];
+  blessing: { id: string; until: number } | null;
+  hostedDay: number; // forage gathered on the homestead: "x,y" -> day number
   bowGiven?: boolean;
   lore: { tier: Record<string, number>; fails: Record<string, number>; studied: Record<string, number> };
 }
@@ -93,7 +104,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {};
+    d.archeryXp ??= 0; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99;
     if (!d.bowGiven) { d.bowGiven = true; if (!d.slots.some((s) => s?.id === "bow")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("bow", 1); g.addItem("Arrow", STARTING_ARROWS); } }
     d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
@@ -153,7 +164,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {},
+      archeryXp: 0, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99,
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -181,6 +192,22 @@ export class GameState {
   /** How well a villager knows you, -12 to +12. */
   rel(id: string) { return this.data.npc[id]?.rel ?? 0; }
   npcRec(id: string) { return (this.data.npc[id] ??= { rel: 0, talked: -1, gifted: -1 }); }
+  favor(god: string) { return this.data.favor[god] ?? 0; }
+  /** Change a god's favor, up to an optional cap. Reaching +4 ("known by name") the first time gives Ambrosia. */
+  addFavor(god: string, d: number, cap = 12): number {
+    const before = this.favor(god);
+    let after = before + d;
+    if (d > 0) after = Math.min(after, Math.max(before, cap));
+    after = Math.max(-12, Math.min(12, after));
+    this.data.favor[god] = after;
+    if (after >= 4 && !this.data.knownByName[god]) { this.data.knownByName[god] = true; this.data.currencies.Ambrosia++; this.say(`${god} knows you by name now. (+1 Ambrosia)`); }
+    if (favorLabel(after) !== favorLabel(before)) this.say(`${god}: ${favorLabel(after).toLowerCase()} (favor ${after >= 0 ? "+" : ""}${after}).`);
+    return after;
+  }
+  /** Favor tier, -4 to +4: what boons and penalties scale by. */
+  boon(god: string) { const f = this.favor(god); return Math.sign(f) * Math.ceil(Math.abs(f) / 3); }
+  earn(c: Currency, n = 1, why = "") { this.data.currencies[c] += n; this.say(`+${n} ${c}${why ? `: ${why}` : ""}.`); }
+  blessed(id: string) { return !!this.data.blessing && this.data.blessing.id === id && this.dayNumber <= this.data.blessing.until; }
   toolLevel(id: string) { return this.data.tools[id] ?? 1; }
   lore(id: string) { return this.data.lore.tier[id] ?? 0; }
   get dateKey() { return `${this.data.year}-${this.data.month}-${this.data.day}`; }
@@ -282,7 +309,8 @@ export class GameState {
     // The miller's cart calls at dawn: it takes what you left in the pithos and brings what you ordered.
     if (this.data.outbox.length) {
       let earned = 0;
-      for (const s of this.data.outbox) earned += Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1] * s.qty);
+      const hermes = Math.max(0.5, 1 + 0.05 * this.boon("Hermes")); // Hermes' favor in the market
+      for (const s of this.data.outbox) earned += Math.round((ITEMS[s.id].value ?? 0) * QUALITY_MULT[s.q ?? 1] * hermes) * s.qty;
       this.data.silver += earned; this.data.outbox = [];
       notes.push(`The miller's cart took your goods and left ${money(earned)} in the pithos.`);
     }
@@ -292,6 +320,12 @@ export class GameState {
       this.data.orders = [];
     }
     for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "wet") this.data.ground[k] = "tilled";
+    // Artemis wants her share of every deer.
+    if (this.data.deerDebt > 0) {
+      const n = this.data.deerDebt; this.data.deerDebt = 0;
+      this.data.favor.Artemis = Math.max(-12, (this.data.favor.Artemis ?? 0) - n); this.data.currencies.Hubris += n;
+      notes.push(`Artemis is angered: you took her deer and gave her no share. (Artemis -${n}, +${n} Hubris)`);
+    }
     if (this.data.smithJob && this.dayNumber === this.data.smithJob.ready) notes.push("Lykos the smith has finished your tool. Collect it at the smithy.");
     // The goats eat and drink in the night; a goat that goes without gives no milk.
     for (const g of this.data.goats) {
