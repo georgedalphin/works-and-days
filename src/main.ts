@@ -2704,7 +2704,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
-      "Far from home (4+ screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
+      "Far from home (3 or more screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
       "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
       "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
       "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
