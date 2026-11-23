@@ -117,6 +117,7 @@ export function makeTextures(scene: Phaser.Scene) {
 
   // Player: four facings in one strip (down, left, right, up), 16x16 each.
   makePlayerTexture(scene, { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" });
+  makeGlowTexture(scene);
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -594,23 +595,69 @@ function drawStranger(c: Ctx, o: number, look: string) {
 }
 
 /** The player's sprite, in the colors chosen at creation. Redrawn whenever a life begins or is loaded. */
+/** Poses in each facing's run of frames: frame = facing * POSES + pose. */
+export const POSES = 7;
+export const POSE = { stand: 0, walk1: 1, walk2: 2, raise: 3, strike: 4, lookA: 5, lookB: 6 } as const;
+
+/**
+ * The player in 4 facings (down, left, right, up) x 7 poses: standing, two walking steps,
+ * raising and striking with a tool, and a hand over the brow looking one way, then the other.
+ */
 export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) {
   if (scene.textures.exists("player")) scene.textures.remove("player");
   const belt = look.tunic === "#b0412f" ? "#e9e1cf" : "#b0412f";
-  const player = canvasTex(scene, "player", 64, 16, (c) => {
-    for (let f = 0; f < 4; f++) {
-      const o = f * 16;
-      px(c, o + 5, 13, 6, 2, "rgba(0,0,0,0.25)");
-      px(c, o + 5, 6, 6, 7, look.tunic); // chiton
-      px(c, o + 5, 9, 6, 1, belt);
-      px(c, o + 6, 1, 4, 5, look.skin); // head
-      px(c, o + 6, 1, 4, 2, look.hair);
-      px(c, o + 6, 13, 1, 2, "#6b4a2b"); px(c, o + 9, 13, 1, 2, "#6b4a2b");
-      if (f === 0) { px(c, o + 7, 3, 1, 1, "#2a1d14"); px(c, o + 8, 3, 1, 1, "#2a1d14"); }
-      if (f === 1) px(c, o + 6, 3, 1, 1, "#2a1d14");
-      if (f === 2) px(c, o + 9, 3, 1, 1, "#2a1d14");
-      if (f === 3) px(c, o + 6, 1, 4, 4, look.hair);
+  const leg = "#6b4a2b", eye = "#2a1d14", tool = "#7a5a33", toolHead = "#9c968a";
+  const player = canvasTex(scene, "player", 16 * 4 * POSES, 16, (c) => {
+    for (let f = 0; f < 4; f++) for (let pose = 0; pose < POSES; pose++) {
+      const o = (f * POSES + pose) * 16;
+      // Left is drawn as right, mirrored.
+      const mir = f === 1, side = f === 1 || f === 2;
+      const p = (x: number, y: number, w: number, h: number, col: string) => px(c, o + (mir ? 16 - x - w : x), y, w, h, col);
+      const walk = pose === 1 ? 1 : pose === 2 ? -1 : 0;
+      p(5, 13, 6, 2, "rgba(0,0,0,0.25)");
+      // Legs.
+      if (!side) {
+        p(6, 13, 1, walk === -1 ? 1 : 2, leg); p(9, 13, 1, walk === 1 ? 1 : 2, leg);
+      } else if (walk === 1) { p(9, 13, 1, 2, leg); p(6, 13, 1, 2, leg); }
+      else if (walk === -1) { p(7, 13, 1, 2, leg); p(8, 13, 1, 1, leg); }
+      else { p(7, 13, 1, 2, leg); p(8, 13, 1, 2, leg); }
+      // Body and head.
+      p(5, 6, 6, 7, look.tunic); p(5, 9, 6, 1, belt);
+      p(6, 1, 4, 5, look.skin); p(6, 1, 4, 2, look.hair);
+      if (f === 3) p(6, 1, 4, 4, look.hair);
+      // Eyes, which wander when looking around.
+      if (f === 0) {
+        const ex = pose === 5 ? 8 : pose === 6 ? 6 : 7;
+        p(ex, 3, 1, 1, eye); p(ex + 1, 3, 1, 1, eye);
+      } else if (side) p(pose === 6 ? 8 : 9, 3, 1, 1, eye);
+      // Arms, by pose.
+      const sk = look.skin;
+      if (!side) {
+        const L = () => p(4, walk === 1 ? 8 : 7, 1, walk === 1 ? 3 : 4, sk);
+        if (pose <= 2) { L(); p(11, walk === -1 ? 8 : 7, 1, walk === -1 ? 3 : 4, sk); }
+        else if (pose === 3) { L(); p(11, 1, 1, 6, sk); p(11, 0, 2, 1, toolHead); p(12, 1, 1, 2, tool); }
+        else if (pose === 4) { L(); p(10, 9, 1, 3, sk); p(10, 12, 2, 1, tool); p(11, 13, 2, 2, toolHead); }
+        else if (f === 0) { L(); p(11, 4, 1, 4, sk); p(8, 2, 3, 1, sk); }
+        else if (pose === 5) { p(4, 7, 1, 4, sk); p(11, 3, 1, 5, sk); p(10, 2, 1, 1, sk); }
+        else { p(11, 7, 1, 4, sk); p(4, 3, 1, 5, sk); p(5, 2, 1, 1, sk); }
+      } else {
+        if (pose === 0) p(8, 7, 1, 4, sk);
+        else if (pose === 1) { p(9, 7, 1, 1, sk); p(10, 8, 1, 2, sk); }
+        else if (pose === 2) { p(7, 7, 1, 1, sk); p(6, 8, 1, 2, sk); }
+        else if (pose === 3) { p(6, 2, 1, 5, sk); p(5, 0, 2, 2, toolHead); p(6, 2, 1, 1, tool); }
+        else if (pose === 4) { p(9, 8, 4, 1, sk); p(13, 7, 1, 3, tool); p(14, 9, 2, 2, toolHead); }
+        else { p(9, 5, 1, 3, sk); p(9, 2, 3, 1, sk); p(10, 3, 1, 1, sk); }
+      }
     }
   });
-  for (let f = 0; f < 4; f++) player.add(f, 0, f * 16, 0, 16, 16);
+  for (let i = 0; i < 4 * POSES; i++) player.add(i, 0, i * 16, 0, 16, 16);
+}
+
+/** A soft round light, for showing what you are looking at. */
+export function makeGlowTexture(scene: Phaser.Scene) {
+  if (scene.textures.exists("focusGlow")) return;
+  const t = scene.textures.createCanvas("focusGlow", 48, 48)!, c = t.getContext();
+  const g = c.createRadialGradient(24, 24, 2, 24, 24, 22);
+  g.addColorStop(0, "rgba(255,236,170,0.9)"); g.addColorStop(0.45, "rgba(255,220,140,0.45)"); g.addColorStop(1, "rgba(255,210,120,0)");
+  c.fillStyle = g; c.fillRect(0, 0, 48, 48); t.refresh();
 }

@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GameState, rng } from "./state";
-import { makeTextures, makePlayerTexture, T, TILE } from "./textures";
+import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
@@ -180,6 +180,10 @@ abstract class PlayScene extends Phaser.Scene {
   makePlayer(x: number, y: number) {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
+    this.poseT = 0; this.poseKind = ""; this.walkT = 0;
+    this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
+    this.focusMarks = this.add.graphics().setDepth(99981);
+    this.focusTag = this.add.text(0, 0, "", { fontFamily: FONT, fontSize: "6px", color: "#fbe39a", stroke: "#1f1712", strokeThickness: 2 }).setOrigin(0.5, 1).setResolution(5).setAlpha(0.9).setDepth(99982).setVisible(false);
     this.cameras.main.startFollow(this.player, true, 0.2, 0.2).setZoom(ZOOM).setRoundPixels(true);
   }
 
@@ -220,8 +224,72 @@ abstract class PlayScene extends Phaser.Scene {
     if (moving) {
       if (Math.abs(vx) > Math.abs(vy)) this.facing = vx < 0 ? 1 : 2; else this.facing = vy < 0 ? 3 : 0;
     }
-    this.player.setFrame(this.facing);
+    this.animatePlayer(dt, moving, speed);
     this.player.setDepth(this.player.y);
+  }
+
+  // ---------------------------------------------------------------- the player's body
+  poseKind: "" | "act" | "look" = "";
+  poseT = 0;
+  walkT = 0;
+
+  /** Play a gesture: a tool swing ("act") or shading the eyes to look around ("look"). */
+  gesture(kind: "act" | "look") { this.poseKind = kind; this.poseT = kind === "act" ? 0.3 : 1.2; }
+
+  /** Steps while walking (quicker when running), a swing when working, a look about when studying. */
+  animatePlayer(dt: number, moving: boolean, speed: number) {
+    let pose: number = POSE.stand;
+    if (this.poseT > 0) {
+      this.poseT -= dt;
+      if (this.poseKind === "look" && moving) this.poseT = 0; // walking off breaks the look
+      else if (this.poseKind === "act") pose = this.poseT > 0.17 ? POSE.raise : POSE.strike;
+      else pose = Math.floor(this.poseT / 0.4) % 2 ? POSE.lookA : POSE.lookB;
+    }
+    if (this.poseT <= 0 && moving) {
+      this.walkT += dt * (speed / 70);
+      pose = [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(this.walkT / 0.11) % 4];
+    } else if (!moving) this.walkT = 0;
+    this.player.setFrame(this.facing * POSES + pose);
+  }
+
+  // ---------------------------------------------------------------- what you are looking at
+  focusGlow!: Phaser.GameObjects.Image;
+  focusMarks!: Phaser.GameObjects.Graphics;
+  focusTag!: Phaser.GameObjects.Text;
+
+  /**
+   * A soft light on what E, Space or Q will act on, so it is always clear.
+   * What E would use comes first; then a creature in front; then the tile in front, if anything is there.
+   * Holding a tool marks the tile it will strike with faint corners; anything you can study gets a small name tag.
+   */
+  updateFocus() {
+    const pulse = 0.22 + 0.08 * Math.sin(this.time.now / 260);
+    let fx = 0, fy = 0, on = false, tag = "", big = false;
+    const [tx, ty] = this.facingTile();
+    const ahead = this.creatureAhead();
+    const spot = this.forageAt(tx, ty);
+    const objs = (this as unknown as { objects?: Phaser.Tilemaps.TilemapLayer }).objects;
+    const obj = objs?.getTileAt(tx, ty)?.index ?? -1;
+    const subject = this.paused ? null : ahead ? ahead.kind : spot ? spot.def.id : this.subjectAt();
+    if (this.current) { fx = this.current.x; fy = this.current.y; on = true; }
+    else if (ahead) { fx = ahead.sprite.x; fy = ahead.sprite.y; on = true; big = ahead.kind === "centaur"; }
+    else if (spot || (obj >= 0 && obj !== T.EDGE && obj !== T.CAVEWALL) || (subject && !/^t\d+$/.test(subject))) { fx = tx * TILE + 8; fy = ty * TILE + 8; on = true; }
+    if (on && subject && LORE[subject] && !/^t\d+$/.test(subject)) tag = loreName(subject);
+    const show = on && !this.paused && !this.aiming;
+    this.focusGlow.setVisible(show);
+    if (show) this.focusGlow.setPosition(fx, fy - 2).setAlpha(pulse).setScale(big ? 1.3 : 0.75);
+    this.focusTag.setVisible(show && !!tag && !this.current);
+    if (show && tag) this.focusTag.setText(tag[0].toUpperCase() + tag.slice(1)).setPosition(fx, fy - (big ? 18 : 10));
+    // Faint corners on the tile a tool or seed in hand will work.
+    this.focusMarks.clear();
+    const held = G.selectedItem ? ITEMS[G.selectedItem.id] : null;
+    if (!this.paused && !this.aiming && held && (held.kind === "tool" || held.kind === "seed") && held.id !== "bow") {
+      const x0 = tx * TILE, y0 = ty * TILE, a = 0.35 + 0.15 * Math.sin(this.time.now / 260);
+      this.focusMarks.lineStyle(1, 0xfbe39a, a);
+      for (const [cx, cy, sx, sy] of [[x0, y0, 1, 1], [x0 + 16, y0, -1, 1], [x0, y0 + 16, 1, -1], [x0 + 16, y0 + 16, -1, -1]]) {
+        this.focusMarks.lineBetween(cx, cy, cx + 4 * sx, cy); this.focusMarks.lineBetween(cx, cy, cx, cy + 4 * sy);
+      }
+    }
   }
 
   /** The tile in front of the player's feet. */
@@ -247,7 +315,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
     this.movePlayer(dt);
-    if (this.paused) { ui(this).prompt(null); return false; }
+    if (this.paused) { ui(this).prompt(null); this.focusGlow?.setVisible(false); this.focusTag?.setVisible(false); this.focusMarks?.clear(); return false; }
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
     G.data.px = this.player.x; G.data.py = this.player.y;
     this.current = this.findTarget();
@@ -260,8 +328,9 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.aiming) this.aimAtPointer();
     this.drawAim();
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.updateFocus();
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
-      if (!bow) this.useItem();
+      if (!bow) { this.gesture("act"); this.useItem(); }
       else if (!this.canHunt) G.say("Not indoors.");
     }
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.investigate();
@@ -513,7 +582,7 @@ abstract class PlayScene extends Phaser.Scene {
     const [tx, ty] = this.aimPoint();
     const dx = tx - this.player.x, dy = ty - this.player.y;
     this.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
-    this.player.setFrame(this.facing);
+    this.player.setFrame(this.facing * POSES + POSE.raise);
   }
 
   /**
@@ -715,6 +784,7 @@ abstract class PlayScene extends Phaser.Scene {
   }
 
   investigate() {
+    this.gesture("look");
     const a = this.creatureAhead();
     const [fx, fy] = this.facingTile();
     const spot = this.forageAt(fx, fy);
