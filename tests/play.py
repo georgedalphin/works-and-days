@@ -11,6 +11,7 @@ async def main():
         await pg.wait_for_timeout(1500)
         await pg.screenshot(path="/home/claude/test/1_title.png")
         await pg.keyboard.press("Enter")   # new life
+        if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
         await pg.wait_for_timeout(1200)
         await pg.screenshot(path="/home/claude/test/2_house_help.png")
         await pg.keyboard.press("Escape")

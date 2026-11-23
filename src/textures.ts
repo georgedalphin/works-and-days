@@ -97,22 +97,7 @@ export function makeTextures(scene: Phaser.Scene) {
   for (let i = 0; i < COUNT; i++) tiles.add(`t${i}`, 0, i * TILE, 0, TILE, TILE); // single tiles, for break effects
 
   // Player: four facings in one strip (down, left, right, up), 16x16 each.
-  const player = canvasTex(scene, "player", 64, 16, (c) => {
-    for (let f = 0; f < 4; f++) {
-      const o = f * 16;
-      px(c, o + 5, 13, 6, 2, "rgba(0,0,0,0.25)");
-      px(c, o + 5, 6, 6, 7, "#e9e1cf"); // chiton
-      px(c, o + 5, 9, 6, 1, "#b0412f"); // belt
-      px(c, o + 6, 1, 4, 5, "#c98e62"); // head
-      px(c, o + 6, 1, 4, 2, "#4a3324"); // hair
-      px(c, o + 6, 13, 1, 2, "#6b4a2b"); px(c, o + 9, 13, 1, 2, "#6b4a2b");
-      if (f === 0) { px(c, o + 7, 3, 1, 1, "#2a1d14"); px(c, o + 8, 3, 1, 1, "#2a1d14"); }
-      if (f === 1) px(c, o + 6, 3, 1, 1, "#2a1d14");
-      if (f === 2) px(c, o + 9, 3, 1, 1, "#2a1d14");
-      if (f === 3) px(c, o + 6, 1, 4, 4, "#4a3324");
-    }
-  });
-  for (let f = 0; f < 4; f++) player.add(f, 0, f * 16, 0, 16, 16);
+  makePlayerTexture(scene, { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" });
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -534,4 +519,26 @@ function drawStranger(c: Ctx, o: number, look: string) {
     case "bard":
       drawPerson(c, o, { tunic: "#e8e2d0", hair: "#c98e2a", skin: "#d8a878" }); px(c, o + 10, 7, 4, 4, "#8a6a3a"); px(c, o + 10, 4, 1, 4, "#c9b48f"); px(c, o + 13, 4, 1, 4, "#c9b48f"); px(c, o + 10, 4, 4, 1, "#c9b48f"); break;
   }
+}
+
+/** The player's sprite, in the colors chosen at creation. Redrawn whenever a life begins or is loaded. */
+export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) {
+  if (scene.textures.exists("player")) scene.textures.remove("player");
+  const belt = look.tunic === "#b0412f" ? "#e9e1cf" : "#b0412f";
+  const player = canvasTex(scene, "player", 64, 16, (c) => {
+    for (let f = 0; f < 4; f++) {
+      const o = f * 16;
+      px(c, o + 5, 13, 6, 2, "rgba(0,0,0,0.25)");
+      px(c, o + 5, 6, 6, 7, look.tunic); // chiton
+      px(c, o + 5, 9, 6, 1, belt);
+      px(c, o + 6, 1, 4, 5, look.skin); // head
+      px(c, o + 6, 1, 4, 2, look.hair);
+      px(c, o + 6, 13, 1, 2, "#6b4a2b"); px(c, o + 9, 13, 1, 2, "#6b4a2b");
+      if (f === 0) { px(c, o + 7, 3, 1, 1, "#2a1d14"); px(c, o + 8, 3, 1, 1, "#2a1d14"); }
+      if (f === 1) px(c, o + 6, 3, 1, 1, "#2a1d14");
+      if (f === 2) px(c, o + 9, 3, 1, 1, "#2a1d14");
+      if (f === 3) px(c, o + 6, 1, 4, 4, look.hair);
+    }
+  });
+  for (let f = 0; f < 4; f++) player.add(f, 0, f * 16, 0, 16, 16);
 }

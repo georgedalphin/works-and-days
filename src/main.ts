@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GameState, rng } from "./state";
-import { makeTextures, T, TILE } from "./textures";
+import { makeTextures, makePlayerTexture, T, TILE } from "./textures";
+import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
@@ -274,14 +275,15 @@ abstract class PlayScene extends Phaser.Scene {
   struck(a: Animal) {
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
-    G.addFatigue(d.damage);
+    const dmg = Math.max(1, d.damage - (G.data.health - 4)); // Health from character creation
+    G.addFatigue(dmg);
     this.invuln = 1; this.knock = 0.22;
     const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
     this.player.setVelocity(Math.cos(ang) * 170, Math.sin(ang) * 170);
     this.cameras.main.shake(140, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
     const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts" };
-    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${d.damage} Fatigue)`);
+    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${dmg} Fatigue)`);
     if (G.data.fatigue >= 100) this.struckDown(a);
   }
 
@@ -639,7 +641,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
   updateAnimals(dt: number) {
     const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
-    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis"));
+    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.data.stealth - 4));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     if (!this.paused) for (const a of this.animals) a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
@@ -667,7 +669,7 @@ class TitleScene extends Phaser.Scene {
 
     const options: { label: string; go: () => void }[] = [];
     if (save) options.push({ label: "Continue", go: () => this.begin(new GameState(save)) });
-    options.push({ label: "New life", go: () => { GameState.clearSave(); this.begin(new GameState()); } });
+    options.push({ label: "New life", go: () => { if (this.starting) return; this.starting = true; this.scene.start("Creation"); } });
 
     let sel = 0;
     const texts = options.map((o, i) =>
@@ -686,13 +688,274 @@ class TitleScene extends Phaser.Scene {
   begin(state: GameState) {
     if (this.starting) return; // a click and a key in the same frame must not start the game twice
     this.starting = true;
-    G = state;
-    (window as unknown as { G: GameState }).G = G; // for testing from the console
-    this.scene.start(G.data.scene);
-    if (this.scene.isActive("UI")) this.scene.stop("UI");
-    this.scene.launch("UI");
+    startLife(this, state);
   }
 }
+
+/** Begin (or resume) a life: dress the player in their colors and open the world. */
+function startLife(scene: Phaser.Scene, state: GameState) {
+  G = state;
+  (window as unknown as { G: GameState }).G = G; // for testing from the console
+  makePlayerTexture(scene, G.data.look);
+  scene.scene.start(G.data.scene);
+  if (scene.scene.isActive("UI")) scene.scene.stop("UI");
+  scene.scene.launch("UI");
+}
+
+// ------------------------------------------------------------------ character creation
+const ARETAI_ORDER = WHEEL.map((w) => w.aretai);
+const TABLES: Record<number, TableEntry[]> = { 0: SIGNS, 1: BIRTHRIGHTS, 3: TRAININGS, 4: HAMARTIAI, 10: ASTHENEIAI, 11: MOROI };
+const d12i = () => Math.floor(Math.random() * 12);
+
+/**
+ * The creation screen is the Cosmic Wheel itself: twelve segments, one per step, filling in as each is
+ * decided. Modes from the Character Systems doc: choose four steps and roll the rest (default), let the
+ * Fates roll everything, or (for testing and the curious) choose freely.
+ */
+class CreationScene extends Phaser.Scene {
+  mode: "four" | "fates" | "free" = "four";
+  sel = 0;
+  picks: Record<number, number> = {};
+  chosen = new Set<number>();
+  aretai: Record<string, number> = {};
+  favor: Record<string, number> = {};
+  res = { Wealth: 4, Health: 4, Stealth: 4 };
+  name = "";
+  look = { tunic: TUNICS[0], hair: HAIRS[0], skin: SKINS[0] };
+  root?: Phaser.GameObjects.Container;
+  naming = false;
+  note = "";
+  done = false;
+
+  constructor() { super("Creation"); }
+
+  create() {
+    this.done = false; this.naming = false; this.note = ""; this.sel = 0; this.mode = "four";
+    this.name = NAMES[d12i() % NAMES.length];
+    this.rollAll();
+    this.cameras.main.setBackgroundColor("#1f2a3a");
+    this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+      if (this.naming) return;
+      const dx = p.x - WC.x, dy = p.y - WC.y, r = Math.hypot(dx, dy);
+      if (r < WC.r0 || r > WC.r1) return;
+      let a = (Math.atan2(dy, dx) * 180) / Math.PI + 90 + 15; if (a < 0) a += 360;
+      this.sel = Math.floor(a / 30) % 12; this.note = ""; this.draw();
+    });
+    this.input.keyboard!.on("keydown", (e: KeyboardEvent) => {
+      if (!this.naming) return;
+      if (e.key === "Backspace") this.name = this.name.slice(0, -1);
+      else if (e.key === "Enter" || e.key === "Escape") this.naming = false;
+      else if (e.key.length === 1 && /[\p{L} '-]/u.test(e.key) && this.name.length < 16) this.name += e.key;
+      this.draw();
+    });
+    this.draw();
+  }
+
+  rollTable(step: number) { this.picks[step] = d12i(); }
+
+  /** Roll the whole life: every table, and a random spread of points. */
+  rollAll() {
+    for (const k of Object.keys(TABLES)) this.rollTable(Number(k));
+    this.chosen.clear();
+    this.aretai = Object.fromEntries(ARETAI_ORDER.map((a) => [a, 3]));
+    for (let i = 0; i < 14; i++) {
+      const from = ARETAI_ORDER[d12i()], to = ARETAI_ORDER[d12i()];
+      if (from !== to && this.aretai[from] > 1 && this.aretai[to] < ARETAI_MAX_AT_CREATION) { this.aretai[from]--; this.aretai[to]++; }
+    }
+    this.favor = {};
+    const plus = this.favorPool();
+    for (let i = 0; i < plus; i++) { const g = WHEEL[d12i()].god; this.favor[g] = (this.favor[g] ?? 0) + 1; }
+    for (let i = 0; i < FAVOR_MINUS; i++) { const g = WHEEL[d12i()].god; this.favor[g] = (this.favor[g] ?? 0) - 1; }
+    this.res = { Wealth: 4, Health: 4, Stealth: 4 };
+    for (let i = 0; i < 5; i++) {
+      const keys = ["Wealth", "Health", "Stealth"] as const, from = keys[d12i() % 3], to = keys[d12i() % 3];
+      if (from !== to && this.res[from] > 1 && this.res[to] < RESOURCE_MAX[to]) { this.res[from]--; this.res[to]++; }
+    }
+  }
+
+  favorPool() { return FAVOR_PLUS + (BIRTHRIGHTS[this.picks[1] ?? 0].favorPoints ?? 0); }
+  pointsLeft() { return YOUNG_ADULT.aretaiPoints - ARETAI_ORDER.reduce((n, a) => n + this.aretai[a], 0); }
+  resLeft() { return RESOURCE_POINTS - this.res.Wealth - this.res.Health - this.res.Stealth; }
+  bonus(a: string) { return (BIRTHRIGHTS[this.picks[1]].aretai?.[a] ?? 0) + (TRAININGS[this.picks[3]].aretai?.[a] ?? 0); }
+
+  canChoose(step: number) {
+    if (step === 11) return false; // Moros stays hidden
+    if (this.mode === "fates") return false;
+    if (this.mode === "free") return true;
+    return this.chosen.has(step) || this.chosen.size < 4;
+  }
+
+  choose(step: number, i: number) {
+    if (!this.canChoose(step)) { this.note = step === 11 ? "Your doom is the Fates' to keep." : this.mode === "fates" ? "The Fates are deciding everything. Change the mode to choose." : "You have chosen four steps; the Fates decide the rest."; this.draw(); return; }
+    this.picks[step] = i; this.chosen.add(step); this.note = ""; this.draw();
+  }
+
+  draw() {
+    this.root?.destroy();
+    const root = this.add.container(0, 0); this.root = root;
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const txt = (x: number, y: number, t: string, size = 14, color = "#f2e6c9", extra: object = {}) => { const o = this.add.text(x, y, t, { ...font, fontSize: `${size}px`, color, ...extra }); root.add(o); return o; };
+    const button = (x: number, y: number, t: string, fn: () => void, on = true, size = 14) => {
+      const o = txt(x, y, t, size, on ? "#f2e6c9" : "#8d877b");
+      if (on) o.setInteractive({ useHandCursor: true }).on("pointerover", () => o.setColor("#f2c14e")).on("pointerout", () => o.setColor("#f2e6c9")).on("pointerdown", (_p: unknown, _x: unknown, _y: unknown, ev: Phaser.Types.Input.EventData) => { ev.stopPropagation(); fn(); });
+      return o;
+    };
+    txt(W / 2, 14, "The Moirai spin a new Life Thread", 22).setOrigin(0.5, 0);
+    // The wheel.
+    const g = this.add.graphics(); root.add(g);
+    for (let i = 0; i < 12; i++) {
+      const a0 = Phaser.Math.DegToRad(-90 - 15 + i * 30), a1 = a0 + Phaser.Math.DegToRad(30);
+      const fixed = i === 2 || i === 6 || i === 7, chosen = this.chosen.has(i) || (this.mode === "free" && TABLES[i] !== undefined) || [5, 8, 9].includes(i);
+      const col = Phaser.Display.Color.HexStringToColor(WHEEL[i].color).color;
+      g.fillStyle(fixed ? 0x3a3a46 : col, fixed ? 1 : chosen ? 0.85 : 0.4);
+      g.beginPath(); g.arc(WC.x, WC.y, WC.r1, a0, a1, false); g.arc(WC.x, WC.y, WC.r0, a1, a0, true); g.closePath(); g.fillPath();
+      g.lineStyle(i === this.sel ? 3 : 1, i === this.sel ? 0xf2c14e : 0x1f2a3a, 1).strokePath();
+      const am = (a0 + a1) / 2, lr = (WC.r0 + WC.r1) / 2;
+      txt(WC.x + Math.cos(am) * lr, WC.y + Math.sin(am) * lr - 8, STEPS[i], 11, "#fffaf0", { stroke: "#1f2a3a", strokeThickness: 3 }).setOrigin(0.5);
+      txt(WC.x + Math.cos(am) * lr, WC.y + Math.sin(am) * lr + 7, this.stepValue(i), 9, "#fbe39a", { stroke: "#1f2a3a", strokeThickness: 3, wordWrap: { width: 80 }, align: "center" }).setOrigin(0.5);
+    }
+    // At the center: the one being made.
+    const pi = this.add.image(WC.x, WC.y - 24, "player", 0).setScale(3); root.add(pi);
+    txt(WC.x, WC.y + 6, this.name || "(unnamed)", 16).setOrigin(0.5, 0);
+    txt(WC.x, WC.y + 26, `${YOUNG_ADULT.name} · Life Thread ${YOUNG_ADULT.thread}`, 11, "#c9b48f").setOrigin(0.5, 0);
+    button(WC.x - 34, WC.y + 44, "Name & look", () => { this.naming = true; this.draw(); }, true, 12);
+
+    // The selected step.
+    const px0 = 500, pw = 440;
+    txt(px0, 56, `${this.sel + 1}. ${STEPS[this.sel]}`, 20, Phaser.Display.Color.HexStringToColor(WHEEL[this.sel].color).rgba);
+    txt(px0, 84, `${WHEEL[this.sel].aretai} · ${WHEEL[this.sel].god}`, 11, "#c9b48f");
+    txt(px0, 100, STEP_HELP[this.sel], 12, "#e0d2b4", { wordWrap: { width: pw } });
+    let y = 148;
+    const table = TABLES[this.sel];
+    if (this.sel === 11) txt(px0, y, "Hidden. The Fates have already drawn it.\nIt will show itself in omens, dreams and oracles.", 14, "#a8a0c0");
+    else if (table) {
+      table.forEach((e, i) => {
+        const on = this.picks[this.sel] === i;
+        const t = button(px0, y, `${on ? "›" : " "} ${i + 1}. ${e.name}  ·  ${e.text}`, () => this.choose(this.sel, i), this.canChoose(this.sel), 12);
+        if (on) t.setColor("#f2c14e");
+        t.setWordWrapWidth(pw);
+        y += Math.max(18, t.height + 3);
+      });
+      const tag = this.chosen.has(this.sel) ? "Chosen by you." : this.mode === "free" ? "" : "Rolled by the Fates.";
+      txt(px0, y + 4, tag, 11, "#c9b48f");
+      if (this.mode !== "fates") button(px0 + 150, y + 4, this.chosen.has(this.sel) ? "Give it back to the Fates (roll)" : "Roll again", () => { this.chosen.delete(this.sel); this.rollTable(this.sel); this.draw(); }, true, 11);
+    } else if (this.sel === 5) {
+      txt(px0, y, `Points left: ${this.pointsLeft()} of ${YOUNG_ADULT.aretaiPoints}`, 14, this.pointsLeft() ? "#fbe39a" : "#9ad07a"); y += 24;
+      ARETAI_ORDER.forEach((a, i) => {
+        const v = this.aretai[a], b = this.bonus(a);
+        txt(px0, y, `${a}`, 13); txt(px0 + 90, y, `${WHEEL[i].god}`, 10, "#c9b48f");
+        button(px0 + 170, y, "−", () => { if (this.aretai[a] > 1 && this.mode !== "fates") { this.aretai[a]--; this.draw(); } }, this.mode !== "fates" && v > 1);
+        txt(px0 + 190, y, `${v}`, 13).setOrigin(0.5, 0);
+        button(px0 + 204, y, "+", () => { if (this.pointsLeft() > 0 && this.aretai[a] < ARETAI_MAX_AT_CREATION) { this.aretai[a]++; this.draw(); } }, this.mode !== "fates" && this.pointsLeft() > 0 && v < ARETAI_MAX_AT_CREATION);
+        txt(px0 + 230, y, b ? `+${b}  =  ${Math.min(12, v + b)}` : `=  ${v}`, 13, b ? "#fbe39a" : "#f2e6c9");
+        y += 20;
+      });
+    } else if (this.sel === 8) {
+      const pos = Object.values(this.favor).filter((v) => v > 0).reduce((n, v) => n + v, 0), neg = Object.values(this.favor).filter((v) => v < 0).reduce((n, v) => n + v, 0);
+      txt(px0, y, `Favor to give: +${this.favorPool() - pos}   Disfavor to take: ${-FAVOR_MINUS - neg}   (plus your sign: ${SIGNS[this.picks[0]].text})`, 12, "#fbe39a", { wordWrap: { width: pw } }); y += 34;
+      WHEEL.forEach((w) => {
+        const v = this.favor[w.god] ?? 0;
+        txt(px0, y, w.god, 13);
+        button(px0 + 170, y, "−", () => { if (v > 0 || neg > -FAVOR_MINUS) { this.favor[w.god] = v - 1; this.draw(); } }, this.mode !== "fates" && (v > 0 || neg > -FAVOR_MINUS));
+        txt(px0 + 192, y, `${v > 0 ? "+" : ""}${v}`, 13, v > 0 ? "#fbe39a" : v < 0 ? "#e09080" : "#f2e6c9").setOrigin(0.5, 0);
+        button(px0 + 208, y, "+", () => { if (v < 0 || pos < this.favorPool()) { this.favor[w.god] = v + 1; this.draw(); } }, this.mode !== "fates" && (v < 0 || pos < this.favorPool()));
+        y += 20;
+      });
+    } else if (this.sel === 9) {
+      txt(px0, y, `Points left: ${this.resLeft()} of ${RESOURCE_POINTS}`, 14, this.resLeft() ? "#fbe39a" : "#9ad07a"); y += 26;
+      const br = BIRTHRIGHTS[this.picks[1]], as = ASTHENEIAI[this.picks[10]];
+      const extra = { Wealth: (br.wealth ?? 0) + (as.wealth ?? 0), Health: (br.health ?? 0) + (as.health ?? 0), Stealth: br.stealth ?? 0 };
+      const what = { Wealth: (n: number) => `${Math.max(0, n) * SILVER_PER_WEALTH} silver to start`, Health: (n: number) => `blows hurt you ${n >= 4 ? n - 4 : 4 - n} ${n >= 4 ? "less" : "more"}`, Stealth: (n: number) => `creatures notice you ${Math.abs((n - 4) * 4)}% ${n >= 4 ? "later" : "sooner"}` };
+      for (const k of ["Wealth", "Health", "Stealth"] as const) {
+        const v = this.res[k], total = v + extra[k];
+        txt(px0, y, k, 14);
+        button(px0 + 100, y, "−", () => { if (this.res[k] > 1) { this.res[k]--; this.draw(); } }, this.mode !== "fates" && v > 1);
+        txt(px0 + 122, y, `${v}`, 14).setOrigin(0.5, 0);
+        button(px0 + 138, y, "+", () => { if (this.resLeft() > 0 && this.res[k] < RESOURCE_MAX[k]) { this.res[k]++; this.draw(); } }, this.mode !== "fates" && this.resLeft() > 0 && v < RESOURCE_MAX[k]);
+        txt(px0 + 170, y, `${extra[k] ? `${extra[k] > 0 ? "+" : ""}${extra[k]} = ${total}: ` : ""}${what[k](total)}`, 12, "#e0d2b4");
+        y += 28;
+      }
+    } else {
+      const info: Record<number, string> = {
+        2: `${YOUNG_ADULT.name} (${YOUNG_ADULT.gift}): ${YOUNG_ADULT.thread} Life Thread, ${YOUNG_ADULT.aretaiPoints} Aretai points, ${YOUNG_ADULT.expertise} Expertise points.\nOther life stages come with childhood starts, aging and heirs.`,
+        6: `${YOUNG_ADULT.expertise} Expertise points are waiting. Expertises arrive in a later build.`,
+        7: "One Natural Thaumata, matching one of your two highest Aretai, arrives in a later build.",
+      };
+      txt(px0, y, info[this.sel] ?? "", 13, "#e0d2b4", { wordWrap: { width: pw } });
+    }
+    if (this.note) txt(px0, 520, this.note, 12, "#e09080", { wordWrap: { width: pw } });
+
+    // Modes and the way forward.
+    const by = H - 70;
+    txt(40, by - 24, "How shall this life be made?", 13, "#c9b48f");
+    ([["four", "Choose four, roll the rest"], ["fates", "Let the Fates decide"], ["free", "Choose freely"]] as const).forEach(([m, label], i) => {
+      const b = button(40 + i * 205, by, `${this.mode === m ? "● " : "○ "}${label}`, () => { this.mode = m; if (m === "fates") this.rollAll(); if (m === "four") { while (this.chosen.size > 4) this.chosen.delete([...this.chosen][this.chosen.size - 1]); } this.note = ""; this.draw(); }, true, 13);
+      if (this.mode === m) b.setColor("#f2c14e");
+    });
+    button(40, by + 28, "Roll everything again", () => { this.rollAll(); this.note = ""; this.draw(); }, true, 13);
+    const ready = this.pointsLeft() === 0 && this.resLeft() === 0 && this.name.trim().length > 0;
+    const begin = button(W - 220, by + 10, "Begin this life  ›", () => this.finish(), true, 20);
+    if (!ready) begin.setColor("#8d877b");
+    if (!ready) txt(W - 220, by + 40, this.pointsLeft() ? `Spend all your Aretai points (${this.pointsLeft()} left).` : this.resLeft() ? `Spend all your Resources (${this.resLeft()} left).` : "Give yourself a name.", 11, "#e09080");
+
+    if (this.naming) this.drawNaming(root, txt, button);
+  }
+
+  stepValue(i: number): string {
+    if (TABLES[i]) return i === 11 ? "hidden" : TABLES[i][this.picks[i]].name;
+    if (i === 2) return YOUNG_ADULT.name;
+    if (i === 5) return this.pointsLeft() ? `${this.pointsLeft()} to spend` : "spent";
+    if (i === 8) { const best = Object.entries(this.favor).sort((a, b) => b[1] - a[1])[0]; return best && best[1] > 0 ? `${best[0]} +${best[1]}` : "—"; }
+    if (i === 9) return `W${this.res.Wealth} H${this.res.Health} S${this.res.Stealth}`;
+    return "later";
+  }
+
+  drawNaming(root: Phaser.GameObjects.Container, txt: (x: number, y: number, t: string, size?: number, color?: string, extra?: object) => Phaser.GameObjects.Text, button: (x: number, y: number, t: string, fn: () => void, on?: boolean, size?: number) => Phaser.GameObjects.Text) {
+    const bg = this.add.rectangle(W / 2, H / 2, 560, 330, 0x1f1712, 0.98).setStrokeStyle(2, 0xc4703f).setInteractive(); root.add(bg);
+    const x0 = W / 2 - 250, y0 = H / 2 - 150;
+    txt(W / 2, y0, "Name & look", 20).setOrigin(0.5, 0);
+    txt(x0, y0 + 40, "Name (type it; Enter when done):", 13, "#c9b48f");
+    txt(x0, y0 + 60, `${this.name}_`, 22, "#fbe39a");
+    button(x0 + 360, y0 + 66, "Another name", () => { this.name = NAMES[Math.floor(Math.random() * NAMES.length)]; this.draw(); }, true, 12);
+    const row = (label: string, y: number, list: string[], key: "tunic" | "hair" | "skin") => {
+      txt(x0, y, label, 13, "#c9b48f");
+      list.forEach((c, i) => {
+        const sw = this.add.rectangle(x0 + 90 + i * 34, y + 8, 26, 18, Phaser.Display.Color.HexStringToColor(c).color).setStrokeStyle(this.look[key] === c ? 3 : 1, this.look[key] === c ? 0xf2c14e : 0x6b4a2b)
+          .setInteractive({ useHandCursor: true }).on("pointerdown", (_p: unknown, _x: unknown, _y: unknown, ev: Phaser.Types.Input.EventData) => { ev.stopPropagation(); this.look[key] = c; makePlayerTexture(this, this.look); this.draw(); });
+        root.add(sw);
+      });
+    };
+    row("Chiton", y0 + 110, TUNICS, "tunic"); row("Hair", y0 + 145, HAIRS, "hair"); row("Skin", y0 + 180, SKINS, "skin");
+    const pi = this.add.image(x0 + 430, y0 + 160, "player", 0).setScale(4); root.add(pi);
+    button(W / 2 - 30, y0 + 270, "Done", () => { this.naming = false; this.draw(); }, true, 18);
+  }
+
+  finish() {
+    if (this.done) return;
+    if (this.pointsLeft() !== 0 || this.resLeft() !== 0 || !this.name.trim()) { this.note = "Not yet: spend every point and give yourself a name."; this.draw(); return; }
+    this.done = true;
+    GameState.clearSave();
+    const st = new GameState(), d = st.data;
+    const sign = SIGNS[this.picks[0]], br = BIRTHRIGHTS[this.picks[1]], tr = TRAININGS[this.picks[3]];
+    const ham = HAMARTIAI[this.picks[4]], ast = ASTHENEIAI[this.picks[10]], mor = MOROI[this.picks[11]];
+    d.name = this.name.trim(); d.look = { ...this.look };
+    d.aretai = Object.fromEntries(ARETAI_ORDER.map((a) => [a, Math.min(12, this.aretai[a] + this.bonus(a))]));
+    st.essenceMax = essencePools(d.aretai); st.essence = { ...st.essenceMax };
+    d.favor = {};
+    for (const [god, v] of Object.entries({ ...sign.favor })) d.favor[god] = (d.favor[god] ?? 0) + v;
+    for (const [god, v] of Object.entries(this.favor)) if (v) d.favor[god] = (d.favor[god] ?? 0) + v;
+    for (const god of Object.keys(d.favor)) if (d.favor[god] >= 4) d.knownByName[god] = true;
+    d.silver = Math.max(0, this.res.Wealth + (br.wealth ?? 0) + (ast.wealth ?? 0)) * SILVER_PER_WEALTH;
+    d.health = this.res.Health + (br.health ?? 0) + (ast.health ?? 0);
+    d.stealth = Math.max(0, this.res.Stealth + (br.stealth ?? 0));
+    if (ast.rel) { for (const id of Object.keys(VILLAGERS)) if (!ast.relWith || ast.relWith === id) st.npcRec(id).rel = ast.rel; }
+    d.lifeThread = YOUNG_ADULT.thread;
+    d.birth = { sign: sign.name, birthright: br.name, training: tr.name, hamartia: [ham.name, ham.text], astheneia: [ast.name, ast.text], moros: [mor.name, mor.text] };
+    st.say(`${d.name}, ${sign.name.replace(/^The /, "born under the ")}, of the ${br.name.replace(/^The /, "")}, trained in ${tr.name.toLowerCase()}.`);
+    startLife(this, st);
+  }
+}
+const WC = { x: 250, y: 330, r0: 95, r1: 205 };
 
 // ------------------------------------------------------------------ the homestead
 const MW = 48, MH = 36;
@@ -2171,7 +2434,7 @@ class UIScene extends Phaser.Scene {
       "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
-      "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: your Aretai and currencies.",
+      "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
       "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
       "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
       "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
@@ -2712,7 +2975,8 @@ class UIScene extends Phaser.Scene {
   }
 
   buildSelf() {
-    const { root, font, x0, y0, h } = this.sheetFrame("Your Aretai", "Twelve excellences, in the order of the Cosmic Wheel. Spend Ambrosia to raise them.", 520);
+    const b = G.data.birth;
+    const { root, font, x0, y0, h } = this.sheetFrame(`${G.data.name || "You"}  ·  Young Adult  ·  Life Thread ${G.data.lifeThread}`, b ? `${b.sign} · born to ${b.birthright} · trained in ${b.training}.  Spend Ambrosia to raise your Aretai.` : "Twelve excellences, in the order of the Cosmic Wheel. Spend Ambrosia to raise them.", 600);
     WHEEL.forEach((w, i) => {
       const col = i < 6 ? 0 : 1, row = i % 6;
       const x = x0 + 24 + col * 400, y = y0 + 66 + row * 40;
@@ -2735,6 +2999,11 @@ class UIScene extends Phaser.Scene {
       root.add(this.add.text(x0 + 24, y, `${c}  ${G.data.currencies[c]}`, { ...font, fontSize: "15px", color: c === "Hubris" ? "#e09080" : "#fbe39a" }));
       root.add(this.add.text(x0 + 160, y + 2, CURRENCY_DESC[c], { ...font, fontSize: "12px", color: "#c9b48f" }));
       y += 24;
+    }
+    if (b) {
+      y += 6;
+      root.add(this.add.text(x0 + 24, y, `Hamartia: ${b.hamartia[0]}. ${b.hamartia[1]}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } })); y += 20;
+      root.add(this.add.text(x0 + 24, y, `Astheneia: ${b.astheneia[0]}. ${b.astheneia[1]}   ·   Moros: hidden by the Fates.   ·   Health ${G.data.health} · Stealth ${G.data.stealth}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } }));
     }
     root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "P or Esc to close   ·   F for the gods", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }
@@ -3110,7 +3379,7 @@ class UIScene extends Phaser.Scene {
   pixelArt: true,
   physics: { default: "arcade", arcade: { debug: false } },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, TitleScene, FarmScene, HouseScene, WildScene, VillageScene, CaveScene, UIScene],
+  scene: [BootScene, TitleScene, CreationScene, FarmScene, HouseScene, WildScene, VillageScene, CaveScene, UIScene],
 });
 
 (window as unknown as { WHEEL: typeof WHEEL }).WHEEL = WHEEL;

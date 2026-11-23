@@ -5,6 +5,7 @@ async def run(b, ctype):
     errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
     await pg.goto("file:///home/claude/works-and-days/dist/index.html"); await pg.wait_for_timeout(1200)
     await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
+    if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
     U="game.scene.getScene('UI')"; Wd="game.scene.getScene('Wild')"; C="game.scene.getScene('Cave')"
     msg = lambda: pg.evaluate("G.messages.map(m=>m.text).slice(-2).join(' | ')")
     await pg.evaluate(f"G.data.anchors.cave='1,0'; G.data.screens['1,0']={{terrain:4,special:false,feature:'Stone outcrop',cleared:[]}}; G.data.wx=1;G.data.wy=0;G.data.entry='W';G.data.scene='Wild'; {U}.help.setVisible(false); {U}.modal=false; game.scene.getScene('House').goTo('Wild')")

@@ -7,6 +7,7 @@ async def main():
         errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
         await pg.goto("file:///home/claude/works-and-days/dist/index.html"); await pg.wait_for_timeout(1200)
         await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
+        if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
         U="game.scene.getScene('UI')"; Wd="game.scene.getScene('Wild')"
         text = lambda: pg.evaluate(f"{U}.talkPanel ? {U}.talkPanel.list.filter(o=>o.type==='Text').map(o=>o.text).slice(0,3).join(' || ') : ''")
         opts = lambda: pg.evaluate(f"{U}.talkOpts.map(o=>o.label).join(' / ')")

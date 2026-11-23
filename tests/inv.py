@@ -11,6 +11,7 @@ async def main():
         await pg.mouse.click(480,320)
         # choose New life (last option)
         await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1000)
+        if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
         await pg.keyboard.press("Escape"); await pg.wait_for_timeout(300)
         print("scene", await pg.evaluate("[G.data.scene, game.scene.getScene('UI').modal, game.scene.getScene('House').player.y]"))
         # walk out of hut

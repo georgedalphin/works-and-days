@@ -8,6 +8,7 @@ async def main():
         await pg.goto("file:///home/claude/works-and-days/dist/index.html")
         await pg.wait_for_timeout(1200)
         await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
+        if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
         await pg.keyboard.press("Escape"); await pg.wait_for_timeout(300)
         await pg.keyboard.down("s"); await pg.wait_for_timeout(1600); await pg.keyboard.up("s"); await pg.wait_for_timeout(800)
         F="game.scene.getScene('Farm')"
