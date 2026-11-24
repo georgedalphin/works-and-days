@@ -1,14 +1,14 @@
 import Phaser from "phaser";
-import { GameState, rng } from "./state";
+import { GameState, rng, CHEST_SIZE, type Placed, type Slot } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
-import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS } from "./data";
+import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, type Station } from "./data";
 import { MOROS_DREAMS } from "./omens";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
-import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
+import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
@@ -59,6 +59,8 @@ function labor(cost: Record<string, number>, fatigue: number, aretai: string): s
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
+/** How much a blow is softened: Health above the baseline of 4, and a woolen cloak if you carry one. */
+const armor = () => G.data.health - 4 + (G.count("Cloak") > 0 ? 1 : 0);
 /** Extra yield for things you understand fully. */
 const mastery = (id: string, n = 1) => (G.lore(id) >= 3 ? n : 0);
 const OBJ_SUBJECT: Record<number, string> = {
@@ -191,6 +193,7 @@ abstract class PlayScene extends Phaser.Scene {
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
     this.spots = []; inDark = false;
+    this.placedObjs = []; this.ghost = undefined;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.mouseIn = true;
@@ -368,9 +371,113 @@ abstract class PlayScene extends Phaser.Scene {
     return [tx + dx, ty + dy];
   }
 
+  // ---------------------------------------------------------------- things you set down
+  placedObjs: { p: Placed; img?: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t?: Target }[] = [];
+  ghost?: Phaser.GameObjects.Image;
+  /** Where placed things are kept for this map ("" if nothing can be set down here). */
+  placeKey(): string { return ""; }
+  /** Why a thing can't be set down on this tile, or null if it can. */
+  placeBlocked(_tx: number, _ty: number): string | null { return "There's nowhere to set that down here."; }
+  /** The objects layer, for fences (the farm and the wild have one). */
+  objLayer(): Phaser.Tilemaps.TilemapLayer | undefined { return (this as unknown as { objects?: Phaser.Tilemaps.TilemapLayer }).objects; }
+
+  placedAt(tx: number, ty: number) { return this.placedObjs.find((o) => o.p.x === tx && o.p.y === ty); }
+  /** Draw everything already set down on this map. Call once the map and its targets exist. */
+  drawPlaced() {
+    const key = this.placeKey(); if (!key) return;
+    for (const p of G.data.placed) if (p.where === key) this.spawnPlaced(p);
+  }
+  spawnPlaced(p: Placed) {
+    const cx = p.x * TILE + 8, by = p.y * TILE + 15;
+    if (p.id === "Fence") {
+      this.objLayer()?.putTileAt(T.FENCE, p.x, p.y).setCollision(true);
+      this.placedObjs.push({ p }); return;
+    }
+    if (p.id === "Snare") this.resolveSnare(p);
+    const img = this.add.image(cx, by, `pl_${p.id}`, p.id === "Snare" ? (p.caught ? 1 : 0) : undefined).setOrigin(0.5, 1).setDepth(by);
+    const o: { p: Placed; img: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t: Target } = { p, img, t: { x: cx, y: p.y * TILE + 10, label: "", act: () => {} } };
+    if (p.id !== "Snare") {
+      const body = this.add.zone(cx, p.y * TILE + 11, 14, 8); this.physics.add.existing(body, true);
+      this.physics.add.collider(this.player, body); o.body = body;
+    }
+    const sc = this;
+    const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom" };
+    if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => ui(sc).openCraft(station[p.id]) };
+    else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
+    else if (p.id === "Snare") o.t = { x: o.t.x, y: o.t.y, get label() { return p.caught ? "Something is in the snare" : "Check the snare"; }, act: () => sc.checkSnare(o) };
+    this.targets.push(o.t);
+    this.placedObjs.push(o);
+  }
+  /** A snare set for at least a night has had its chance: d12 ≤ Oikos + 2, and Artemis' favor. */
+  resolveSnare(p: Placed) {
+    if (p.caught || p.set === undefined || G.dayNumber <= p.set) return;
+    const roll = d12(), need = (G.data.aretai.Oikos ?? 3) + 2 + Math.max(0, G.boon("Artemis"));
+    if (roll <= need) p.caught = Math.random() < 0.6 ? "hare" : "partridge";
+    else p.set = G.dayNumber;
+  }
+  checkSnare(o: { p: Placed; img?: Phaser.GameObjects.Image; t?: Target }) {
+    const p = o.p;
+    if (p.caught) {
+      const got = p.caught === "hare" ? `${give("Meat", 1)}, ${give("Hide", 1)}` : `${give("Meat", 1)}, ${give("Feather", 2)}`;
+      G.say(`A ${p.caught} hangs in the noose. You take it and reset the snare: ${got}.`);
+      if (p.where !== "farm") G.data.deerDebt += 0; // small game: Artemis asks no share
+      p.caught = undefined; p.set = G.dayNumber; o.img?.setFrame(0);
+      return;
+    }
+    const fresh = p.set === G.dayNumber;
+    ui(this).choose(`${fresh ? "The snare is set. Give it a night." : "The noose hangs empty. Perhaps tonight."}\n\nTake up the snare?`, () => this.pickUp(o));
+  }
+  /** Lift a placed thing back into your pack. */
+  pickUp(o: { p: Placed; img?: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t?: Target }) {
+    const p = o.p;
+    if (p.store?.some((s) => s)) { G.say("Empty the chest before you move it."); return; }
+    if (G.addItem(p.id, 1) > 0) { G.say("Your pack is full."); return; }
+    if (p.id === "Fence") this.objLayer()?.putTileAt(-1, p.x, p.y);
+    o.img?.destroy(); o.body?.destroy();
+    if (o.t) this.targets = this.targets.filter((t) => t !== o.t);
+    this.placedObjs = this.placedObjs.filter((x) => x !== o);
+    G.data.placed = G.data.placed.filter((x) => x !== p);
+    G.say(`You take up the ${ITEMS[p.id].name.toLowerCase()}.`);
+  }
+  /** Set down the held thing on the tile under the cursor (or in front of you). */
+  tryPlace() {
+    const held = G.selectedItem!; const name = ITEMS[held.id].name.toLowerCase();
+    const key = this.placeKey();
+    if (!key) { G.say(`There's nowhere to set the ${name} down here.`); return; }
+    if (key !== "farm" && held.id !== "Snare") { G.say(`The ${name} belongs on your own homestead.`); return; }
+    const [tx, ty] = this.facingTile(); if (tx < 0) return;
+    const why = this.placeBlocked(tx, ty) ?? (this.placedAt(tx, ty) ? "Something is already there." : null);
+    if (why) { G.say(why); return; }
+    const [px, py] = this.playerTile();
+    if (px === tx && py === ty) { G.say("Step aside first."); return; }
+    if (held.id === "Snare" && G.data.placed.filter((p) => p.id === "Snare" && p.where === key).length >= 3) { G.say("Three snares on one stretch of ground is plenty."); return; }
+    G.removeItem(held.id, 1);
+    const p: Placed = { id: held.id, where: key, x: tx, y: ty };
+    if (held.id === "Chest") p.store = Array(CHEST_SIZE).fill(null);
+    if (held.id === "Snare") p.set = G.dayNumber;
+    G.data.placed.push(p); this.spawnPlaced(p);
+    SOUND.sfx("pickup");
+    G.say(held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
+  }
+  /** The ghost of what you're about to set down. */
+  updateGhost() {
+    const held = G.selectedItem;
+    const placing = held && ITEMS[held.id]?.kind === "place" && !this.paused;
+    if (!placing) { this.ghost?.setVisible(false); return; }
+    const [tx, ty] = this.facingTile();
+    if (tx < 0) { this.ghost?.setVisible(false); return; }
+    const tex = held.id === "Fence" ? "items" : `pl_${held.id}`;
+    if (!this.ghost || !this.ghost.active) this.ghost = this.add.image(0, 0, tex).setOrigin(0.5, 1).setAlpha(0.55).setDepth(99980);
+    if (this.ghost.texture.key !== tex) this.ghost.setTexture(tex);
+    if (held.id === "Fence") this.ghost.setFrame("Fence"); else if (held.id === "Snare") this.ghost.setFrame(0);
+    const ok = this.placeKey() && !this.placeBlocked(tx, ty) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare");
+    this.ghost.setPosition(tx * TILE + 8, ty * TILE + 15).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
+  }
+
   tooFar() { G.say("That's too far. Come within two paces of it."); }
   /** E or a right click: use whatever is under the cursor (or in front of you). */
   interactNow() {
+    if (performance.now() - ui(this).closedByE < 150) return; // that E press closed a panel
     if (this.current) { this.faceToward(this.current.x, this.current.y); this.current.act(); }
     else if (this.cursorMode && !this.cursorInReach()) this.tooFar();
   }
@@ -379,6 +486,11 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.cursorMode && !this.cursorInReach()) { this.tooFar(); return; }
     const [lx, ly] = this.lookPoint(); if (this.cursorMode) this.faceToward(lx, ly);
     this.gesture("act");
+    if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "place") { this.tryPlace(); return; }
+    if (G.selectedItem?.id === "axe" || G.selectedItem?.id === "mattock") {
+      const [tx, ty] = this.facingTile(), o = this.placedAt(tx, ty);
+      if (o) { SOUND.sfx("chop"); this.pickUp(o); return; }
+    }
     const tool = G.selectedItem?.id; if (tool === "axe" || tool === "mattock" || tool === "hoe" || tool === "sickle") SOUND.sfx("chop");
     this.useItem();
   }
@@ -430,7 +542,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.aiming) this.aimAtPointer();
     this.drawAim();
     this.cooldown = Math.max(0, this.cooldown - dt);
-    this.updateFocus();
+    this.updateFocus(); this.updateGhost();
     if (this.ambience) { this.maybeSign(dt); this.maybeOmen(dt); }
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
       if (!bow) this.useNow();
@@ -477,7 +589,7 @@ abstract class PlayScene extends Phaser.Scene {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
-    const dmg = Math.max(1, d.damage - (G.data.health - 4)); // Health from character creation
+    const dmg = Math.max(1, d.damage - armor()); // Health from character creation, and a cloak
     G.addFatigue(dmg);
     this.invuln = 1; this.knock = 0.22;
     const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
@@ -919,7 +1031,7 @@ abstract class PlayScene extends Phaser.Scene {
       if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
-    const dmg = Math.max(1, 8 - (G.data.health - 4));
+    const dmg = Math.max(1, 8 - armor());
     G.addFatigue(dmg); this.invuln = 0.8;
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
@@ -1407,6 +1519,19 @@ class FarmScene extends PlayScene {
   youngVines = new Map<string, Phaser.GameObjects.Image>();
 
   constructor() { super("Farm"); }
+  /** Tiles under the homestead's fixed structures, where nothing can be set down. */
+  reserved = new Set<string>();
+  placeKey() { return "farm"; }
+  placeBlocked(tx: number, ty: number) {
+    const k = `${tx},${ty}`;
+    if (tx < 2 || ty < 2 || tx >= MW - 2 || ty >= MH - 2) return "Not at the very edge of your land.";
+    if (inPen(tx, ty)) return "Not inside the goat pen.";
+    if (this.baseGround[ty][tx] === T.PATH) return "Leave the path clear.";
+    if ((this.objects.getTileAt(tx, ty)?.index ?? -1) !== -1) return "Clear the ground there first.";
+    if (G.data.ground[k] || G.data.crops[k] || G.data.vines[k]) return "Not on worked soil.";
+    if (this.reserved.has(k)) return "There's no room there.";
+    return null;
+  }
 
   create() {
     this.leaving = false;
@@ -1470,7 +1595,10 @@ class FarmScene extends PlayScene {
     // The hut, the well, the storage jar and the signposts.
     const hut = this.add.image(HUT.tx * TILE, HUT.ty * TILE, "hut").setOrigin(0, 0).setDepth((HUT.ty + 3.4) * TILE);
     const solids = this.physics.add.staticGroup();
+    this.reserved = new Set([`${Math.floor(DOOR_X / TILE)},${DOOR.ty + 1}`]);
     const solid = (x: number, y: number, w: number, h: number) => {
+      for (let ty = Math.floor((y - h / 2) / TILE); ty <= Math.floor((y + h / 2) / TILE); ty++)
+        for (let tx = Math.floor((x - w / 2) / TILE); tx <= Math.floor((x + w / 2) / TILE); tx++) this.reserved.add(`${tx},${ty}`);
       const b = solids.create(x, y, "") as Phaser.Physics.Arcade.Sprite;
       b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(w, h);
     };
@@ -1544,6 +1672,7 @@ class FarmScene extends PlayScene {
     this.placeForage(rng(G.data.seed ^ 0x51f0a9e), HOME_TERRAIN, 6, (x, y) =>
       x < MW - 2 && y < MH - 2 && Math.hypot((x - 24) / 1.3, y - 14) > 9 && objs[y][x] === -1 && this.baseGround[y][x] !== T.PATH && !inPen(x, y));
     this.spawnAnimals(r, objs);
+    this.drawPlaced();
     this.cameras.main.fadeIn(250);
   }
 
@@ -2067,6 +2196,11 @@ class WildScene extends PlayScene {
   open: Record<Side, boolean> = { N: true, S: true, E: true, W: true };
 
   constructor() { super("Wild"); }
+  placeKey() { return `w:${this.key}`; }
+  placeBlocked(tx: number, ty: number) {
+    if (tx < 2 || ty < 2 || tx >= WW - 2 || ty >= WH - 2) return "Not at the very edge of the land.";
+    return (this.objects.getTileAt(tx, ty)?.index ?? -1) === -1 ? null : "Find open ground for it.";
+  }
 
   /** Which sides lead somewhere. Next to home, only the farm's own gateways connect. */
   sideOpen(wx: number, wy: number, side: Side) {
@@ -2215,6 +2349,7 @@ class WildScene extends PlayScene {
     this.maybeMonster();
     this.setupGlint();
     this.setupHut();
+    this.drawPlaced();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -2314,8 +2449,9 @@ class WildScene extends PlayScene {
       const type: CaveType = roll <= 6 ? "common" : roll <= 9 ? "sacred" : "chthonic";
       G.data.caves[this.key] = { type, boss: "alive", hoard: false, mined: {} };
     }
-    G.data.torchLit = G.count("Torch") > 0;
-    if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
+    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0;
+    if (G.count("Lamp") > 0) G.say("You light your clay lamp and duck inside. Its steady flame throws the light wide.");
+    else if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
     else G.say("You have no torch. You feel your way into the dark: every action is at -3. (Make torches with C.)");
     G.data.cave = { key: this.key, level: 1 }; G.data.entry = "N"; G.data.scene = "Cave";
     this.goTo("Cave");
@@ -3033,7 +3169,7 @@ class CaveScene extends PlayScene {
     // Clay and ochre in the cave floor.
     this.placeForage(rng(screenSeed(cwx, cwy) ^ (0x51 + level)), 99, 3, (x, y) => x > 1 && y > 3 && x < CW - 2 && y < CH - 2 && objs[y][x] === -1 && !path.some(([a, b]) => a === x && b === y));
 
-    this.dark = this.add.image(sx, sy, inDark ? "dark0" : "dark1").setDepth(99990);
+    this.dark = this.add.image(sx, sy, inDark ? "dark0" : G.count("Lamp") > 0 ? "dark2" : "dark1").setDepth(99990);
     this.cameras.main.fadeIn(300);
     if (level === 1 && !this.rec.mined.seen) { this.rec.mined.seen = ["1"]; G.say(CAVE_KINDS[this.rec.type].signs); }
     if (level === CAVE_LEVELS && this.rec.boss === "alive") G.say("The passage opens into a chamber. Something here is awake.");
@@ -3458,7 +3594,7 @@ class UIScene extends Phaser.Scene {
       if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
       if (e.key === "m" || e.key === "M") G.say(SOUND.toggleMute() ? "Sound off (M to turn it back on)." : "Sound on.");
       if (e.key === "n" || e.key === "N") G.say(SOUND.toggleMusic() ? "Music on." : "Music off (N to bring it back). The world still sounds.");
-      if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook) { if (this.craft) this.closeCraft(); else this.openCraft(); }
+      if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook && !this.chestPanel) { if (this.craft) this.closeCraft(); else this.openCraft(); }
       if ((e.key === "f" || e.key === "F") && !this.talkPanel) { if (this.sheet === "gods") this.closeSheet(); else this.openSheet("gods"); }
       if ((e.key === "p" || e.key === "P") && !this.talkPanel) { if (this.sheet === "self") this.closeSheet(); else this.openSheet("self"); }
     });
@@ -3502,6 +3638,7 @@ class UIScene extends Phaser.Scene {
       "Crops: choose seeds and press Space on tilled soil; water daily; harvest with Space when ripe.",
       "Watered every night, or sown in the crop's patron hour, it grows finer (★). Trade at the pithos.",
       "Goats: pet and milk them daily (E); keep the manger in Fiber and the trough in water.",
+      "Crafting (C): handwork anywhere. Make a workbench, hold it and click to set it down; E at it for more.",
       "The hive gives honey every few days. Wild creatures bolt if you run at them.",
       "",
       "Each of the day's twelve hours belongs to a god of the Cosmic Wheel.",
@@ -3521,8 +3658,12 @@ class UIScene extends Phaser.Scene {
       if (this.dialog || this.inv) return;
       this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
     });
+    this.input.keyboard!.on("keydown-E", () => {
+      if (this.chestPanel) { this.closeChest(); this.closedByE = performance.now(); }
+      else if (this.craft && this.craftAt !== "hand") { this.closeCraft(); this.closedByE = performance.now(); }
+    });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && k === "ESC") this.closeCraft(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); else if (this.talkPanel) this.closeTalk(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -3935,6 +4076,7 @@ class UIScene extends Phaser.Scene {
       const god = artemisShare ? "Artemis" : OFFER_PATRON[held.id];
       if (god) opts.push({ label: `Offer your ${ITEMS[held.id].name.toLowerCase()} to ${CHTHONIC.includes(god) ? "the one below" : god}`, fn: () => this.offer(where, held.id, god, cap) });
       // Wine can be poured out to any god: a libation.
+      if (held.id === "Figurine" || held.id === "Garland") opts.push({ label: `Dedicate the ${ITEMS[held.id].name.toLowerCase()} to another god`, fn: () => this.showTalk("To whom?", "A votive may be given to any god", "", TWELVE.map((g) => ({ label: `${g} (${G.favor(g) >= 0 ? "+" : ""}${G.favor(g)})`, fn: () => this.offer(where, held.id, g, cap) }))) });
       if (held.id === "Wine") opts.push({ label: "Pour a libation to another god", fn: () => this.showTalk("A libation to whom?", "Wine poured out is welcome to every god", "", TWELVE.map((g) => ({ label: `${g} (${G.favor(g) >= 0 ? "+" : ""}${G.favor(g)})`, fn: () => this.offer(where, "Wine", g, cap) }))) });
     }
     const text = said ?? (where === "home"
@@ -4192,42 +4334,111 @@ class UIScene extends Phaser.Scene {
     this.showTalk(art.name, ok ? "The rite holds" : "The rite fails", text, []);
   }
 
-  openCraft() {
+  craftAt: Station = "hand";
+  closedByE = -1;
+  openCraft(at: Station = "hand") {
     if (this.market || this.dialog || this.loreBook) return;
     if (this.inv) this.toggleInventory();
     if (this.help.visible) this.help.setVisible(false);
+    this.craftAt = at;
     this.modal = true; this.buildCraft();
   }
   closeCraft() { this.craft?.destroy(); this.craft = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook; }
 
-  /** Simple handwork you can do anywhere. A workbench will come with the homestead's structures. */
+  /** Your hands' skill at a station: Techne, and Hephaestus' boon when he favors you. */
+  static craftQuality(): { q: number; roll: number; skill: number } {
+    const skill = (G.data.aretai.Techne ?? 3) + Math.max(0, G.boon("Hephaestus"));
+    const roll = d12();
+    return { q: roll <= Math.ceil(skill / 2) ? 3 : roll <= skill + 3 ? 2 : 1, roll, skill };
+  }
+
+  /** Handwork you can do anywhere (C), or the work of a station you have built (E at the station). */
   buildCraft() {
     this.craft?.destroy();
+    const at = this.craftAt;
+    const list = RECIPES.filter((r) => (r.at ?? "hand") === at);
     const font = { fontFamily: FONT, color: "#f2e6c9" };
-    const w = 560, h = 90 + RECIPES.length * 56 + 40, x0 = (W - w) / 2, y0 = (H - h) / 2 - 30;
+    const row = 50, w = 600, h = 84 + list.length * row + 36, x0 = (W - w) / 2, y0 = Math.max(8, (H - h) / 2 - 30);
     const root = this.add.container(0, 0).setDepth(23);
     this.craft = root;
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
-    root.add(this.add.text(W / 2, y0 + 12, "Handwork", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
-    root.add(this.add.text(W / 2, y0 + 40, "Click a recipe to make it from what you carry.", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
-    RECIPES.forEach((r, i) => {
-      const y = y0 + 72 + i * 56;
+    root.add(this.add.text(W / 2, y0 + 12, STATION_NAME[at], { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    const sub = at === "hand" ? "Click a recipe to make it from what you carry. Larger work needs a workbench."
+      : `Click a recipe to make it. Fine work is a Techne check (skill ${(G.data.aretai.Techne ?? 3) + Math.max(0, G.boon("Hephaestus"))}).`;
+    root.add(this.add.text(W / 2, y0 + 40, sub, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    list.forEach((r, i) => {
+      const y = y0 + 68 + i * row;
       const ok = r.needs.every(([id, n]) => G.count(id) >= n);
-      root.add(this.add.image(x0 + 34, y + 18, "items", r.out).setScale(2));
-      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (have ${G.count(id)})`).join(", ");
-      const t = this.add.text(x0 + 64, y, `${ITEMS[r.out].name} × ${r.qty}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
+      root.add(this.add.image(x0 + 34, y + 16, "items", r.out).setScale(2));
+      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (${G.count(id)})`).join(", ");
+      const t = this.add.text(x0 + 64, y, `${ITEMS[r.out].name}${r.qty > 1 ? ` × ${r.qty}` : ""}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
       root.add(t);
-      root.add(this.add.text(x0 + 64, y + 22, r.desc, { ...font, fontSize: "12px", color: "#c9b48f" }));
-      if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => {
-        if (labor({}, 1, "Techne") === null) return;
-        for (const [id, n] of r.needs) G.removeItem(id, n);
-        const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
-        const left = G.addItem(r.out, qty);
-        G.say(`You make ${qty - left} ${ITEMS[r.out].name.toLowerCase()}.${left ? " Your pack is full." : ""}${qty > r.qty ? " Hephaestus guides your hands." : ""}`);
-        this.buildCraft();
-      });
+      root.add(this.add.text(x0 + 64, y + 21, r.desc + (r.quality ? " ★" : ""), { ...font, fontSize: "12px", color: "#c9b48f" }));
+      if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => this.makeRecipe(r));
     });
-    root.add(this.add.text(W / 2, y0 + h - 26, "C or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + h - 26, `${at === "hand" ? "C" : "E"} or Esc to close${list.some((r) => r.quality) ? "   ·   ★ quality depends on your hands" : ""}`, { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+
+  makeRecipe(r: (typeof RECIPES)[number]) {
+    const heavy = r.at && r.at !== "hand";
+    if (labor(heavy ? { Fire: 1 } : {}, heavy ? 2 : 1, "Techne") === null) return;
+    for (const [id, n] of r.needs) G.removeItem(id, n);
+    const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
+    let q: number | undefined, note = "";
+    if (r.quality) {
+      const c = UIScene.craftQuality(); q = c.q;
+      note = ` (Techne d12 ${c.roll} against ${c.skill}: ${q === 3 ? "excellent work" : q === 2 ? "fine work" : "ordinary work"})`;
+    }
+    const got = give(r.out, qty, q);
+    G.say(`${STATION_NAME[r.at ?? "hand"]}: ${got}${note}.${qty > r.qty ? " Hephaestus guides your hands." : ""}`);
+    this.buildCraft();
+  }
+
+  // ---------------------------------------------------------------- chests
+  chestPanel?: Phaser.GameObjects.Container;
+  chestOf?: Placed;
+  openChest(p: Placed) {
+    if (this.market || this.dialog || this.loreBook || this.craft) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.chestOf = p; this.modal = true; this.buildChest();
+  }
+  closeChest() { this.chestPanel?.destroy(); this.chestPanel = undefined; this.chestOf = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft; }
+  /** Move a whole stack between the pack and the chest. */
+  static moveStack(from: (Slot | null)[], i: number, to: (Slot | null)[]) {
+    const s = from[i]; if (!s) return;
+    for (const t of to) if (t && t.id === s.id && (t.q ?? 1) === (s.q ?? 1) && t.qty < STACK_MAX && ITEMS[s.id].kind !== "tool") {
+      const n = Math.min(s.qty, STACK_MAX - t.qty); t.qty += n; s.qty -= n; if (!s.qty) { from[i] = null; return; }
+    }
+    const j = to.findIndex((t) => !t); if (j >= 0) { to[j] = s; from[i] = null; }
+  }
+  buildChest() {
+    this.chestPanel?.destroy();
+    const p = this.chestOf!; const store = p.store!;
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const cell = 40, cols = 10, w = cols * cell + 60, h = 340, x0 = (W - w) / 2, y0 = (H - h) / 2 - 20;
+    const root = this.add.container(0, 0).setDepth(23); this.chestPanel = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 10, "The chest", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    const grid = (arr: (Slot | null)[], gy: number, other: (Slot | null)[], n: number) => {
+      for (let i = 0; i < n; i++) {
+        const cx = x0 + 30 + (i % cols) * cell + cell / 2, cy = gy + Math.floor(i / cols) * cell + cell / 2;
+        const box = this.add.rectangle(cx, cy, cell - 4, cell - 4, 0x2c221a).setStrokeStyle(1, 0x5e4a36);
+        root.add(box);
+        const s = arr[i]; if (!s) continue;
+        root.add(this.add.image(cx, cy - 2, "items", s.id).setScale(2));
+        if (s.qty > 1) root.add(this.add.text(cx + 16, cy + 16, `${s.qty}`, { ...font, fontSize: "11px" }).setOrigin(1, 1));
+        if (s.q && s.q > 1) root.add(this.add.text(cx - 16, cy - 18, "★", { ...font, fontSize: "11px", color: s.q === 3 ? "#f2c14e" : "#d8d8e0" }));
+        box.setInteractive({ useHandCursor: true }).on("pointerover", () => { box.setStrokeStyle(2, 0xf2c14e); hint.setText(`${s.q && s.q > 1 ? QUALITY[s.q] + " " : ""}${ITEMS[s.id].name} × ${s.qty}`); })
+          .on("pointerout", () => box.setStrokeStyle(1, 0x5e4a36)).on("pointerdown", () => { UIScene.moveStack(arr, i, other); this.buildChest(); });
+      }
+    };
+    root.add(this.add.text(x0 + 30, y0 + 40, "In the chest (click to take)", { ...font, fontSize: "13px", color: "#c9b48f" }));
+    grid(store, y0 + 58, G.data.slots, CHEST_SIZE);
+    root.add(this.add.text(x0 + 30, y0 + 148, "Your pack (click to put away)", { ...font, fontSize: "13px", color: "#c9b48f" }));
+    grid(G.data.slots, y0 + 166, store, INVENTORY_SIZE);
+    const hint = this.add.text(W / 2, y0 + h - 26, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);
+    root.add(hint);
   }
 
   openLore(focus?: string) {

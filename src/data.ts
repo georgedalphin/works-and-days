@@ -90,7 +90,7 @@ export const NIGHT_WATCHES_PLAYABLE = 2;
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----
-export type ItemKind = "tool" | "material" | "seed" | "crop" | "find";
+export type ItemKind = "tool" | "material" | "seed" | "crop" | "find" | "place";
 export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string; value?: number }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -116,6 +116,19 @@ export const ITEMS: Record<string, ItemDef> = {
   Purslane: { id: "Purslane", value: 1, name: "Purslane", kind: "material", desc: "Fleshy wild greens from the field edges." },
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
   // Rare finds (omens.ts says where they turn up).
+  // Made things (crafting.ts says how).
+  Workbench: { id: "Workbench", value: 20, name: "Workbench", greek: "ergasterion", kind: "place", desc: "A stout bench for joinery. Place it on your homestead and use it to make larger things." },
+  Kiln: { id: "Kiln", value: 30, name: "Kiln", greek: "kaminos", kind: "place", desc: "A beehive of clay and stone for firing pots. Place it on your homestead." },
+  Loom: { id: "Loom", value: 25, name: "Loom", greek: "histos", kind: "place", desc: "An upright warp-weighted loom, Athena's gift. Place it on your homestead." },
+  Chest: { id: "Chest", value: 18, name: "Chest", greek: "kibotos", kind: "place", desc: "A wooden chest with a bronze hasp. Place it and keep things in it." },
+  Fence: { id: "Fence", value: 2, name: "Fence", greek: "phragmos", kind: "place", desc: "A length of wattle fence. Place it to mark a field or pen a goat." },
+  Snare: { id: "Snare", value: 3, name: "Snare", greek: "brochos", kind: "place", desc: "A noose of twisted fiber on a bent stick. Set it in the wild or on your land; check it after a night." },
+  Amphora: { id: "Amphora", value: 8, name: "Amphora", greek: "amphoreus", kind: "material", desc: "A two-handled jar for wine and oil." },
+  WineAmphora: { id: "WineAmphora", value: 70, name: "Amphora of wine", greek: "amphoreus oinou", kind: "material", desc: "Three measures of wine, sealed with pitch. Worth far more to the miller than loose wine." },
+  Lamp: { id: "Lamp", value: 10, name: "Clay lamp", greek: "lychnos", kind: "material", desc: "A little lamp burning beeswax. Carried, it lights caves wider than a torch, and never burns out." },
+  Cloth: { id: "Cloth", value: 6, name: "Linen cloth", greek: "othone", kind: "material", desc: "A bolt of plain linen from your loom." },
+  Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "material", desc: "A thick cloak pinned at the shoulder. Carried, it turns a little of every blow (Health +1)." },
+  Garland: { id: "Garland", value: 5, name: "Garland", greek: "stephanos", kind: "material", desc: "Wildflowers woven on a fiber cord. Everyone likes a garland; Aphrodite most of all." },
   LionPelt: { id: "LionPelt", value: 70, name: "Lion pelt", greek: "leonte", kind: "material", desc: "The hide of a lion of the high country, mane and all. Heracles wore one. Worth a great deal, and more in glory." },
   Fibula: { id: "Fibula", value: 12, name: "Bronze fibula", greek: "porpe", kind: "find", desc: "A cloak pin, green with age. Someone lost it long ago." },
   Figurine: { id: "Figurine", value: 10, name: "Clay figurine", greek: "kore", kind: "find", desc: "A little clay woman with raised arms: a votive, once offered to a goddess." },
@@ -288,12 +301,31 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
 };
 /** Practice makes the archer: experience per shot and per hit, and how much a level is. */
 export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
-export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string }[] = [
+/** Where a recipe is made: by hand anywhere, or at a station you have built and placed on the homestead. */
+export type Station = "hand" | "workbench" | "kiln" | "loom";
+export const STATION_NAME: Record<Station, string> = { hand: "Handwork", workbench: "The workbench", kiln: "The kiln", loom: "The loom" };
+export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string; at?: Station; quality?: boolean }[] = [
   { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
   { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
   { out: "Arrow", qty: 6, needs: [["Wood", 1], ["Obsidian", 1]], desc: "Obsidian points: keener, and more of them." },
   { out: "Arrow", qty: 5, needs: [["Wood", 1], ["Arrowhead", 1]], desc: "An old flint point, rehafted, and its fellows knapped to match." },
   { out: "Torch", qty: 2, needs: [["Wood", 1], ["Fiber", 1]], desc: "Wood wrapped in fiber and pitch, for the dark places." },
+  { out: "Snare", qty: 1, needs: [["Fiber", 2], ["Wood", 1]], desc: "A noose on a bent stick. Set it, and check it after a night." },
+  { out: "Garland", qty: 1, needs: [["Flowers", 3], ["Fiber", 1]], desc: "Wildflowers woven on a cord: a gift, or an offering." },
+  { out: "Workbench", qty: 1, needs: [["Wood", 8], ["Stone", 2]], desc: "The first station: place it on your homestead to make larger things." },
+  { out: "WineAmphora", qty: 1, needs: [["Amphora", 1], ["Wine", 3]], desc: "Seal three measures of wine in an amphora with pitch." },
+  // At the workbench.
+  { out: "Chest", qty: 1, needs: [["Wood", 6], ["Copper", 1]], desc: "Somewhere to keep what your pack can't carry.", at: "workbench" },
+  { out: "Fence", qty: 4, needs: [["Wood", 2]], desc: "Wattle fencing, for fields and pens.", at: "workbench" },
+  { out: "Kiln", qty: 1, needs: [["Clay", 12], ["Stone", 6]], desc: "For firing clay: amphorae, lamps, figurines.", at: "workbench" },
+  { out: "Loom", qty: 1, needs: [["Wood", 10], ["Fiber", 4]], desc: "For weaving linen and wool.", at: "workbench" },
+  // At the kiln.
+  { out: "Amphora", qty: 1, needs: [["Clay", 3]], desc: "A two-handled jar for wine.", at: "kiln", quality: true },
+  { out: "Lamp", qty: 1, needs: [["Clay", 1], ["Wax", 1]], desc: "A wax lamp: lights caves wide, and never burns out.", at: "kiln", quality: true },
+  { out: "Figurine", qty: 1, needs: [["Clay", 2], ["Ochre", 1]], desc: "A votive, painted with ochre: an excellent offering.", at: "kiln", quality: true },
+  // At the loom.
+  { out: "Cloth", qty: 1, needs: [["Fiber", 3]], desc: "A bolt of linen.", at: "loom", quality: true },
+  { out: "Cloak", qty: 1, needs: [["Cloth", 2], ["Hide", 1]], desc: "Turns a little of every blow (Health +1 while carried).", at: "loom", quality: true },
 ];
 
 // ---- danger ----

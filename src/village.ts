@@ -20,7 +20,7 @@ export const VILLAGERS: Record<string, Villager> = {
   theron: {
     id: "theron", name: "Theron", household: "the miller", patron: "Demeter", aretai: "Oikos",
     look: { tunic: "#d8c8a0", hair: "#d8d8d0", skin: "#c98e62", beard: true },
-    loves: ["Honey", "Melon"], likes: ["Millet", "Chickpeas", "Plum", "Milk", "Wine"], dislikes: ["Stone", "Clay", "Feather"],
+    loves: ["Honey", "Melon"], likes: ["Millet", "Chickpeas", "Plum", "Milk", "Wine", "Amphora", "Cloth"], dislikes: ["Stone", "Clay", "Feather"],
     lines: {
       cool: ["Hm. You again.", "Grain doesn't grind itself. Is there something you need?"],
       new: ["New on the old homestead, aren't you? The soil there is good, if you treat it right.",
@@ -35,7 +35,7 @@ export const VILLAGERS: Record<string, Villager> = {
   lykos: {
     id: "lykos", name: "Lykos", household: "the smith", patron: "Hephaestus", aretai: "Techne",
     look: { tunic: "#6b5a45", hair: "#2a1d14", skin: "#a8744a", beard: true },
-    loves: ["Ochre", "Meat"], likes: ["Wood", "Clay", "Capers", "Tusk", "Wine"], dislikes: ["Flowers", "Mint"],
+    loves: ["Ochre", "Meat", "Lamp"], likes: ["Wood", "Clay", "Capers", "Tusk", "Wine"], dislikes: ["Flowers", "Mint"],
     lines: {
       cool: ["Mind the sparks. And mind yourself.", "I've work. Make it quick."],
       new: ["Bronze is copper married to tin, and tin comes from the ends of the earth. So I don't waste it.",
@@ -50,7 +50,7 @@ export const VILLAGERS: Record<string, Villager> = {
   myrrhine: {
     id: "myrrhine", name: "Myrrhine", household: "the priestess", patron: "Dionysus", aretai: "Pneuma",
     look: { tunic: "#7a3a6a", hair: "#4a2a1a", skin: "#d8a878", veil: "#e8e2d0" },
-    loves: ["Grapes", "WildGrapes", "Wine"], likes: ["Flowers", "Thyme", "Milk", "Honey"], dislikes: ["Stone", "Hide"],
+    loves: ["Grapes", "WildGrapes", "Wine", "Garland", "WineAmphora"], likes: ["Figurine", "Flowers", "Thyme", "Milk", "Honey"], dislikes: ["Stone", "Hide"],
     lines: {
       cool: ["The god sees what you do. So do I.", "Come back when your heart is clearer."],
       new: ["Every hour of the day belongs to one of the Twelve. Learn whose, and work with them, not against them.",
@@ -65,7 +65,7 @@ export const VILLAGERS: Record<string, Villager> = {
   eudora: {
     id: "eudora", name: "Eudora", household: "the innkeeper", patron: "Hermes", aretai: "Aiolos",
     look: { tunic: "#3a6a7a", hair: "#8a4a2a", skin: "#c98e62" },
-    loves: ["Milk", "Cornel"], likes: ["Purslane", "Plum", "Mushrooms", "Meat", "Honey", "Wine"], dislikes: ["Feather", "Clay"],
+    loves: ["Milk", "Cornel", "Cloak"], likes: ["Garland", "Lamp", "Purslane", "Plum", "Mushrooms", "Meat", "Honey", "Wine"], dislikes: ["Feather", "Clay"],
     lines: {
       cool: ["Rooms are for paying guests.", "Hm? Oh. It's you."],
       new: ["Everyone passes through an inn sooner or later. Kings, beggars, and once, I swear, a man with goat's legs.",

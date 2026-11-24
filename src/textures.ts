@@ -187,6 +187,43 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 9, 2, 2, 6, "#c9b48f");
   });
 
+  // Things you make and set down on the ground.
+  canvasTex(scene, "pl_Workbench", 24, 18, (c) => {
+    px(c, 2, 16, 20, 2, "rgba(0,0,0,0.22)");
+    px(c, 3, 9, 2, 8, "#5e4026"); px(c, 19, 9, 2, 8, "#5e4026"); px(c, 4, 13, 16, 1, "#6b4a2b");
+    px(c, 1, 6, 22, 4, "#9c7445"); px(c, 1, 6, 22, 1, "#b88d58"); px(c, 1, 9, 22, 1, "#6b4a2b");
+    px(c, 5, 4, 6, 2, "#8a8780"); px(c, 9, 3, 1, 3, "#6b4a2b"); // an adze
+    px(c, 14, 5, 5, 1, "#d9b25e"); px(c, 15, 4, 3, 1, "#c9a24e"); // shavings
+  });
+  canvasTex(scene, "pl_Kiln", 20, 24, (c) => {
+    px(c, 1, 22, 18, 2, "rgba(0,0,0,0.25)");
+    px(c, 3, 8, 14, 14, "#b0703f"); px(c, 5, 4, 10, 4, "#b0703f"); px(c, 7, 2, 6, 2, "#a8653a"); px(c, 8, 0, 4, 2, "#6b5a4e");
+    px(c, 2, 18, 16, 4, "#8a8780"); px(c, 3, 18, 2, 2, "#a49e91"); px(c, 9, 19, 3, 2, "#a49e91"); px(c, 14, 18, 2, 2, "#a49e91");
+    px(c, 7, 14, 6, 5, "#2a1d14"); px(c, 8, 16, 4, 3, "#c4703f"); px(c, 9, 17, 2, 2, "#f2c14e");
+    px(c, 4, 10, 2, 1, "#c98a55"); px(c, 13, 7, 2, 1, "#c98a55");
+  });
+  canvasTex(scene, "pl_Loom", 20, 26, (c) => {
+    px(c, 1, 24, 18, 2, "rgba(0,0,0,0.22)");
+    px(c, 2, 1, 2, 24, "#6b4a2b"); px(c, 16, 1, 2, 24, "#6b4a2b"); px(c, 1, 1, 18, 2, "#8a5f35");
+    for (let x = 5; x <= 15; x += 2) px(c, x, 3, 1, 15, "#e9e1cf");
+    px(c, 4, 3, 12, 7, "#d8c8a4"); for (let y = 4; y < 10; y += 2) px(c, 4, y, 12, 1, "#c4703f");
+    px(c, 3, 12, 14, 1, "#8a5f35");
+    for (let x = 5; x <= 15; x += 2) px(c, x - 1, 18, 2, 3, "#a8653a");
+  });
+  canvasTex(scene, "pl_Chest", 16, 14, (c) => {
+    px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
+    px(c, 1, 3, 14, 10, "#7a5a33"); px(c, 1, 2, 14, 3, "#9c7445"); px(c, 1, 2, 14, 1, "#b88d58");
+    px(c, 1, 5, 14, 1, "#5e4026"); px(c, 3, 3, 1, 10, "#5e4026"); px(c, 12, 3, 1, 10, "#5e4026");
+    px(c, 7, 4, 2, 3, "#c98a55"); px(c, 7, 6, 2, 1, "#8a5a2c");
+  });
+  const snare = canvasTex(scene, "pl_Snare", 32, 16, (c) => { for (const full of [false, true]) { const o = full ? 16 : 0;
+    px(c, o + 3, 4, 1, 10, "#6b4a2b"); px(c, o + 3, 3, 8, 1, "#7a5a33"); px(c, o + 10, 3, 1, 3, "#c9b48f");
+    px(c, o + 8, 6, 5, 1, "#c9b48f"); px(c, o + 8, 6, 1, 4, "#c9b48f"); px(c, o + 12, 6, 1, 4, "#c9b48f"); px(c, o + 8, 10, 5, 1, "#c9b48f");
+    px(c, o + 2, 13, 3, 1, "#5a3d22");
+    if (full) { px(c, o + 6, 9, 8, 4, "#a08a6a"); px(c, o + 12, 7, 2, 3, "#a08a6a"); px(c, o + 13, 6, 1, 2, "#8a7558"); px(c, o + 6, 12, 1, 1, "#e9e1cf"); px(c, o + 12, 8, 1, 1, "#1a1008"); }
+  } });
+  snare.add(0, 0, 0, 0, 16, 16); snare.add(1, 0, 16, 0, 16, 16);
+
   // Item icons, one 16x16 frame each, in the order of ITEM_ICON_ORDER.
   const icons = canvasTex(scene, "items", 16 * ITEM_ICON_ORDER.length, 16, (c) => {
     ITEM_ICON_ORDER.forEach((id, i) => drawIcon(c, i * 16, id));
@@ -501,7 +538,7 @@ export function makeTextures(scene: Phaser.Scene) {
   }
 
   // Darkness: a black field with a soft hole of light, small without a torch, larger with one.
-  for (const [key, r] of [["dark0", 30], ["dark1", 78]] as [string, number][]) {
+  for (const [key, r] of [["dark0", 30], ["dark1", 78], ["dark2", 112]] as [string, number][]) {
     canvasTex(scene, key, 640, 640, (c) => {
       const g = c.createRadialGradient(320, 320, r * 0.4, 320, 320, r);
       g.addColorStop(0, "rgba(8,6,4,0)"); g.addColorStop(1, "rgba(8,6,4,0.97)");
@@ -561,7 +598,8 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
+  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -669,6 +707,18 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "Workbench": px(c, o + 1, 5, 14, 3, "#9c7445"); px(c, o + 1, 5, 14, 1, "#b88d58"); px(c, o + 2, 8, 2, 6, "#5e4026"); px(c, o + 12, 8, 2, 6, "#5e4026"); px(c, o + 4, 3, 4, 2, "#8a8780"); break;
+    case "Kiln": px(c, o + 3, 6, 10, 9, "#b0703f"); px(c, o + 5, 3, 6, 3, "#b0703f"); px(c, o + 7, 1, 2, 2, "#6b5a4e"); px(c, o + 6, 10, 4, 4, "#2a1d14"); px(c, o + 7, 12, 2, 2, "#f2c14e"); px(c, o + 2, 14, 12, 1, "#8a8780"); break;
+    case "Loom": px(c, o + 2, 1, 2, 14, "#6b4a2b"); px(c, o + 12, 1, 2, 14, "#6b4a2b"); px(c, o + 2, 1, 12, 2, "#8a5f35"); for (let x = 5; x <= 11; x += 2) px(c, o + x, 3, 1, 9, "#e9e1cf"); px(c, o + 4, 3, 8, 4, "#c4703f"); for (let x = 4; x <= 11; x += 2) px(c, o + x, 12, 2, 2, "#a8653a"); break;
+    case "Chest": px(c, o + 1, 5, 14, 9, "#7a5a33"); px(c, o + 1, 4, 14, 3, "#9c7445"); px(c, o + 1, 7, 14, 1, "#5e4026"); px(c, o + 7, 6, 2, 3, "#c98a55"); break;
+    case "Fence": for (const x of [2, 7, 12]) px(c, o + x, 3, 2, 11, "#6b4a2b"); px(c, o + 1, 6, 14, 2, "#9c7445"); px(c, o + 1, 10, 14, 2, "#9c7445"); break;
+    case "Snare": px(c, o + 3, 3, 1, 11, "#6b4a2b"); px(c, o + 3, 3, 8, 1, "#7a5a33"); px(c, o + 7, 6, 6, 6, "#c9b48f"); c.clearRect(o + 8, 7, 4, 4); break;
+    case "Amphora": px(c, o + 6, 1, 4, 3, "#a8653a"); px(c, o + 4, 3, 2, 4, "#a8653a"); px(c, o + 10, 3, 2, 4, "#a8653a"); px(c, o + 5, 4, 6, 8, "#c4703f"); px(c, o + 6, 12, 4, 2, "#a8653a"); px(c, o + 7, 14, 2, 1, "#8a4a2a"); px(c, o + 5, 7, 6, 1, "#2a1d14"); break;
+    case "WineAmphora": px(c, o + 6, 0, 4, 2, "#2a1d14"); px(c, o + 6, 2, 4, 2, "#a8653a"); px(c, o + 4, 3, 2, 4, "#a8653a"); px(c, o + 10, 3, 2, 4, "#a8653a"); px(c, o + 5, 4, 6, 8, "#c4703f"); px(c, o + 6, 12, 4, 2, "#a8653a"); px(c, o + 5, 7, 6, 2, "#6b2a3a"); px(c, o + 7, 8, 2, 1, "#e8c86a"); break;
+    case "Lamp": px(c, o + 2, 9, 12, 4, "#c4703f"); px(c, o + 3, 8, 8, 1, "#a8653a"); px(c, o + 12, 8, 3, 2, "#a8653a"); px(c, o + 6, 9, 3, 1, "#2a1d14"); px(c, o + 13, 5, 2, 3, "#f2c14e"); px(c, o + 13, 4, 1, 1, "#fff3c0"); break;
+    case "Cloth": px(c, o + 2, 4, 12, 9, "#e9e1cf"); px(c, o + 2, 4, 12, 2, "#f7f0e0"); px(c, o + 2, 9, 12, 1, "#d8c8a4"); px(c, o + 12, 6, 2, 7, "#cfc2a2"); break;
+    case "Cloak": px(c, o + 4, 2, 8, 3, "#7a3b2e"); px(c, o + 3, 5, 10, 9, "#8f4a36"); px(c, o + 2, 9, 2, 5, "#7a3b2e"); px(c, o + 12, 9, 2, 5, "#7a3b2e"); px(c, o + 7, 3, 2, 2, "#d9b25e"); break;
+    case "Garland": for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; px(c, o + 7 + Math.round(Math.cos(a) * 5), 7 + Math.round(Math.sin(a) * 5), 2, 2, ["#e8c86a", "#c94c4c", "#e9e1cf", "#9a7ad0"][i % 4]); } px(c, o + 7, 2, 2, 1, "#5e9f5a"); break;
     case "LionPelt": px(c, o + 2, 4, 12, 9, "#c8964a"); px(c, o + 1, 5, 2, 3, "#c8964a"); px(c, o + 13, 5, 2, 3, "#c8964a"); px(c, o + 1, 11, 3, 3, "#c8964a"); px(c, o + 12, 11, 3, 3, "#c8964a"); px(c, o + 5, 1, 6, 5, "#7a4a22"); px(c, o + 6, 3, 4, 3, "#c8964a"); px(c, o + 7, 4, 1, 1, "#1a1008"); px(c, o + 9, 4, 1, 1, "#1a1008"); break;
     case "Antler": px(c, o + 4, 13, 2, 2, "#c9b48f"); for (let i = 0; i < 10; i++) px(c, o + 5 + Math.floor(i / 3), 12 - i, 1, 1, "#d8c8a0"); px(c, o + 8, 6, 4, 1, "#d8c8a0"); px(c, o + 11, 4, 1, 2, "#d8c8a0"); px(c, o + 6, 8, 1, 1, "#d8c8a0"); px(c, o + 3, 7, 3, 1, "#d8c8a0"); break;
     case "Tusk": for (let i = 0; i < 9; i++) px(c, o + 3 + i, 12 - Math.round(Math.sin((i / 8) * Math.PI) * 7), 2, 2, "#f2ece0"); px(c, o + 3, 12, 2, 2, "#c9b48f"); break;
