@@ -2,7 +2,8 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
-import { WEATHER_WORD } from "./data";
+import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS } from "./data";
+import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
@@ -101,6 +102,16 @@ const mythRec = (id: string) => (G.data.myth[id] ??= { days: 0, last: -1, gone: 
 /** Poseidon's favor deepens your water jar. */
 const jarCap = () => Math.max(10, JAR_CAPACITY + 5 * G.boon("Poseidon"));
 
+/** Maybe turn up a rare find from one of the find tables. Finds come excellent, so the gods value them as offerings. */
+function rollFind(table: keyof typeof FIND_TABLES, chance: number): boolean {
+  if (Math.random() >= chance) return false;
+  const id = pickFrom(FIND_TABLES[table]), lid = id.toLowerCase();
+  const first = (G.data.lore.tier[lid] ?? 0) < 1;
+  if (first) G.data.lore.tier[lid] = 1;
+  G.say(`A find! ${ITEMS[id].desc} ${give(id, 1, 3)}${first ? " (New in your lore book.)" : ""}`);
+  return true;
+}
+
 function give(id: string, qty: number, q?: number): string {
   const left = G.addItem(id, qty, q);
   if (left > 0) G.say(`Your hands are full: ${left} ${ITEMS[id].name} left on the ground.`);
@@ -116,7 +127,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
       const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
       const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
       const hits = G.toolLevel("axe") >= 2 ? 2 : TREE_HITS;
-      if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The pine comes down, smelling of resin: ${give("Wood", 5 + mastery("pine", 2))}${b}`); }
+      if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The pine comes down, smelling of resin: ${give("Wood", 5 + mastery("pine", 2))}${b}`); rollFind("tree", FIND_CHANCE.tree / 2); }
       else { G.say(`You swing the axe into the pine (${G.data.treeHits[k]} of ${hits}).${b}`); sc.cameras.main.shake(80, 0.002); (sc as unknown as PlayScene).chips(x, y, T.PINE, 4); }
       return true;
     }
@@ -141,7 +152,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
           const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
           const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
           const hits = G.toolLevel("axe") >= 2 ? 2 : TREE_HITS;
-          if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6 + mastery("oak", 2))}${b}`); }
+          if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6 + mastery("oak", 2))}${b}`); rollFind("tree", FIND_CHANCE.tree * (["Spring", "Summer"].includes(G.month.season) ? 1 : 0.5)); }
           else { G.say(`You swing the axe into the oak (${G.data.treeHits[k]} of ${hits}).${b}`); sc.cameras.main.shake(80, 0.002); (sc as unknown as PlayScene).chips(x, y, T.TREE, 4); }
         }
         else if (obj === T.OLIVE) G.say("You would never cut an olive tree. Athena would not forgive it.");
@@ -149,7 +160,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
         else G.say("Nothing here for the axe.");
         return true;
       case "mattock":
-        if (obj === T.STONE) { const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2 + mastery("stone"))}${b}`); }
+        if (obj === T.STONE) { const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2 + mastery("stone"))}${b}`); rollFind("stone", FIND_CHANCE.stone); }
         else if (obj === T.BOULDER && G.toolLevel("mattock") >= 2) { const b = labor({ Earth: 4, Fire: 3 }, 6, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`The bronze-shod mattock splits the boulder: ${give("Stone", 4 + mastery("stone"))}${b}`); }
         else if (obj === T.BOULDER) G.say("Too big for this mattock. Lykos the smith in the village can shoe it in bronze.");
         else G.say("Nothing here for the mattock.");
@@ -340,6 +351,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.drawAim();
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.updateFocus();
+    if (this.ambience) { this.maybeSign(dt); this.maybeOmen(dt); }
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
       if (!bow) { this.gesture("act"); this.useItem(); }
       else if (!this.canHunt) G.say("Not indoors.");
@@ -664,6 +676,111 @@ abstract class PlayScene extends Phaser.Scene {
   /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
   groundSpeed() { return 1; }
 
+  // ---------------------------------------------------------------- signs and omens
+  /** A passing sign or omen you can still study with Q, until the time given. */
+  skySubject?: { id: string; until: number };
+  omenLeft = 0;
+
+  /** Once a year in its months, each of Hesiod's signs shows itself to someone outdoors. */
+  maybeSign(dt: number) {
+    const m = G.data.month;
+    for (const s of Object.values(HESIOD_SIGNS)) {
+      if (!s.months.includes(m)) continue;
+      const seen = G.data.signs[s.id];
+      if (seen !== undefined && G.yearOf(seen) === G.data.year) continue;
+      const timeOk = s.when === "dawn" ? G.data.clock < 1.5 : G.isDay && G.data.clock > 1;
+      if (!timeOk || Math.random() > dt / (s.when === "dawn" ? 5 : 45)) continue;
+      this.showSign(s);
+      return;
+    }
+  }
+
+  showSign(s: SignDef) {
+    G.data.signs[s.id] = G.dayNumber;
+    this.skySubject = { id: s.id, until: this.time.now + 20000 };
+    const v = this.cameras.main.worldView;
+    if (s.visual === "cranes") {
+      // A long V of cranes, crossing slowly high over the land, their shadows below.
+      for (let i = 0; i < 9; i++) {
+        const k = i - 4, x = v.right + 30 + Math.abs(k) * 14, y = v.y + 40 + k * 9;
+        const img = this.add.image(x, y, "crane", i % 2).setDepth(99050);
+        const sh = this.add.image(x, y + 50, "crane", 0).setTint(0).setAlpha(0.15).setDepth(2);
+        for (const o of [img, sh]) this.tweens.add({ targets: o, x: v.x - 60 - Math.abs(k) * 14, y: o.y + 40, duration: 14000, onComplete: () => o.destroy() });
+        this.time.addEvent({ delay: 350, repeat: 38, callback: () => img.active && img.setFrame((Number(img.frame.name) + 1) % 2) });
+      }
+    } else if (s.visual === "swallow") {
+      const img = this.add.image(v.x - 10, this.player.y - 30, "swallow", 0).setDepth(99050);
+      this.tweens.add({ targets: img, x: v.right + 20, y: this.player.y - 60, duration: 2600, onComplete: () => img.destroy() });
+    } else if (s.visual === "stars") {
+      // Seven faint stars low over the edge of the world, fading with the dawn.
+      const east = s.id !== "pleiadesSet";
+      for (let i = 0; i < 7; i++) {
+        const img = this.add.image((east ? v.right - 40 : v.x + 40) + ((i * 7) % 13) - 6, v.y + 22 + ((i * 5) % 9), "glint").setScale(0.4).setBlendMode(Phaser.BlendModes.ADD).setDepth(99060).setAlpha(0);
+        this.tweens.add({ targets: img, alpha: 0.9, duration: 1500, yoyo: true, hold: 6000, onComplete: () => img.destroy() });
+      }
+    } else if (s.visual === "snail") {
+      const near = this.ambience?.inView(this.ambience.flowers.length ? this.ambience.flowers : this.ambience.trees) ?? [];
+      const [tx, ty] = near.length ? near.sort((a, b) => Math.hypot(a[0] * TILE - this.player.x, a[1] * TILE - this.player.y) - Math.hypot(b[0] * TILE - this.player.x, b[1] * TILE - this.player.y))[0] : [Math.floor(this.player.x / TILE) + 1, Math.floor(this.player.y / TILE)];
+      const img = this.add.image(tx * TILE + 9, ty * TILE + 2, "snail").setDepth(ty * TILE + 40);
+      this.time.delayedCall(60000, () => img.destroy());
+    }
+    const known = G.lore(s.id) >= 1;
+    G.say(known ? `${s.sight} ${s.meaning} (For ${SIGN_DAYS} days, ${EFFECT_WORD[s.effect]}.)` : `${s.sight} (Press Q while it lasts to study it.)`);
+  }
+
+  /** The gods speak now and then: an omen comes on about one day in three, outdoors. */
+  maybeOmen(dt: number) {
+    const o = G.data.omen;
+    if (o && o.day === G.dayNumber) return;
+    if (Math.random() > dt * 0.35 / DAYLIGHT_REAL_SECONDS) return;
+    const dusk = G.data.clock >= G.daylight - 1.2 && G.data.clock < G.daylight + 1.5;
+    const wild = this.scene.key === "Wild";
+    const ok = OMENS.filter((d) => (d.when === "dusk" ? dusk : G.isDay && !dusk) && (d.visual !== "thunder" || G.data.weather === "clear") && (d.visual !== "hind" || wild));
+    if (ok.length) this.fireOmen(ok[Math.floor(Math.random() * ok.length)]);
+  }
+
+  /**
+   * An omen: its truth is set by the god's mood (a god who favors you leans fair). Pneuma decides whether you notice it
+   * (d12 at or under Pneuma + Dionysus' boon); Gnosis whether you read it rightly (d12 at or under Gnosis + 2 + your augury).
+   * What you see is the truth; what you are told is your reading of it.
+   */
+  fireOmen(d: OmenDef) {
+    const good = Math.random() < Phaser.Math.Clamp(0.55 + 0.07 * G.boon(d.god), 0.15, 0.85);
+    const pneuma = (G.data.aretai.Pneuma ?? 3) + G.boon("Dionysus"), nRoll = 1 + Math.floor(Math.random() * 12);
+    const noticed = nRoll <= pneuma;
+    G.data.omen = { day: G.dayNumber, god: d.god, good, noticed };
+    this.omenVisual(d, good);
+    if (!noticed) { G.say(d.plain); return; }
+    const gnosis = (G.data.aretai.Gnosis ?? 3) + 2 + G.lore("augury"), rRoll = 1 + Math.floor(Math.random() * 12);
+    const right = rRoll <= gnosis, belief = right ? good : !good;
+    G.data.omen.read = right;
+    this.skySubject = { id: "augury", until: this.time.now + 12000 };
+    G.say(`${belief ? d.good : d.bad} An omen. ${OMEN_MEANING[d.god][belief ? 0 : 1]}`);
+  }
+
+  /** The bird, beast or sound itself, on the side it truly came. */
+  omenVisual(d: OmenDef, good: boolean) {
+    const side = good ? 1 : -1, v = this.cameras.main.worldView, x = this.player.x + side * 70;
+    if (d.visual === "thunder") { this.cameras.main.flash(220, 255, 250, 230); this.cameras.main.shake(300, 0.003); return; }
+    if (d.visual === "voice") {
+      const t = this.add.text(x, this.player.y - 20, d.id === "cuckoo" ? "cu-ckoo" : "kraak", { fontFamily: FONT, fontSize: "7px", color: "#e8e0c8", stroke: "#1f1712", strokeThickness: 2 }).setOrigin(0.5).setResolution(4).setDepth(99070);
+      this.tweens.add({ targets: t, y: t.y - 10, alpha: 0, duration: 2200, onComplete: () => t.destroy() });
+      return;
+    }
+    if (d.visual === "hind") {
+      const img = this.add.image(this.player.x + side * 40, this.player.y - 10, "deer", 0).setFlipX(side < 0).setDepth(this.player.y);
+      this.tweens.add({ targets: img, x: img.x + side * 120, alpha: 0, delay: good ? 900 : 100, duration: good ? 2200 : 900, onComplete: () => img.destroy() });
+      return;
+    }
+    const key = d.visual === "owl" ? "owl" : "eagle";
+    const img = this.add.image(x, v.y - 10, key, 0).setDepth(99070).setScale(d.visual === "hawk" ? 0.8 : 1);
+    if (d.visual === "raven") img.setTint(0x26262e);
+    if (d.visual === "hawk") img.setTint(0xb08050);
+    const sh = this.add.image(x, v.y + 30, key, 0).setTint(0).setAlpha(0.15).setDepth(2);
+    for (const o of [img, sh]) this.tweens.add({ targets: o, y: o.y + v.height + 40, x: o.x + side * 30, duration: 3200, onComplete: () => o.destroy() });
+    this.time.addEvent({ delay: 180, repeat: 16, callback: () => img.active && img.setFrame((Number(img.frame.name) + 1) % 2) });
+  }
+
   /** Butterflies, swallows, smoke, mist: the small life of the place (outdoor scenes only). */
   ambience?: Ambience;
 
@@ -845,7 +962,9 @@ abstract class PlayScene extends Phaser.Scene {
     const a = this.creatureAhead();
     const [fx, fy] = this.facingTile();
     const spot = this.forageAt(fx, fy);
-    const id = a ? a.kind : spot ? spot.def.id : this.subjectAt();
+    const subj = this.subjectAt();
+    const sky = this.skySubject && this.time.now < this.skySubject.until ? this.skySubject.id : null;
+    const id = a ? a.kind : spot ? spot.def.id : sky && (!subj || /^t\d+$/.test(subj)) ? sky : subj;
     if (!id || !LORE[id]) { G.say("There's nothing here to investigate."); return; }
     if (study(id)) { ui(this).openLore(id); this.refreshForage(); }
   }
@@ -1515,10 +1634,12 @@ class FarmScene extends PlayScene {
     const d = CROPS[c.id];
     if (c.withered) { delete G.data.crops[k]; this.drawCrop(k); G.say(`You pull up the withered ${d.name.toLowerCase()}.`); return true; }
     if (this.isRipe(c)) {
-      const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0) + (c.nymph ? 1 : 0));
+      const q = Math.min(3, 1 + (c.dryNights === 0 ? 1 : 0) + (c.hourBonus ? 1 : 0) + (c.nymph ? 1 : 0) + (c.sign ? 1 : 0));
+      const reap = G.signActive("reap") ? 1 : 0; // the Pleiades are up, or the snail has climbed
+      if (reap) G.say("Reaped in its season, as the signs say: an extra measure.");
       const dem = G.boon("Demeter"); // Demeter's favor (or anger) at the harvest
       const extra = dem !== 0 && Math.random() < 0.15 * Math.abs(dem) ? Math.sign(dem) : 0;
-      const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra), q);
+      const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra + reap), q);
       if (extra > 0) G.say("Demeter is generous: an extra measure.");
       if (d.regrow) { c.picks++; c.growth = 0; c.dryNights = 0; c.dryStreak = 0; G.say(`You pick the ${d.name.toLowerCase()}: ${got}. It will be ready again in ${d.regrow} nights.`); }
       else { delete G.data.crops[k]; G.say(`You harvest the ${d.name.toLowerCase()}: ${got}${q === 3 ? ". A splendid crop!" : ""}`); }
@@ -1538,13 +1659,15 @@ class FarmScene extends PlayScene {
     const b = labor({ Earth: 1 }, 1, "Oikos"); if (b === null) return;
     G.removeItem(seed, 1);
     const hour = d.aretai === "Night" ? !G.isDay : G.patron?.aretai === d.aretai;
-    G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0 };
+    const signed = G.signActive("sow");
+    G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0, sign: signed };
     this.drawCrop(k);
+    if (signed) G.say("Sown in the season the signs proclaim, it will grow finer.");
     G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.aretai === "Night" ? "the night, Hades' time" : `${d.god}'s hour`}, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
   }
 
   /** Grapes picked in Dionysus' hour, or by one he favors, are finer. */
-  grapeQuality() { return Math.min(3, 1 + (G.patron?.aretai === "Pneuma" ? 1 : 0) + (G.boon("Dionysus") >= 1 ? 1 : 0)); }
+  grapeQuality() { return Math.min(3, 1 + (G.patron?.aretai === "Pneuma" ? 1 : 0) + (G.boon("Dionysus") >= 1 ? 1 : 0) + (G.signActive("vintage") ? 1 : 0)); }
 
   vineBearing(k: string) { const v = G.data.vines[k]; return !!v && G.data.month === 1 && G.dayNumber - v.planted >= VINE_BEARS_AFTER && v.picked !== G.data.year; }
 
@@ -1558,7 +1681,7 @@ class FarmScene extends PlayScene {
   workVine(x: number, y: number): boolean {
     const k = `${x},${y}`, v = G.data.vines[k];
     if (!v) return false;
-    if (this.vineBearing(k)) { v.picked = G.data.year; G.say(`You pick your young vine: ${give("Grapes", YOUNG_VINE_YIELD + mastery("vine", 2), this.grapeQuality())}.`); return true; }
+    if (this.vineBearing(k)) { v.picked = G.data.year; G.say(`You pick your young vine: ${give("Grapes", YOUNG_VINE_YIELD + mastery("vine", 2) + (G.signThisYear("swallow") ? 2 : 0), this.grapeQuality())}.`); return true; }
     const left = VINE_BEARS_AFTER - (G.dayNumber - v.planted);
     G.say(v.picked === G.data.year ? "You've picked this vine for the year." : left > 0 ? `A young vine, taking root. It needs ${left} more day${left > 1 ? "s" : ""} before it can bear, and bears only in Metageitnion.` : "A young vine, well rooted. It will bear in Metageitnion.");
     return true;
@@ -1630,7 +1753,7 @@ class FarmScene extends PlayScene {
     if (G.data.vineYear === G.data.year) { G.say("You've picked the vine clean this year."); return; }
     G.data.vineYear = G.data.year;
     const q = this.grapeQuality();
-    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4) + 2 * Math.max(0, G.boon("Dionysus")), q)}. Tread them in the vat for wine.`);
+    G.say(`You cut the heavy clusters from the old vine: ${give("Grapes", 12 + mastery("vine", 4) + 2 * Math.max(0, G.boon("Dionysus")) + (G.signThisYear("swallow") ? 2 : 0), q)}. Tread them in the vat for wine.`);
   }
 
   subjectAt(): string | null {
@@ -1704,7 +1827,7 @@ class FarmScene extends PlayScene {
         if (soil) { G.say("This soil is already tilled."); return; }
         { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return;
           if (obj === T.FLOWERS) this.clearObject(x, y);
-          this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); }
+          this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); rollFind("hoe", FIND_CHANCE.hoe); }
         return;
       case "jar":
         if (isWell) { G.data.jarWater = jarCap(); G.data.jarSpring = false; G.say("You fill the water jar at the well."); return; }
@@ -1999,6 +2122,7 @@ class WildScene extends PlayScene {
     if (this.hasCave) this.placeCaveMouth();
     this.setupBarrow();
     this.maybeMonster();
+    this.setupGlint();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -2175,6 +2299,23 @@ class WildScene extends PlayScene {
       return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- glints
+  /** Some days, something half buried catches the light on a screen (more often on the shore, where the sea brings things). */
+  setupGlint() {
+    if (this.rec.glint === G.dayNumber) return;
+    const r = rng((screenSeed(G.data.wx, G.data.wy) ^ Math.imul(G.dayNumber, 7919)) >>> 0);
+    if (r() >= (this.rec.terrain === 7 ? 0.3 : 0.12)) return;
+    let at: [number, number] | null = null;
+    for (let i = 0; i < 60 && !at; i++) { const tx = 3 + Math.floor(r() * (WW - 6)), ty = 3 + Math.floor(r() * (WH - 6)); if (this.free(tx * TILE + 8, ty * TILE + 8)) at = [tx, ty]; }
+    if (!at) return;
+    const [gx, gy] = [at[0] * TILE + 8, at[1] * TILE + 10];
+    const img = this.add.image(gx, gy, "glint").setScale(0.6).setDepth(gy).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: img, alpha: 0.2, scale: 0.35, duration: 700, yoyo: true, repeat: -1, repeatDelay: 1400 });
+    const sc = this;
+    this.targets.push({ x: gx, y: gy, get label() { return img.active ? "Something glints here" : ""; },
+      act: () => { img.destroy(); sc.rec.glint = G.dayNumber; sc.gesture("act"); rollFind(sc.rec.terrain === 7 ? "shore" : "glint", FIND_CHANCE.glint); } });
   }
 
   // ---------------------------------------------------------------- the lands themselves
@@ -2961,6 +3102,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
+      "Signs and omens: Hesiod's signs mark the farming year (study one with Q as it happens, and it helps for 4 days). Birds on your right are fair omens, on your left a warning; Pneuma notices them, Gnosis reads them. Watch for glints: rare finds go in your lore book.",
       "Far from home (3 or more screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
       "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
       "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
@@ -3162,7 +3304,13 @@ class UIScene extends Phaser.Scene {
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
       rec.talked = today; const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
-      this.talkTo(v, `"${pick(v.lines[relTier(r)])}"\n\n(${v.name} warms to you: +${gain}${phoenix > 0 ? ", Aphrodite smiles on it" : ""}${welcome ? ", the Hospitality Blessing" : ""}.)`);
+      // A kledon: now and then a chance word turns out to be about tomorrow. Pneuma tells you it was meant for you.
+      let kledon = "";
+      if (G.data.nextWeather && Math.random() < 0.25) {
+        const felt = 1 + Math.floor(Math.random() * 12) <= (G.data.aretai.Pneuma ?? 3) + 2;
+        kledon = `\n\nAs you turn to go, ${v.name} says to no one in particular: ${KLEDON[G.data.nextWeather]}${felt ? " The words stay with you, as if meant for you: a kledon." : ""}`;
+      }
+      this.talkTo(v, `"${pick(v.lines[relTier(r)])}"${kledon}\n\n(${v.name} warms to you: +${gain}${phoenix > 0 ? ", Aphrodite smiles on it" : ""}${welcome ? ", the Hospitality Blessing" : ""}.)`);
     } });
     const held = G.selectedItem;
     if (held && ITEMS[held.id].kind !== "tool" && rec.gifted !== today) opts.push({ label: `Give ${v.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
@@ -3411,14 +3559,16 @@ class UIScene extends Phaser.Scene {
       label: `${god} (${G.favor(god) >= 0 ? "+" : ""}${G.favor(god)}, devotion ${G.data.devotion[god] ?? 0})`,
       fn: () => {
         G.data.prayedDay = G.dayNumber;
-        const n = (G.data.devotion[god] = (G.data.devotion[god] ?? 0) + 1);
+        // A sneeze as you finish: the god has heard (an extra day of devotion).
+        const sneeze = Math.random() < 1 / 8;
+        const n = (G.data.devotion[god] = (G.data.devotion[god] ?? 0) + (sneeze ? 2 : 1));
         let note = `${DEVOTION_STEP - (n % DEVOTION_STEP)} more day${DEVOTION_STEP - (n % DEVOTION_STEP) > 1 ? "s" : ""} of prayer to be noticed further.`;
         if (n % DEVOTION_STEP === 0) {
           if (G.favor(god) < HOME_CAP) { G.addFavor(god, 1, HOME_CAP); note = `${god} has noticed your devotion: favor +1.`; }
           else note = `${god} knows your household well. To be known by name, bring offerings to the village altar.`;
         }
         if (n % DEVOTION_STEP === 0 && G.favor(god) >= HOME_CAP) note = note;
-        this.openAltar("home", `You light the lamp, pour a little water, and pray to ${god}.\n\n${note}`);
+        this.openAltar("home", `You light the lamp, pour a little water, and pray to ${god}.${sneeze ? " As you finish, you sneeze. The god has heard you." : ""}\n\n${note}`);
       },
     }));
     this.showTalk("Pray to whom?", "Choose one god today. Each day of prayer counts toward their notice.", "", opts);
@@ -3484,7 +3634,9 @@ class UIScene extends Phaser.Scene {
   }
 
   buildGods() {
-    const { root, font, x0, y0, h } = this.sheetFrame("The Twelve", "Favor runs from -12 to +12. Each tier of three brings more of a god's boon, or more of their anger.", 540);
+    const om = G.data.omen && G.data.omen.day === G.dayNumber && G.data.omen.noticed ? G.data.omen : null;
+    const omenLine = om ? `  Today's omen, as you read it: ${OMEN_MEANING[om.god][(om.read ? om.good : !om.good) ? 0 : 1]}` : "";
+    const { root, font, x0, y0, h } = this.sheetFrame("The Twelve", `Favor runs from -12 to +12. Each tier of three brings more of a god's boon, or more of their anger.${omenLine}`, 540);
     const g = this.add.graphics(); root.add(g);
     TWELVE.forEach((god, i) => {
       const y = y0 + 64 + i * 34, f = G.favor(god), w = WHEEL[i];

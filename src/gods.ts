@@ -41,6 +41,8 @@ export const OFFER_PATRON: Record<string, string> = {
   Wood: "Zeus", Meat: "Zeus",
   Cornel: "Apollo", Antler: "Artemis", Tusk: "Ares",
   Mint: "Hades",
+  Fibula: "Athena", Figurine: "Hera", Arrowhead: "Artemis", OldCoin: "Hermes", Nest: "Aphrodite", Fossil: "Poseidon", Obsidian: "Hephaestus",
+  Amber: "Apollo", OwlFeather: "Athena", Thunderstone: "Zeus", HeliadTear: "Apollo",
   SeaFennel: "Poseidon", Saltbush: "Poseidon", MountainTea: "Apollo", Thistle: "Ares", Fennel: "Dionysus",
 };
 /** Household worship gets you noticed and no further (Theoi): offerings at home reach +3, at the village altar +6. */

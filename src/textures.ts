@@ -130,6 +130,7 @@ export function makeTextures(scene: Phaser.Scene) {
   makePlayerTexture(scene, { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" });
   makeGlowTexture(scene);
   makeAmbientTextures(scene);
+  makeOmenTextures(scene);
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -459,7 +460,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -556,6 +557,17 @@ function drawIcon(c: Ctx, o: number, id: string) {
       px(c, o + 12, 2, 2, 2, "#8d877b"); px(c, o + 13, 1, 1, 1, "#b8b2a6"); px(c, o + 2, 11, 2, 1, "#e8e2d0"); px(c, o + 3, 13, 1, 2, "#e8e2d0"); break;
     case "Meat": px(c, o + 3, 5, 9, 7, "#b5443b"); px(c, o + 4, 6, 6, 3, "#d0645a"); px(c, o + 11, 8, 3, 2, "#f2ece0"); px(c, o + 13, 7, 2, 4, "#f2ece0"); break;
     case "Hide": px(c, o + 3, 3, 10, 10, "#a47a52"); px(c, o + 1, 4, 2, 3, "#a47a52"); px(c, o + 13, 4, 2, 3, "#a47a52"); px(c, o + 2, 11, 2, 3, "#a47a52"); px(c, o + 12, 11, 2, 3, "#a47a52"); px(c, o + 6, 5, 4, 6, "#c09468"); break;
+    case "Fibula": for (let i = 0; i < 9; i++) px(c, o + 3 + i, 11 - Math.round(Math.sin((i / 8) * Math.PI) * 5), 1, 1, "#5a9a7a"); px(c, o + 3, 11, 10, 1, "#7ab89a"); px(c, o + 11, 9, 3, 3, "#4a8a6a"); px(c, o + 2, 10, 2, 2, "#4a8a6a"); break;
+    case "Figurine": px(c, o + 6, 5, 4, 9, "#c47a4a"); px(c, o + 7, 2, 2, 3, "#c47a4a"); px(c, o + 3, 3, 3, 2, "#c47a4a"); px(c, o + 10, 3, 3, 2, "#c47a4a"); px(c, o + 7, 7, 2, 1, "#8a4a2a"); px(c, o + 7, 10, 2, 1, "#8a4a2a"); px(c, o + 5, 13, 6, 1, "#a8603a"); break;
+    case "Arrowhead": for (let i = 0; i < 6; i++) px(c, o + 8 - Math.floor(i / 1.5), 3 + i, 1 + Math.floor(i * 1.2), 1, i % 2 ? "#8a8070" : "#a09888"); px(c, o + 6, 9, 4, 4, "#8a8070"); px(c, o + 7, 13, 2, 2, "#6b5a45"); break;
+    case "OldCoin": px(c, o + 4, 4, 8, 8, "#c8ccd0"); px(c, o + 3, 6, 1, 4, "#c8ccd0"); px(c, o + 12, 6, 1, 4, "#c8ccd0"); px(c, o + 6, 3, 4, 1, "#c8ccd0"); px(c, o + 6, 12, 4, 1, "#a8acb0"); px(c, o + 6, 6, 4, 4, "#9a9ea4"); px(c, o + 7, 7, 1, 1, "#e8ecf0"); px(c, o + 9, 7, 1, 1, "#e8ecf0"); break;
+    case "Nest": px(c, o + 2, 8, 12, 5, "#8a6a3a"); px(c, o + 4, 7, 8, 2, "#6b4a2b"); px(c, o + 5, 8, 6, 2, "#4a3420"); for (const [x, y] of [[3, 9], [7, 11], [11, 10], [5, 12], [12, 12]]) px(c, o + x, y, 2, 1, "#b0905a"); break;
+    case "Fossil": px(c, o + 3, 5, 10, 7, "#b8b0a0"); for (let i = 0; i < 5; i++) px(c, o + 4 + i * 2, 5, 1, 7, "#9a9282"); px(c, o + 6, 12, 4, 2, "#a8a090"); break;
+    case "Obsidian": px(c, o + 5, 3, 3, 10, "#1e1a24"); px(c, o + 8, 5, 3, 7, "#2a2632"); px(c, o + 6, 4, 1, 6, "#5a5468"); px(c, o + 9, 6, 1, 3, "#6a6478"); break;
+    case "Amber": px(c, o + 5, 5, 6, 6, "#d8902a"); px(c, o + 4, 6, 1, 4, "#c07a1a"); px(c, o + 11, 6, 1, 4, "#c07a1a"); px(c, o + 6, 6, 2, 2, "#f8c860"); break;
+    case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
+    case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
+    case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
     case "Antler": px(c, o + 4, 13, 2, 2, "#c9b48f"); for (let i = 0; i < 10; i++) px(c, o + 5 + Math.floor(i / 3), 12 - i, 1, 1, "#d8c8a0"); px(c, o + 8, 6, 4, 1, "#d8c8a0"); px(c, o + 11, 4, 1, 2, "#d8c8a0"); px(c, o + 6, 8, 1, 1, "#d8c8a0"); px(c, o + 3, 7, 3, 1, "#d8c8a0"); break;
     case "Tusk": for (let i = 0; i < 9; i++) px(c, o + 3 + i, 12 - Math.round(Math.sin((i / 8) * Math.PI) * 7), 2, 2, "#f2ece0"); px(c, o + 3, 12, 2, 2, "#c9b48f"); break;
     case "Feather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#6b5a45"); px(c, o + 3 + i, 11 - i, 2, 2, i < 8 ? "#8a7a62" : "#a99878"); } break;
@@ -689,6 +701,23 @@ export function makeAmbientTextures(scene: Phaser.Scene) {
   soft("puff", 16, "200,196,188", 0.9);
   soft("mist", 96, "236,240,244", 0.75);
   soft("cloudShadow", 128, "10,16,30", 1);
+}
+
+/** Birds and beasts of signs and omens, and the glint of something half buried. */
+export function makeOmenTextures(scene: Phaser.Scene) {
+  if (scene.textures.exists("crane")) return;
+  const two = (key: string, w: number, h: number, draw: (c: CanvasRenderingContext2D, o: number, f: number) => void) => {
+    const t = canvasTex(scene, key, w * 2, h, (c) => { draw(c, 0, 0); draw(c, w, 1); });
+    t.add(0, 0, 0, 0, w, h); t.add(1, 0, w, 0, w, h);
+  };
+  two("crane", 16, 8, (c, o, f) => { px(c, o + 6, 4, 6, 1, "#b8b8b0"); px(c, o + 12, 3, 3, 1, "#b8b8b0"); px(c, o + 14, 3, 1, 1, "#b02020"); px(c, o + 2, 4, 4, 1, "#9a9a92");
+    if (f) { px(c, o + 7, 5, 2, 3, "#d8d8d0"); px(c, o + 9, 5, 2, 2, "#3a3a3a"); } else { px(c, o + 7, 0, 2, 4, "#d8d8d0"); px(c, o + 9, 1, 2, 3, "#3a3a3a"); } });
+  two("eagle", 16, 8, (c, o, f) => { px(c, o + 6, 3, 5, 2, "#5a3a20"); px(c, o + 11, 3, 2, 1, "#e8e0d0"); px(c, o + 13, 3, 1, 1, "#d8a020"); px(c, o + 3, 3, 3, 2, "#4a2e18");
+    if (f) { px(c, o + 5, 5, 6, 3, "#4a2e18"); } else { px(c, o + 1, 1, 6, 2, "#4a2e18"); px(c, o + 8, 0, 6, 2, "#4a2e18"); } });
+  two("owl", 10, 8, (c, o, f) => { px(c, o + 3, 2, 4, 5, "#8a7a62"); px(c, o + 4, 3, 1, 1, "#f2d040"); px(c, o + 6, 3, 1, 1, "#f2d040");
+    if (f) { px(c, o + 0, 4, 3, 2, "#7a6a52"); px(c, o + 7, 4, 3, 2, "#7a6a52"); } else { px(c, o + 0, 1, 3, 2, "#7a6a52"); px(c, o + 7, 1, 3, 2, "#7a6a52"); } });
+  canvasTex(scene, "snail", 8, 6, (c) => { px(c, 3, 0, 4, 4, "#a87a4a"); px(c, 4, 1, 2, 2, "#c8a070"); px(c, 0, 3, 6, 2, "#c8b890"); px(c, 0, 1, 1, 2, "#c8b890"); });
+  canvasTex(scene, "glint", 7, 7, (c) => { px(c, 3, 0, 1, 7, "#fffbe0"); px(c, 0, 3, 7, 1, "#fffbe0"); px(c, 2, 2, 3, 3, "#fff4b0"); });
 }
 
 /** A soft round light, for showing what you are looking at. */

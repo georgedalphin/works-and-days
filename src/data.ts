@@ -90,7 +90,7 @@ export const NIGHT_WATCHES_PLAYABLE = 2;
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----
-export type ItemKind = "tool" | "material" | "seed" | "crop";
+export type ItemKind = "tool" | "material" | "seed" | "crop" | "find";
 export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string; value?: number }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -115,6 +115,18 @@ export const ITEMS: Record<string, ItemDef> = {
   Cornel: { id: "Cornel", value: 3, name: "Cornelian cherries", kind: "material", desc: "Tart red fruit. The wood makes the best javelins." },
   Purslane: { id: "Purslane", value: 1, name: "Purslane", kind: "material", desc: "Fleshy wild greens from the field edges." },
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
+  // Rare finds (omens.ts says where they turn up).
+  Fibula: { id: "Fibula", value: 12, name: "Bronze fibula", greek: "porpe", kind: "find", desc: "A cloak pin, green with age. Someone lost it long ago." },
+  Figurine: { id: "Figurine", value: 10, name: "Clay figurine", greek: "kore", kind: "find", desc: "A little clay woman with raised arms: a votive, once offered to a goddess." },
+  Arrowhead: { id: "Arrowhead", value: 4, name: "Flint arrowhead", greek: "glochis", kind: "find", desc: "Knapped by hands older than memory. Still sharp: it makes fine arrows." },
+  OldCoin: { id: "OldCoin", value: 20, name: "Old silver coin", greek: "argyrion", kind: "find", desc: "Worn smooth; the stamp might be an owl, or a turtle." },
+  Nest: { id: "Nest", value: 3, name: "Empty bird's nest", greek: "kalia", kind: "find", desc: "Woven of grass and hair, abandoned after the fledging." },
+  Fossil: { id: "Fossil", value: 8, name: "Stone seashell", greek: "konche", kind: "find", desc: "A shell turned to stone, found far from any sea. Poseidon's once." },
+  Obsidian: { id: "Obsidian", value: 10, name: "Obsidian flake", greek: "obsidianos", kind: "find", desc: "Black volcanic glass, sharper than bronze. It makes keen arrowheads." },
+  Amber: { id: "Amber", value: 15, name: "Amber bead", greek: "elektron", kind: "find", desc: "Golden and warm to the touch; rub it and it draws chaff." },
+  OwlFeather: { id: "OwlFeather", value: 6, name: "Owl feather", greek: "pteron glaukos", kind: "find", desc: "Soft and silent. Athena's bird." },
+  Thunderstone: { id: "Thunderstone", value: 60, name: "Thunderstone", greek: "keraunia", kind: "find", desc: "Black iron fallen from the sky where Zeus' bolt struck. Carried, Zeus' favor sits heavier on you." },
+  HeliadTear: { id: "HeliadTear", value: 50, name: "Tear of the Heliades", greek: "dakry Heliadon", kind: "find", desc: "Amber that holds a faint light: a sister of Phaethon wept it. Carried, Apollo's aim is yours." },
   SeaFennel: { id: "SeaFennel", value: 3, name: "Sea fennel", greek: "krithmon", kind: "material", desc: "Salty shore greens, good pickled." },
   Saltbush: { id: "Saltbush", value: 1, name: "Saltbush", greek: "halimos", kind: "material", desc: "Grey desert leaves; fodder for beasts." },
   MountainTea: { id: "MountainTea", value: 4, name: "Mountain tea", greek: "sideritis", kind: "material", desc: "Woolly mountain herb, brewed for tea and medicine." },
@@ -260,6 +272,8 @@ export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
 export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string }[] = [
   { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
   { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
+  { out: "Arrow", qty: 6, needs: [["Wood", 1], ["Obsidian", 1]], desc: "Obsidian points: keener, and more of them." },
+  { out: "Arrow", qty: 5, needs: [["Wood", 1], ["Arrowhead", 1]], desc: "An old flint point, rehafted, and its fellows knapped to match." },
   { out: "Torch", qty: 2, needs: [["Wood", 1], ["Fiber", 1]], desc: "Wood wrapped in fiber and pitch, for the dark places." },
 ];
 
