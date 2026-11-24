@@ -193,10 +193,18 @@ abstract class PlayScene extends Phaser.Scene {
     this.spots = []; inDark = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
+    this.mouseIn = true;
+    this.input.mouse?.disableContextMenu();
+    this.input.on("pointermove", () => { this.mouseUsed = true; });
+    this.input.on("gameout", () => { this.mouseIn = false; });
+    this.input.on("gameover", () => { this.mouseIn = true; });
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
-      if (!this.aiming || !p.leftButtonDown()) return;
-      const w = p.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
-      this.loose(w.x, w.y);
+      this.mouseUsed = true;
+      if (this.aiming) { if (p.leftButtonDown()) { const w = p.positionToCamera(this.cameras.main) as Phaser.Math.Vector2; this.loose(w.x, w.y); } return; }
+      // Like Stardew: left click works with what you hold, right click interacts. Clicks on the hotbar belong to it.
+      if (this.paused || p.y > HOTBAR_Y - 8) return;
+      if (p.rightButtonDown()) this.interactNow();
+      else if (p.leftButtonDown() && G.selectedItem?.id !== "bow") this.useNow();
     });
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,Q,SPACE,SHIFT") as Record<string, Phaser.Input.Keyboard.Key>;
@@ -306,8 +314,13 @@ abstract class PlayScene extends Phaser.Scene {
     if (show) this.focusGlow.setPosition(fx, fy - 2).setAlpha(pulse).setScale(big ? 1.3 : 0.75);
     this.focusTag.setVisible(show && !!tag && !this.current);
     if (show && tag) this.focusTag.setText(tag[0].toUpperCase() + tag.slice(1)).setPosition(fx, fy - (big ? 18 : 10));
-    // Faint corners on the tile a tool or seed in hand will work.
+    // Faint corners on the tile a tool or seed in hand will work; a dim grey mark when the mouse is out of reach.
     this.focusMarks.clear();
+    if (this.cursorMode && !this.paused && !this.cursorInReach()) {
+      const [cx, cy] = this.cursorWorld(), x0 = Math.floor(cx / TILE) * TILE, y0 = Math.floor(cy / TILE) * TILE;
+      this.focusMarks.lineStyle(1, 0x8d877b, 0.35).strokeRect(x0 + 0.5, y0 + 0.5, 15, 15);
+      return;
+    }
     const held = G.selectedItem ? ITEMS[G.selectedItem.id] : null;
     if (!this.paused && !this.aiming && held && (held.kind === "tool" || held.kind === "seed") && held.id !== "bow") {
       const x0 = tx * TILE, y0 = ty * TILE, a = 0.35 + 0.15 * Math.sin(this.time.now / 260);
@@ -318,15 +331,77 @@ abstract class PlayScene extends Phaser.Scene {
     }
   }
 
-  /** The tile in front of the player's feet. */
+  // ---------------------------------------------------------------- what you are aiming at
+  /** How far you can reach: things within this many tiles of the one you stand on. */
+  static REACH = 2;
+  mouseUsed = false;
+  mouseIn = true;
+
+  /** Aiming follows the mouse once you have used it and it is over the game; otherwise it follows the way you face. */
+  get cursorMode() { return this.mouseUsed && this.mouseIn && !this.aiming; }
+  playerTile(): [number, number] { return [Math.floor(this.player.x / TILE), Math.floor((this.player.y + 5) / TILE)]; }
+  cursorWorld(): [number, number] { const w = this.input.activePointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2; return [w.x, w.y]; }
+  /** Is a point in the world within reach (two tiles of yours, any direction)? */
+  inReach(x: number, y: number) { const [px, py] = this.playerTile(); return Math.max(Math.abs(Math.floor(x / TILE) - px), Math.abs(Math.floor(y / TILE) - py)) <= PlayScene.REACH; }
+  cursorInReach() { const [x, y] = this.cursorWorld(); return this.inReach(x, y); }
+  /** The point you are looking at: under the mouse, or just in front of you. */
+  lookPoint(): [number, number] {
+    if (this.cursorMode) return this.cursorWorld();
+    const [dx, dy] = DV[this.facing];
+    return [this.player.x + dx * 14, this.player.y + 4 + dy * 14];
+  }
+  /** Turn to face something before acting on it. */
+  faceToward(x: number, y: number) {
+    const dx = x - this.player.x, dy = y - (this.player.y + 4);
+    if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+    this.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+  }
+
+  /** The tile you would work: under the mouse (if within reach), or the one in front of your feet. */
   facingTile(): [number, number] {
-    const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 5) / TILE);
+    if (this.cursorMode) {
+      const [x, y] = this.cursorWorld();
+      return this.inReach(x, y) ? [Math.floor(x / TILE), Math.floor(y / TILE)] : [-99, -99];
+    }
+    const [tx, ty] = this.playerTile();
     const [dx, dy] = DV[this.facing];
     return [tx + dx, ty + dy];
   }
 
-  /** The nearest usable thing within reach, preferring what the player faces. */
+  tooFar() { G.say("That's too far. Come within two paces of it."); }
+  /** E or a right click: use whatever is under the cursor (or in front of you). */
+  interactNow() {
+    if (this.current) { this.faceToward(this.current.x, this.current.y); this.current.act(); }
+    else if (this.cursorMode && !this.cursorInReach()) this.tooFar();
+  }
+  /** Space or a left click: work with what you hold. */
+  useNow() {
+    if (this.cursorMode && !this.cursorInReach()) { this.tooFar(); return; }
+    const [lx, ly] = this.lookPoint(); if (this.cursorMode) this.faceToward(lx, ly);
+    this.gesture("act");
+    const tool = G.selectedItem?.id; if (tool === "axe" || tool === "mattock" || tool === "hoe" || tool === "sickle") SOUND.sfx("chop");
+    this.useItem();
+  }
+  /** Q: study what you are looking at. */
+  studyNow() {
+    if (this.cursorMode && !this.cursorInReach() && !(this.skySubject && this.time.now < this.skySubject.until)) { this.tooFar(); return; }
+    const [lx, ly] = this.lookPoint(); if (this.cursorMode && this.cursorInReach()) this.faceToward(lx, ly);
+    this.investigate();
+  }
+
+  /** The nearest usable thing: under the mouse (within reach), or near what the player faces. */
   findTarget(): Target | null {
+    if (this.cursorMode) {
+      const [cx, cy] = this.cursorWorld();
+      if (!this.inReach(cx, cy)) return null;
+      let best: Target | null = null, bestD = 14;
+      for (const t of this.targets) {
+        if (!t.label || !this.inReach(t.x, t.y)) continue;
+        const d = Math.hypot(t.x - cx, t.y - cy);
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      return best;
+    }
     const [dx, dy] = DV[this.facing];
     const fx = this.player.x + dx * 10, fy = this.player.y + 4 + dy * 10;
     let best: Target | null = null, bestD = 22;
@@ -349,7 +424,7 @@ abstract class PlayScene extends Phaser.Scene {
     const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56 && !(isMonster(a.kind) && !MONSTERS[a.kind].calm));
     if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: isMonster(angry.kind) && G.lore(angry.kind) >= 1 ? MONSTERS[angry.kind].calm : `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
     ui(this).prompt(this.current ? this.current.label : null);
-    if (Phaser.Input.Keyboard.JustDown(this.keys.E) && this.current) this.current.act();
+    if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.interactNow();
     const bow = G.selectedItem?.id === "bow";
     this.aiming = bow && this.canHunt && this.keys.SPACE.isDown;
     if (this.aiming) this.aimAtPointer();
@@ -358,10 +433,10 @@ abstract class PlayScene extends Phaser.Scene {
     this.updateFocus();
     if (this.ambience) { this.maybeSign(dt); this.maybeOmen(dt); }
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
-      if (!bow) { this.gesture("act"); const tool = G.selectedItem?.id; if (tool === "axe" || tool === "mattock" || tool === "hoe" || tool === "sickle") SOUND.sfx("chop"); this.useItem(); }
+      if (!bow) this.useNow();
       else if (!this.canHunt) G.say("Not indoors.");
     }
-    if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.investigate();
+    if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.studyNow();
     this.updateArrows(dt);
     this.updatePickups();
     return true;
@@ -953,13 +1028,14 @@ abstract class PlayScene extends Phaser.Scene {
   subjectAt(): string | null { return null; }
   animals: Animal[] = [];
 
-  /** A creature close in front of the player, if any. */
+  /** A creature under the mouse (within reach), or close in front of the player. */
   creatureAhead(): Animal | null {
-    const [dx, dy] = DV[this.facing];
-    const fx = this.player.x + dx * 14, fy = this.player.y + 4 + dy * 14;
-    let best: Animal | null = null, bestD = 34;
+    const [fx, fy] = this.lookPoint(), cursor = this.cursorMode;
+    if (cursor && !this.inReach(fx, fy)) return null;
+    let best: Animal | null = null, bestD = cursor ? 14 : 34;
     for (const a of this.animals) {
       if (a.state === "gone" || !a.sprite.visible) continue;
+      if (cursor && !this.inReach(a.sprite.x, a.sprite.y)) continue;
       const d = Math.hypot(a.sprite.x - fx, a.sprite.y - fy);
       if (d < bestD) { bestD = d; best = a; }
     }
@@ -2718,8 +2794,8 @@ class WildScene extends PlayScene {
   }
 
   subjectAt(): string | null {
-    const [dx, dy] = DV[this.facing];
-    const fx = this.player.x + dx * 14, fy = this.player.y + 4 + dy * 14;
+    const [fx, fy] = this.lookPoint();
+    if (this.cursorMode && !this.inReach(fx, fy)) return null;
     if (this.naiad?.visible && Math.hypot(this.naiad.x - fx, this.naiad.y - fy) < 24) return "naiad";
     if (this.satyrs.some((s) => Math.hypot(s.x - fx, s.y - fy) < 30)) return "satyr";
     const [x, y] = this.facingTile();
@@ -3347,6 +3423,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
+      "Aiming: point with the mouse at anything within two paces. Left click works with what you hold; right click (or E) interacts; Q studies. With the mouse outside the window, you act on what you face.",
       "Sound: M mutes everything; N turns the music off and on.",
       "Signs and omens: Hesiod's signs mark the farming year (study one with Q as it happens, and it helps for 4 days). Birds on your right are fair omens, on your left a warning; Pneuma notices them, Gnosis reads them. Watch for glints: rare finds go in your lore book.",
       "Far from home (3 or more screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
