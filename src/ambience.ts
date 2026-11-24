@@ -182,6 +182,31 @@ export function seasonGroundTint(G: GameState) {
   const s = G.month.season, m = G.data.month;
   return s === "Summer" ? (m === 2 ? 0xfff0cc : 0xfff8e4) : s === "Autumn" ? 0xf8ead4 : s === "Winter" ? 0xdfe4e8 : 0xffffff;
 }
+/**
+ * How far each kind of thing may sit off the centre of its square, in pixels. Purely visual:
+ * collision stays on the grid (trunk colliders are wider than the trunks, so the slack hides it).
+ */
+const JITTER: Record<number, number> = {
+  [T.TREE]: 2, [T.PINE]: 2, [T.OLIVE]: 2, [T.SAPLING]: 3, [T.BRUSH]: 3, [T.THORN]: 3, [T.REEDS]: 3,
+  [T.STONE]: 3, [T.BOULDER]: 2, [T.FLOWERS]: 4,
+};
+/** A fixed offset for a square, the same every visit. */
+export function jitterOf(x: number, y: number, amt: number): [number, number] {
+  if (amt <= 0) return [0, 0];
+  const h = hash(x * 7 + 3, y * 13 + 5), n = 2 * amt + 1;
+  return [(h % n) - amt, ((h >>> 9) % n) - amt];
+}
+/** Nudge the things on a layer off the grid. Details (pebbles, tufts, shells) wander the most. */
+export function jitterLayer(layer: Phaser.Tilemaps.TilemapLayer | undefined, details = false) {
+  layer?.forEachTile((t) => {
+    if (t.index < 0) return;
+    const amt = details ? 5 : JITTER[t.index] ?? 0;
+    if (!amt) return;
+    const [dx, dy] = jitterOf(t.x, t.y, amt);
+    t.pixelX = t.x * t.baseWidth + dx; t.pixelY = t.y * t.baseHeight + dy;
+  });
+}
+
 export function varyLayers(G: GameState, ground: Phaser.Tilemaps.TilemapLayer | undefined, objects: Phaser.Tilemaps.TilemapLayer | undefined) {
   const s = G.month.season;
   const groundTint = seasonGroundTint(G);
@@ -199,6 +224,7 @@ export function varyLayers(G: GameState, ground: Phaser.Tilemaps.TilemapLayer | 
     if (t.index === T.BRUSH && s === "Autumn") tint = 0xf4dca8;
     t.tint = tint;
   });
+  jitterLayer(objects);
 }
 
 /** Scatter ground details over the open tiles of a map, the same every visit. */

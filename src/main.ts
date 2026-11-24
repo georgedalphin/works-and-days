@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
-import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
+import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, type Station } from "./data";
@@ -310,7 +310,10 @@ abstract class PlayScene extends Phaser.Scene {
     const subject = this.paused ? null : ahead ? ahead.kind : spot ? spot.def.id : this.subjectAt();
     if (this.current) { fx = this.current.x; fy = this.current.y; on = true; }
     else if (ahead) { fx = ahead.sprite.x; fy = ahead.sprite.y; on = true; big = ahead.kind === "centaur"; }
-    else if (spot || (obj >= 0 && obj !== T.EDGE && obj !== T.CAVEWALL) || (subject && !/^t\d+$/.test(subject))) { fx = tx * TILE + 8; fy = ty * TILE + 8; on = true; }
+    else if (spot || (obj >= 0 && obj !== T.EDGE && obj !== T.CAVEWALL) || (subject && !/^t\d+$/.test(subject))) {
+      const tile = obj >= 0 ? objs!.getTileAt(tx, ty) : null; // sits a little off its square's centre
+      fx = tile ? tile.pixelX + 8 : spot ? spot.base.x : tx * TILE + 8; fy = tile ? tile.pixelY + 8 : spot ? spot.base.y : ty * TILE + 8; on = true;
+    }
     if (on && subject && LORE[subject] && !/^t\d+$/.test(subject)) tag = loreName(subject);
     const show = on && !this.paused && !this.aiming;
     this.focusGlow.setVisible(show);
@@ -690,7 +693,7 @@ abstract class PlayScene extends Phaser.Scene {
       let r = gen() * total, def = defs[0];
       for (const d of defs) { if ((r -= d.weight) <= 0) { def = d; break; } }
       if (!ok(x, y) || this.spots.some((s) => Math.abs(s.tx - x) + Math.abs(s.ty - y) < 3)) continue;
-      const px = x * TILE + 8, py = y * TILE + 8;
+      const [jx, jy] = jitterOf(x, y, 3), px = x * TILE + 8 + jx, py = y * TILE + 8 + jy;
       const base = this.add.image(px, py, "forage", def.id).setDepth(py + 2);
       const fruit = this.add.image(px, py, "forage", `${def.id}_fruit`).setDepth(py + 3).setVisible(false);
       this.spots.push({ k: `${x},${y}`, tx: x, ty: y, def, base, fruit });
@@ -1587,6 +1590,7 @@ class FarmScene extends PlayScene {
     this.objects = this.map.createBlankLayer("objects", ts)!;
     this.groundLayer.putTilesAt(ground, 0, 0);
     this.details.putTilesAt(scatterDetails(3, 0xfa53, objs, (x, y) => ground[y][x] !== this.baseGround[y][x] || ground[y][x] === T.PATH || inPen(x, y), 0.06), 0, 0);
+    jitterLayer(this.details, true);
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID);
     this.objects.setDepth(1);
@@ -2314,7 +2318,7 @@ class WildScene extends PlayScene {
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
-    map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0);
+    jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID).setDepth(1);
@@ -3300,7 +3304,7 @@ class VillageScene extends PlayScene {
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: VW, height: VH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     const vGround = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
-    map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(3, 0x7111, objs, (x, y) => ground[y][x] === T.PATH, 0.05), 0, 0);
+    jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(3, 0x7111, objs, (x, y) => ground[y][x] === T.PATH, 0.05), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID).setDepth(1);
