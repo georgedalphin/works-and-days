@@ -249,6 +249,89 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, o + 0, 6, 4, 2, G1); px(c, o + 0, 7, 1, 2, D);
     px(c, o + 11, 4, 4, 4, G1); px(c, o + 15, 6, 1, 2, D); px(c, o + 11, 2, 1, 2, G1); px(c, o + 14, 2, 1, 2, G1); px(c, o + 13, 5, 1, 1, "#e8c86a"); px(c, o + 12, 7, 3, 1, L);
   });
+  // ---- the far lands' animals (frame 0 standing, frame 1 moving or in flight) ----
+  const flyer = (key: string, body: string, wing: string, head: string, beak: string, size = 1) => strip(key, (c, o, f) => {
+    const w = 4 + size, h = 3 + size;
+    if (f === 0) { px(c, o + 5, 14, w + 1, 1, "rgba(0,0,0,0.2)"); px(c, o + 5, 13 - h, w, h, body); px(c, o + 5, 13 - h, w - 1, 1, wing); px(c, o + 4 + w, 12 - h, 2, 2, head); px(c, o + 6 + w, 13 - h, 1, 1, beak); px(c, o + 6, 13, 1, 1, beak); px(c, o + 8, 13, 1, 1, beak); }
+    else { px(c, o + 5, 7, w, 2, body); px(c, o + 2, 4, 4, 2, wing); px(c, o + 5 + w, 4, 4, 2, wing); px(c, o + 4 + w, 6, 2, 2, head); px(c, o + 6 + w, 7, 1, 1, beak); }
+  });
+  flyer("duck", "#8a6a4a", "#3a6a4a", "#2a5a3a", "#d8a030");
+  flyer("gull", "#e8e8e0", "#a8b0b8", "#f0f0e8", "#e0b030");
+  flyer("pigeon", "#8a8e98", "#6a6e78", "#5a7a6a", "#d08080");
+  strip("heron", (c, o, f) => {
+    if (f === 0) { px(c, o + 6, 15, 5, 1, "rgba(0,0,0,0.2)"); px(c, o + 7, 10, 1, 5, "#6b6050"); px(c, o + 9, 10, 1, 5, "#6b6050"); px(c, o + 5, 5, 6, 5, "#a8b0b8"); px(c, o + 10, 1, 1, 5, "#c8ccd0"); px(c, o + 10, 0, 3, 2, "#d8dce0"); px(c, o + 13, 1, 3, 1, "#d8a030"); px(c, o + 11, 0, 1, 1, "#1a1a1a"); }
+    else { px(c, o + 4, 7, 7, 2, "#a8b0b8"); px(c, o + 0, 4, 6, 2, "#8a929a"); px(c, o + 10, 4, 6, 2, "#8a929a"); px(c, o + 11, 6, 3, 1, "#c8ccd0"); px(c, o + 14, 6, 2, 1, "#d8a030"); }
+  });
+  strip("crab", (c, o, f) => {
+    px(c, o + 3, 14, 10, 1, "rgba(0,0,0,0.2)"); const R = "#c8583a", D = "#8a3422";
+    px(c, o + 4, 10, 8, 4, R); px(c, o + 5, 9, 6, 1, R); px(c, o + 6, 8, 1, 1, "#1a1a1a"); px(c, o + 9, 8, 1, 1, "#1a1a1a");
+    px(c, o + 1, 9 - f, 3, 2, D); px(c, o + 12, 9 - f, 3, 2, D);
+    for (const x of [3, 5, 10, 12]) px(c, o + x + (f ? 1 : 0), 14, 1, 1, D);
+  });
+  strip("jackal", (c, o, f) => {
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)"); const B = "#b8905a", D = "#3a2c22";
+    if (f === 0) { px(c, o + 4, 11, 1, 3, D); px(c, o + 10, 11, 1, 3, D); } else { px(c, o + 5, 11, 1, 3, D); px(c, o + 9, 11, 1, 3, D); }
+    px(c, o + 3, 8, 9, 4, B); px(c, o + 1, 7, 3, 2, "#5a4632"); px(c, o + 11, 5, 4, 4, B); px(c, o + 15, 7, 1, 1, D);
+    px(c, o + 11, 2, 1, 3, B); px(c, o + 14, 2, 1, 3, B); px(c, o + 13, 6, 1, 1, D); px(c, o + 4, 8, 6, 1, "#7a5a3a");
+  });
+  strip("scorpion", (c, o, f) => {
+    px(c, o + 3, 14, 10, 1, "rgba(0,0,0,0.2)"); const S = "#3a2e22", L = "#5a4a34";
+    px(c, o + 6, 11, 6, 3, S); px(c, o + 12, 10, 2, 2, L); px(c, o + 13, 9 - f, 2, 2, L);
+    px(c, o + 5, 10, 1, 2, S); px(c, o + 4, 7, 1, 3, S); px(c, o + 4, 5 + f, 2, 2, S); px(c, o + 6, 5 + f, 1, 1, "#c8a040");
+    for (const x of [7, 9, 11]) px(c, o + x, 14, 1, 1, L);
+  });
+  strip("ibex", (c, o, f) => {
+    px(c, o + 3, 14, 10, 2, "rgba(0,0,0,0.22)"); const B = "#8a6a48", L = "#5a4632";
+    if (f === 0) { px(c, o + 4, 11, 1, 3, L); px(c, o + 6, 11, 1, 3, L); px(c, o + 9, 11, 1, 3, L); px(c, o + 11, 11, 1, 3, L); }
+    else { px(c, o + 3, 11, 1, 3, L); px(c, o + 7, 11, 1, 3, L); px(c, o + 8, 11, 1, 3, L); px(c, o + 12, 11, 1, 3, L); }
+    px(c, o + 3, 6, 9, 6, B); px(c, o + 3, 10, 9, 1, "#6a5038"); px(c, o + 11, 4, 4, 4, B); px(c, o + 13, 5, 1, 1, "#1a1210");
+    px(c, o + 10, 1, 1, 4, "#4a3a2a"); px(c, o + 9, 0, 2, 1, "#4a3a2a"); px(c, o + 8, 1, 1, 2, "#4a3a2a"); px(c, o + 14, 8, 1, 2, "#6a5038");
+  });
+  strip("bear", (c, o, f) => {
+    px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.25)"); const B = "#5a3e28", D = "#3a2818";
+    if (f === 0) { px(c, o + 2, 11, 2, 3, D); px(c, o + 10, 11, 2, 3, D); } else { px(c, o + 3, 11, 2, 3, D); px(c, o + 9, 11, 2, 3, D); }
+    px(c, o + 1, 5, 12, 7, B); px(c, o + 3, 4, 7, 2, B); px(c, o + 11, 4, 5, 5, B); px(c, o + 15, 6, 1, 2, "#2a1a10");
+    px(c, o + 11, 3, 2, 2, B); px(c, o + 14, 3, 1, 1, B); px(c, o + 13, 5, 1, 1, "#1a1008"); px(c, o + 2, 6, 6, 1, "#6a4a32");
+  });
+  strip("horse", (c, o, f) => {
+    px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.22)"); const B = "#8a5a32", D = "#3a2618";
+    if (f === 0) { px(c, o + 3, 10, 1, 4, D); px(c, o + 5, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 2, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 2, 6, 11, 5, B); px(c, o + 12, 2, 2, 6, B); px(c, o + 13, 1, 3, 3, B); px(c, o + 15, 3, 1, 1, "#2a1a10");
+    px(c, o + 11, 1, 2, 6, D); px(c, o + 0, 6, 2, 5, D); px(c, o + 14, 2, 1, 1, "#1a1008");
+  });
+  strip("bustard", (c, o, f) => {
+    px(c, o + 4, 14, 8, 1, "rgba(0,0,0,0.2)"); const B = "#b89a6a";
+    px(c, o + (f ? 6 : 7), 11, 1, 3, "#8a7a5a"); px(c, o + (f ? 9 : 8), 11, 1, 3, "#8a7a5a");
+    px(c, o + 4, 6, 8, 5, B); px(c, o + 4, 7, 7, 1, "#6a5a3a"); px(c, o + 11, 3, 2, 4, "#c8c0b0"); px(c, o + 12, 2, 2, 2, "#a8a090"); px(c, o + 14, 3, 1, 1, "#d8a030");
+  });
+  // ---- monsters of the far lands (AEGIS Terata) ----
+  strip("siren", (c, o, f) => {
+    px(c, o + 4, 14, 8, 1, "rgba(0,0,0,0.2)");
+    px(c, o + 5, 8, 6, 5, "#8a6a8a"); px(c, o + (f ? 1 : 2), 6 - f, 4, 3, "#a888a8"); px(c, o + (f ? 11 : 10), 6 - f, 4, 3, "#a888a8");
+    px(c, o + 6, 13, 1, 2, "#d8a040"); px(c, o + 9, 13, 1, 2, "#d8a040");
+    px(c, o + 6, 2, 4, 5, "#e0b08a"); px(c, o + 5, 1, 6, 2, "#c88a3a"); px(c, o + 5, 3, 1, 4, "#c88a3a"); px(c, o + 7, 4, 1, 1, "#2a1d14"); px(c, o + 8, 6, 1, 1, "#b0404a");
+  });
+  const sph = canvasTex(scene, "sphinx", 48, 24, (c) => {
+    for (const o of [0, 24]) { const f = o ? 1 : 0, B = "#c8a060", D = "#8a6a3a";
+      px(c, o + 2, 21, 20, 3, "rgba(0,0,0,0.25)");
+      px(c, o + 3, 13, 15, 6, B); px(c, o + 1, 14, 2, 3, D); px(c, o + 0, 13, 2, 1, D);
+      for (const [x, k] of [[4, f], [7, -f], [14, -f], [17, f]] as [number, number][]) px(c, o + x + k, 19, 2, 3, D);
+      px(c, o + 4, 6 - f * 2, 10, 6, "#d8c8a0"); px(c, o + 5, 4 - f * 2, 8, 3, "#e8dcc0"); // wings
+      px(c, o + 16, 6, 6, 8, B); px(c, o + 17, 3, 5, 6, "#e0b08a"); px(c, o + 16, 2, 6, 2, "#3a2a1a"); px(c, o + 16, 4, 1, 6, "#3a2a1a");
+      px(c, o + 20, 5, 1, 1, "#1a1210"); px(c, o + 19, 7, 2, 1, "#a04040");
+    }
+  });
+  sph.add(0, 0, 0, 0, 24, 24); sph.add(1, 0, 24, 0, 24, 24);
+  strip("lion", (c, o, f) => {
+    px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.25)"); const B = "#c8964a", D = "#7a4a22";
+    if (f === 0) { px(c, o + 3, 11, 2, 3, B); px(c, o + 10, 11, 2, 3, B); } else { px(c, o + 4, 11, 2, 3, B); px(c, o + 9, 11, 2, 3, B); }
+    px(c, o + 2, 7, 11, 5, B); px(c, o + 0, 6, 2, 1, D); px(c, o + 0, 5, 1, 2, D);
+    px(c, o + 10, 3, 6, 7, D); px(c, o + 12, 5, 4, 4, B); px(c, o + 14, 6, 1, 1, "#1a1008"); px(c, o + 15, 8, 1, 1, "#3a2010");
+  });
+  flyer("stymphalian", "#a87a3a", "#d8a850", "#8a5a2a", "#e8d070", 2);
+  flyer("strix", "#4a3a3a", "#2a2026", "#6a5048", "#e8d040", 1);
+
   strip("bird", (c, o, f) => {
     if (f === 0) {
       px(c, o + 6, 14, 5, 1, "rgba(0,0,0,0.2)");
@@ -478,7 +561,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -586,6 +669,7 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "LionPelt": px(c, o + 2, 4, 12, 9, "#c8964a"); px(c, o + 1, 5, 2, 3, "#c8964a"); px(c, o + 13, 5, 2, 3, "#c8964a"); px(c, o + 1, 11, 3, 3, "#c8964a"); px(c, o + 12, 11, 3, 3, "#c8964a"); px(c, o + 5, 1, 6, 5, "#7a4a22"); px(c, o + 6, 3, 4, 3, "#c8964a"); px(c, o + 7, 4, 1, 1, "#1a1008"); px(c, o + 9, 4, 1, 1, "#1a1008"); break;
     case "Antler": px(c, o + 4, 13, 2, 2, "#c9b48f"); for (let i = 0; i < 10; i++) px(c, o + 5 + Math.floor(i / 3), 12 - i, 1, 1, "#d8c8a0"); px(c, o + 8, 6, 4, 1, "#d8c8a0"); px(c, o + 11, 4, 1, 2, "#d8c8a0"); px(c, o + 6, 8, 1, 1, "#d8c8a0"); px(c, o + 3, 7, 3, 1, "#d8c8a0"); break;
     case "Tusk": for (let i = 0; i < 9; i++) px(c, o + 3 + i, 12 - Math.round(Math.sin((i / 8) * Math.PI) * 7), 2, 2, "#f2ece0"); px(c, o + 3, 12, 2, 2, "#c9b48f"); break;
     case "Feather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#6b5a45"); px(c, o + 3 + i, 11 - i, 2, 2, i < 8 ? "#8a7a62" : "#a99878"); } break;

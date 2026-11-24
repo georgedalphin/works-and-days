@@ -16,7 +16,7 @@ import { Animal, SPECIES, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
 import { essencePools } from "./data";
-import { MONSTERS, isMonster, monsterFor, wanderTarget, WANDER_MIN_DEPTH, GRAVE_OFFERINGS } from "./monsters";
+import { MONSTERS, isMonster, monsterFor, wanderTarget, WANDER_MIN_DEPTH, GRAVE_OFFERINGS, RIDDLES, type MonsterKind } from "./monsters";
 import { MYTH, RUNGS, RUNG_DAYS, NAIAD_NAMES, SATYR_NAMES, SPRING_SITES } from "./mythborn";
 import { VILLAGERS, REL_MIN, REL_MAX, relTier, relLabel, UPGRADES, toolName, STRANGER_KINDS, STRANGER_DAYS, GOD_CHANCE, GUEST_FOOD, type Villager } from "./village";
 import type { ScreenRec } from "./state";
@@ -460,8 +460,9 @@ abstract class PlayScene extends Phaser.Scene {
     if (a.kind === "empousa") a.sprite.setTexture("empousaTrue", 0);
     const name = loreName(a.kind);
     const how: Record<string, string> = { boar: "lowers its tusks and charges", wolf: "bares its teeth and comes for you", fox: "snarls and darts at you", deer: "lowers its antlers and charges",
-      centaur: "throws back its head, laughs, and comes on at the gallop", skeleton: "lifts its corroded blade and marches at you", empousa: "shows her true face, a grin too wide for any mouth, and springs at you" };
-    const what = a.kind === "skeleton" ? "Run, or break it." : a.kind === "empousa" ? `Run, fight, or ${G.lore("empousa") >= 1 ? "mock her" : "do something"} (E).` : "Run, fight, or calm it (E).";
+      centaur: "throws back its head, laughs, and comes on at the gallop", jackal: "yips and darts in", scorpion: "raises its tail", bear: "rears up roaring and comes on", crab: "snaps its claws at you",
+      lion: "flattens its ears and charges", stymphalian: "screams, bronze feathers rattling, and stoops at you", strix: "shrieks and drops out of the dark at you", sphinx: "springs from the rock", skeleton: "lifts its corroded blade and marches at you", empousa: "shows her true face, a grin too wide for any mouth, and springs at you" };
+    const what = a.kind === "skeleton" ? "Run, or break it." : a.kind === "empousa" ? `Run, fight, or ${G.lore("empousa") >= 1 ? "mock her" : "do something"} (E).` : isMonster(a.kind) && !MONSTERS[a.kind].calm ? "Run, or fight." : "Run, fight, or calm it (E).";
     G.say(`${name[0].toUpperCase() + name.slice(1)} ${how[a.kind] ?? "comes at you"}! (d12 ${roll}${G.lore(a.kind) >= 2 ? `, Aggression ${agg}` : ""}) ${what}`);
     return true;
   }
@@ -484,7 +485,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setVelocity(Math.cos(ang) * throwV, Math.sin(ang) * throwV); if (a.kind === "centaur") this.knock = 0.35;
     this.cameras.main.shake(140, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites" };
+    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${dmg} Fatigue)`);
     if (G.data.fatigue >= 100) this.struckDown(a);
@@ -915,25 +916,26 @@ abstract class PlayScene extends Phaser.Scene {
   /** A creature's arrow falls: only where it lands, as with yours. Keep moving. */
   arrowAtYou(x: number, y: number, from: Animal) {
     if (Math.hypot(this.player.x - x, this.player.y + 4 - y) > 9 || this.invuln > 0 || this.leaving) {
-      if (this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
+      if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
     const dmg = Math.max(1, 8 - (G.data.health - 4));
     G.addFatigue(dmg); this.invuln = 0.8;
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    G.say(`An arrow from the ${beast(from.kind)} finds you! (+${dmg} Fatigue)`);
+    G.say(from.kind === "stymphalian" ? `A bronze feather slices into you! (+${dmg} Fatigue)` : `An arrow from the ${beast(from.kind)} finds you! (+${dmg} Fatigue)`);
     if (G.data.fatigue >= 100) this.struckDown(from);
   }
 
   /** A creature looses an arrow at where you will be, leading you a little. */
-  shootAt(a: Animal) {
+  shootAt(a: Animal, tint?: number) {
     const sx = a.sprite.x, sy = a.sprite.y - 4;
     const v = this.player.body!.velocity, d = Math.hypot(this.player.x - sx, this.player.y - sy);
     const T = 0.12 + d / ARROW_SPEED, lead = 0.7;
     const ang = Math.random() * Math.PI * 2, rr = 14 * Math.sqrt(Math.random());
     const lx = this.player.x + v.x * T * lead + Math.cos(ang) * rr, ly = this.player.y + 4 + v.y * T * lead + Math.sin(ang) * rr;
     const img = this.add.image(sx, sy, "arrow").setDepth(100001);
+    if (tint !== undefined) img.setTint(tint);
     const shadow = this.add.ellipse(sx, sy + 4, 6, 2, 0x000000, 0.25).setDepth(1);
     this.arrows.push({ img, shadow, sx, sy, lx, ly, t: 0, T, h: d * 0.22 + 6, from: a });
   }
@@ -994,7 +996,8 @@ abstract class PlayScene extends Phaser.Scene {
     const name = beast(a.kind);
     G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: offer her a share (antler or meat) at an altar before you sleep." : ""}`);
     if (a.kind === "deer") G.data.deerDebt++;
-    if (a.kind === "boar" || a.kind === "wolf" || a.kind === "centaur") G.earn("Kleos", 1, `you brought down a ${name}`);
+    if (["boar", "wolf", "centaur", "bear", "siren", "stymphalian"].includes(a.kind)) G.earn("Kleos", 1, `you brought down a ${name}`);
+    if (a.kind === "lion" || a.kind === "sphinx") G.earn("Kleos", 2, `you overcame a ${name}`);
     if (a.kind === "empousa") { G.say("She collapses into foul ash, and the meadow smells of flowers again."); G.earn("Kleos", 1, "you destroyed an empousa"); }
     if (!known && LORE[a.kind]) { G.data.lore.tier[a.kind] = 1; G.say(`Up close, you know it now: a ${LORE[a.kind].name.toLowerCase()}.`); }
     if (a.flock.length) for (const b of a.flock) if (b !== a && b.state !== "dead" && b.state !== "gone") b.bolt(a.sprite);
@@ -2026,19 +2029,19 @@ const PROFILES: Record<number, Profile> = {
 // The rest of the wheel, from the Flora & Fauna sheet's "Found in" column.
 Object.assign(PROFILES, {
   5: { ground: T.MUD, ground2: T.GRASS2, objects: [[T.REEDS, 7], [T.TREE, 1], [T.BRUSH, 1], [T.FLOWERS, 0.5]], density: 0.36,
-       creatures: [["bird", 3], ["boar", 1], ["hare", 1]], features: ["Reed bed", "Still pool", "Willow stand"] },
+       creatures: [["duck", 2], ["heron", 1], ["boar", 1], ["bird", 1]], features: ["Reed bed", "Still pool", "Willow stand"] },
   7: { ground: T.SAND, ground2: T.GRASS2, objects: [[T.STONE, 3], [T.BOULDER, 2], [T.BRUSH, 2], [T.FLOWERS, 0.5]], density: 0.14,
-       creatures: [["bird", 3], ["hare", 1]], features: ["Tide pools", "Driftwood beach", "Headland"] },
+       creatures: [["gull", 3], ["crab", 2]], features: ["Tide pools", "Driftwood beach", "Headland"] },
   8: { ground: T.SAND, ground2: T.REDROCK, objects: [[T.THORN, 4], [T.STONE, 2], [T.BOULDER, 2]], density: 0.12,
-       creatures: [["hare", 1], ["bird", 1], ["fox", 1]], features: ["Dry wadi", "Oasis", "Sun-bleached bones"] },
+       creatures: [["jackal", 1], ["scorpion", 2], ["hare", 1]], features: ["Dry wadi", "Oasis", "Sun-bleached bones"] },
   9: { ground: T.ALPINE, ground2: T.ROCKY, objects: [[T.PINE, 6], [T.STONE, 3], [T.BOULDER, 3], [T.FLOWERS, 1]], density: 0.36,
-       creatures: [["deer", 1], ["bird", 2], ["hare", 1]], features: ["Mountain spring", "Shrine stones", "Eagle crag"] },
+       creatures: [["ibex", 2], ["eagle", 1], ["deer", 1], ["bear", 0.6]], features: ["Mountain spring", "Shrine stones", "Eagle crag"] },
   10: { ground: T.DRYGRASS, ground2: T.GRASS, objects: [[T.BRUSH, 2], [T.FLOWERS, 2], [T.STONE, 1], [T.THORN, 1], [T.TREE, 0.3]], density: 0.1,
-       creatures: [["hare", 3], ["bird", 3], ["deer", 1]], features: ["Wild herd grounds", "Lone oak", "Burial mound"] },
+       creatures: [["horse", 3], ["hare", 2], ["bustard", 2], ["bird", 1]], features: ["Wild herd grounds", "Lone oak", "Burial mound"] },
   11: { ground: T.REDROCK, ground2: T.DIRT, objects: [[T.BOULDER, 4], [T.STONE, 3], [T.THORN, 3]], density: 0.34,
-       creatures: [["boar", 1], ["fox", 1], ["bird", 1]], features: ["Gully", "Old battlefield", "Thorn thicket"] },
+       creatures: [["jackal", 1], ["scorpion", 1], ["ibex", 1], ["boar", 1]], features: ["Gully", "Old battlefield", "Thorn thicket"] },
   12: { ground: T.LIMESTONE, ground2: T.GRASS2, objects: [[T.BOULDER, 3], [T.STONE, 3], [T.OLIVE, 1], [T.FLOWERS, 1], [T.PINE, 1]], density: 0.24,
-       creatures: [["bird", 2], ["hare", 1], ["deer", 1]], features: ["Ruined watchtower", "Eagle crag", "Acropolis ruins"] },
+       creatures: [["pigeon", 2], ["eagle", 1], ["hare", 1], ["ibex", 1]], features: ["Ruined watchtower", "Eagle crag", "Acropolis ruins"] },
 } as Record<number, Profile>);
 const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
 const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 }, CAVE_AT = { x: 9, y: 7 };
@@ -2274,13 +2277,14 @@ class WildScene extends PlayScene {
       }
       return [WW * 8, WH * 8];
     };
-    for (const [kind, n] of p.creatures) {
+    for (const [kind, n0] of p.creatures) {
+      const n = Math.floor(n0) + (gen() < n0 % 1 ? 1 : 0); // a fraction is a chance (bears are rarer)
       for (let i = 0; i < n; i++) {
         if (gen() < 0.25) continue; // not every creature is home every time
         const [x, y] = spot();
-        if (kind === "bird") {
+        if (kind === "bird" || kind === "duck" || kind === "gull" || kind === "pigeon") {
           const flock: Animal[] = [];
-          for (let j = 0; j < 3; j++) { const a = new Animal(this, "bird", x + j * 6, y + (j % 2) * 5, new Phaser.Geom.Rectangle(x - 120, y - 90, 240, 180), free); flock.push(a); this.animals.push(a); }
+          for (let j = 0; j < 3; j++) { const a = new Animal(this, kind, x + j * 6, y + (j % 2) * 5, new Phaser.Geom.Rectangle(x - 120, y - 90, 240, 180), free); flock.push(a); this.animals.push(a); }
           flock.forEach((a) => (a.flock = flock));
         } else {
           const range = kind === "deer" ? 110 : 70;
@@ -2576,9 +2580,9 @@ class WildScene extends PlayScene {
     this.spawnMonster(m.kind);
   }
 
-  monsterHour(when: "any" | "night" | "dusk") { return when === "any" || (when === "night" ? !G.isDay : G.data.clock >= G.daylight - 1); }
+  monsterHour(when: "any" | "night" | "dusk" | "day") { return when === "any" || (when === "day" ? G.isDay : when === "night" ? !G.isDay : G.data.clock >= G.daylight - 1); }
 
-  spawnMonster(kind: "centaur" | "skeleton" | "empousa") {
+  spawnMonster(kind: MonsterKind) {
     const m = MONSTERS[kind], free = (x: number, y: number) => this.free(x, y);
     let x = WW * 8, y = WH * 8;
     if (kind === "skeleton") {
@@ -2590,10 +2594,17 @@ class WildScene extends PlayScene {
         if (Math.hypot(tx * TILE - this.player.x, ty * TILE - this.player.y) > 170 && free(tx * TILE + 8, ty * TILE + 8)) { x = tx * TILE + 8; y = ty * TILE + 8; break; }
       }
     }
-    const range = kind === "centaur" ? 160 : 60;
-    const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
+    const range = kind === "centaur" || kind === "lion" ? 160 : kind === "siren" ? 0 : 60;
+    const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2 + 1, range * 2 + 1), free);
     this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
     this.animals.push(a); this.monster = a;
+    // A flock: more of them, rising together.
+    for (let i = 1; i < (m.count ?? 1); i++) {
+      const b = new Animal(this, kind, x + (i % 2 ? 14 : -14), y + i * 6, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
+      this.physics.add.collider(b.sprite, this.objects); this.collideTrunks(b.sprite); this.animals.push(b);
+    }
+    if (kind === "siren") { a.decide = () => {}; a.sprite.setImmovable(true); } // she does not come to you: her song brings you to her
+    if (kind === "sphinx") a.decide = () => { this.meeting = "coming"; };
     if (kind === "centaur") a.decide = (b) => { if (!this.aggressionRoll(b)) { this.meeting = "coming"; G.say(`The ${beast("centaur")} trots toward you, curious.`); } };
     if (kind === "empousa") a.decide = () => { this.meeting = "coming"; };
     if (kind === "skeleton") {
@@ -2602,9 +2613,9 @@ class WildScene extends PlayScene {
       a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 1, duration: 900 });
     }
     const sc = this;
-    if (kind !== "skeleton") this.targets.push({ get x() { return a.sprite.x; }, get y() { return a.sprite.y + 2; },
-      get label() { return a.state === "dead" || a.state === "charge" || a.state === "recoil" || !a.sprite.active ? "" : kind === "centaur" ? (a.appeased ? "" : "Speak with the centaur") : "Speak with the stranger"; },
-      act: () => (kind === "centaur" ? sc.talkCentaur(a) : sc.meetEmpousa(a)) });
+    if (kind === "centaur" || kind === "empousa" || kind === "sphinx") this.targets.push({ get x() { return a.sprite.x; }, get y() { return a.sprite.y + 2; },
+      get label() { return a.state === "dead" || a.state === "charge" || a.state === "recoil" || !a.sprite.active ? "" : kind === "centaur" ? (a.appeased ? "" : "Speak with the centaur") : kind === "sphinx" ? "Hear the riddle" : "Speak with the stranger"; },
+      act: () => (kind === "centaur" ? sc.talkCentaur(a) : kind === "sphinx" ? sc.meetSphinx(a) : sc.meetEmpousa(a)) });
     const met = G.data.met[kind] ?? 0; G.data.met[kind] = met + 1;
     G.say(met ? m.again : m.first);
   }
@@ -2682,6 +2693,7 @@ class WildScene extends PlayScene {
         G.say("Dawn: the bones fall where they stand and lie still.");
       }
     }
+    this.farLandMonsters(dt);
     const a = this.monster;
     if (!a || !a.sprite.active || a.state === "dead") return;
     const dist = Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y);
@@ -2694,10 +2706,60 @@ class WildScene extends PlayScene {
     // A curious centaur, or the stranger, walks up to you.
     if (this.meeting === "coming" && a.state !== "charge" && a.state !== "recoil" && !a.appeased) {
       if (dist > 26) { a.state = "walk"; a.tx = this.player.x; a.ty = this.player.y + 2; a.timer = 1; }
-      else { a.state = "idle"; a.timer = 2; a.sprite.setVelocity(0, 0); if (a.kind === "empousa") this.meetEmpousa(a); else this.meeting = "done"; }
+      else { a.state = "idle"; a.timer = 2; a.sprite.setVelocity(0, 0); if (a.kind === "empousa") this.meetEmpousa(a); else if (a.kind === "sphinx") this.meetSphinx(a); else this.meeting = "done"; }
     }
     // Walking away from the stranger's invitation is declining it.
     if (a.kind === "empousa" && this.meeting === "talking" && !ui(this).talkPanel) { this.meeting = "done"; this.declineEmpousa(a); }
+    if (a.kind === "sphinx" && this.meeting === "talking" && !ui(this).talkPanel) { this.meeting = "done"; G.say("You turn away without an answer. That is an answer too. The Sphinx springs."); a.charge(30); }
+  }
+
+  songT = 0; sungSaid = false;
+  /**
+   * The monsters of the far lands, each by its Terata nature: the Siren draws you in with her song unless you hold wax;
+   * the bronze birds shoot their feathers from range; the Strix flies from fire.
+   */
+  farLandMonsters(dt: number) {
+    for (const m of this.animals) {
+      if (!m.sprite.active || m.state === "dead") continue;
+      const d = Math.hypot(m.sprite.x - this.player.x, m.sprite.y - this.player.y);
+      if (m.kind === "siren" && G.isDay) {
+        const stopped = G.selectedItem?.id === "Wax";
+        if (d < 170 && !stopped && !this.paused && this.knock <= 0) {
+          // The song pulls you toward her; you can still walk hard away.
+          const v = this.player.body!.velocity, k = 42 / Math.max(1, d);
+          this.player.setVelocity(v.x + (m.sprite.x - this.player.x) * k, v.y + (m.sprite.y - this.player.y) * k);
+          if (!this.sungSaid) { this.sungSaid = true; G.say(`The song draws you toward the rocks. ${G.lore("siren") >= 1 ? "Hold wax to stop your ears, or walk hard away." : "Your feet are moving on their own."}`); }
+          if (d < 18 && (this.songT -= dt) <= 0) { this.songT = 1.6; m.state = "idle"; this.struck(m); }
+        } else if (d < 170 && stopped && !this.sungSaid) { this.sungSaid = true; G.say("You press the wax into your ears. Her mouth moves, and you hear nothing at all."); }
+      }
+      if (m.kind === "stymphalian" && m.state === "charge" && d > 50 && d < 200 && Math.random() < dt * 0.5) {
+        m.state = "recoil"; m.timer = 0.5; m.sprite.setVelocity(0, 0);
+        this.time.delayedCall(200, () => { if (m.sprite.active && m.state !== "dead") this.shootAt(m, 0xd8a850); });
+      }
+      if (m.kind === "strix" && G.selectedItem?.id === "Torch" && d < 90 && m.state !== "flee") { m.bolt(this.player); m.appeased = true; G.say("The night-bird shrieks at the torchlight and wheels away into the dark."); }
+    }
+  }
+
+  /** The Sphinx asks her riddle. Gnosis may recall the old answer; a true answer unmakes her, a wrong one and she springs. */
+  meetSphinx(a: Animal) {
+    if (this.meeting === "talking" || a.state === "charge" || a.state === "recoil" || a.state === "dead") return;
+    const u = ui(this);
+    this.meeting = "talking"; a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0);
+    const r = RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
+    const g = (G.data.aretai.Gnosis ?? 3) + G.lore("sphinx"), roll = 1 + Math.floor(Math.random() * 12);
+    const recall = roll + g >= 9;
+    const order = [...r.answers].sort(() => Math.random() - 0.5);
+    const opts = order.map((ans) => ({ label: ans, fn: () => {
+      this.meeting = "done"; u.closeTalk();
+      if (ans === r.answers[0]) {
+        G.say(`"${ans.split(":")[0]}." She stares at you, and a cry tears out of her, and she throws herself from the rock and is gone like smoke.`);
+        G.earn("Kleos", 2, "you answered the Sphinx"); G.data.currencies.Ambrosia += 1;
+        if (G.lore("sphinx") < 1) G.data.lore.tier.sphinx = 1;
+        a.state = "dead"; this.tweens.add({ targets: a.sprite, alpha: 0, y: a.sprite.y + 20, duration: 900, onComplete: () => { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } });
+      } else { G.say(`"${ans}." Wrong. The Sphinx smiles, and springs.`); a.charge(30); }
+    } }));
+    u.showTalk("The Sphinx", "a winged lion with a woman's face", `"Answer, traveler, and pass. Fail, and be eaten."\n\n"${r.q}"${recall ? `\n\n(Something stirs in your memory: an old story, a lame king at Thebes... Gnosis d12 ${roll} + ${g} vs 9.)` : ""}`, opts);
+    if (recall) { const right = opts.find((o) => o.label === r.answers[0]); if (right) right.label = `${right.label}  ✦`; u.showTalk("The Sphinx", "a winged lion with a woman's face", `"Answer, traveler, and pass. Fail, and be eaten."\n\n"${r.q}"\n\n(Something stirs in your memory: an old story, a lame king at Thebes... Gnosis d12 ${roll} + ${g} vs 9.)`, opts); }
   }
 
   /** A centaur that chose conversation: wine, a contest of strength, or leave it be. */

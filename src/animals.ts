@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 
-export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad" | "centaur" | "skeleton" | "empousa";
+export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad" | "centaur" | "skeleton" | "empousa"
+  | "heron" | "duck" | "gull" | "crab" | "jackal" | "scorpion" | "ibex" | "bear" | "horse" | "bustard" | "eagle" | "pigeon"
+  | "siren" | "sphinx" | "lion" | "stymphalian" | "strix";
 
 interface SpeciesDef {
   name: string;
@@ -15,6 +17,7 @@ interface SpeciesDef {
   damage: number; // Fatigue dealt by a blow
   notice?: number; // how far off it notices you (default: its scare distance, at least 40)
   giveUp?: number; // how far you must get before a charge is abandoned (default 230)
+  flies?: boolean; // hops in place, flies up and away when scared
 }
 
 export const SPECIES: Record<Species, SpeciesDef> = {
@@ -32,7 +35,26 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   centaur: { name: "centaur", walk: 26, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 5, 16], frameRate: 8, aggression: 5, charge: 118, damage: 13, notice: 120, giveUp: 320 },
   skeleton: { name: "skeleton", walk: 12, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 5, 4, 11], frameRate: 5, aggression: 6, charge: 36, damage: 10, notice: 96, giveUp: 600 },
   empousa: { name: "empousa", walk: 18, flee: 0, scare: 0, idle: [1, 3], body: [8, 5, 4, 11], frameRate: 4, aggression: 6, charge: 74, damage: 12, notice: 110, giveUp: 300 },
-  bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0 },
+  bird: { name: "bird", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [4, 3, 6, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0, flies: true },
+  // The far lands (Flora & Fauna).
+  duck: { name: "duck", walk: 0, flee: 80, scare: 46, idle: [0.8, 2.5], body: [6, 3, 5, 10], frameRate: 10, aggression: 0, charge: 0, damage: 0, flies: true },
+  gull: { name: "gull", walk: 0, flee: 90, scare: 50, idle: [0.6, 2], body: [6, 3, 5, 10], frameRate: 10, aggression: 0, charge: 0, damage: 0, flies: true },
+  pigeon: { name: "pigeon", walk: 0, flee: 85, scare: 40, idle: [0.6, 2], body: [5, 3, 5, 10], frameRate: 12, aggression: 0, charge: 0, damage: 0, flies: true },
+  heron: { name: "heron", walk: 0, flee: 75, scare: 60, idle: [2, 5], body: [5, 3, 6, 12], frameRate: 6, aggression: 0, charge: 0, damage: 0, flies: true },
+  eagle: { name: "eagle", walk: 0, flee: 100, scare: 70, idle: [1.5, 4], body: [6, 3, 5, 3], frameRate: 6, aggression: 0, charge: 0, damage: 0, flies: true },
+  crab: { name: "crab", walk: 10, flee: 34, scare: 26, idle: [1, 3], body: [8, 4, 4, 11], frameRate: 8, aggression: 1, charge: 30, damage: 3 },
+  jackal: { name: "jackal", walk: 28, flee: 95, scare: 60, idle: [0.6, 2.5], body: [10, 4, 3, 10], frameRate: 7, aggression: 4, charge: 92, damage: 6 },
+  scorpion: { name: "scorpion", walk: 9, flee: 22, scare: 22, idle: [1.5, 4], body: [8, 4, 4, 11], frameRate: 8, aggression: 4, charge: 40, damage: 8, notice: 34 },
+  ibex: { name: "wild goat", walk: 20, flee: 112, scare: 70, idle: [1.2, 3.5], body: [10, 4, 3, 11], frameRate: 7, aggression: 1, charge: 90, damage: 7 },
+  bear: { name: "bear", walk: 16, flee: 60, scare: 56, idle: [1.5, 4], body: [12, 5, 2, 10], frameRate: 5, aggression: 6, charge: 102, damage: 18, notice: 90 },
+  horse: { name: "wild horse", walk: 26, flee: 140, scare: 84, idle: [1.2, 3.5], body: [12, 4, 2, 11], frameRate: 8, aggression: 0, charge: 0, damage: 0 },
+  bustard: { name: "bustard", walk: 14, flee: 92, scare: 52, idle: [1, 3], body: [8, 4, 4, 11], frameRate: 8, aggression: 0, charge: 0, damage: 0 },
+  // More wandering monsters (AEGIS Terata).
+  siren: { name: "siren", walk: 0, flee: 0, scare: 0, idle: [2, 5], body: [8, 5, 4, 11], frameRate: 4, aggression: 5, charge: 60, damage: 12, notice: 150, giveUp: 260 },
+  sphinx: { name: "sphinx", walk: 10, flee: 0, scare: 0, idle: [2, 5], body: [14, 6, 5, 16], frameRate: 4, aggression: 6, charge: 96, damage: 16, notice: 120, giveUp: 320 },
+  lion: { name: "lion", walk: 18, flee: 0, scare: 0, idle: [1.5, 4], body: [12, 5, 2, 10], frameRate: 6, aggression: 8, charge: 118, damage: 20, notice: 110, giveUp: 300 },
+  stymphalian: { name: "stymphalian bird", walk: 14, flee: 0, scare: 0, idle: [0.6, 2], body: [8, 4, 4, 10], frameRate: 10, aggression: 7, charge: 80, damage: 9, notice: 130, giveUp: 300 },
+  strix: { name: "strix", walk: 20, flee: 0, scare: 0, idle: [0.6, 2], body: [8, 4, 4, 10], frameRate: 10, aggression: 5, charge: 100, damage: 10, notice: 120, giveUp: 260 },
 };
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -101,7 +123,7 @@ export class Animal {
       case "idle":
         s.setVelocity(0, 0);
         if (this.timer <= 0) {
-          if (this.kind === "bird") { // birds hop and peck in place
+          if (SPECIES[this.kind].flies) { // birds hop and peck in place
             s.setFlipX(!s.flipX);
             this.timer = rand(...d.idle);
           } else {
@@ -119,7 +141,7 @@ export class Animal {
         break;
       }
       case "flee":
-        if (this.kind === "bird") {
+        if (SPECIES[this.kind].flies) {
           s.setAlpha(Math.max(0, s.alpha - dt * 0.8));
           if (this.timer <= 0) { this.state = "gone"; this.timer = rand(18, 40); s.setVisible(false); s.setVelocity(0, 0); }
         } else if (this.timer <= 0) { this.state = "idle"; this.timer = rand(...d.idle); }
@@ -156,10 +178,10 @@ export class Animal {
     const moving = Math.abs(body.velocity.x) + Math.abs(body.velocity.y) > 1;
     if (moving) {
       this.animT += dt * d.frameRate;
-      s.setFrame(this.kind === "bird" ? 1 : Math.floor(this.animT) % 2);
+      s.setFrame(SPECIES[this.kind].flies ? 1 : Math.floor(this.animT) % 2);
       if (Math.abs(body.velocity.x) > 0.5) s.setFlipX(body.velocity.x < 0);
     } else s.setFrame(0);
-    s.setDepth(this.state === "flee" && this.kind === "bird" ? 9999 : s.y);
+    s.setDepth(this.state === "flee" && SPECIES[this.kind].flies ? 9999 : s.y);
     void d;
   }
 
@@ -167,10 +189,10 @@ export class Animal {
   bolt(from: { x: number; y: number }) {
     const s = this.sprite, d = this.def;
     let ang = Math.atan2(s.y - from.y, s.x - from.x) + rand(-0.5, 0.5);
-    if (this.kind === "bird") ang = Math.atan2(-1, Math.sign(s.x - from.x) || 1) + rand(-0.4, 0.4); // up and away
+    if (SPECIES[this.kind].flies) ang = Math.atan2(-1, Math.sign(s.x - from.x) || 1) + rand(-0.4, 0.4); // up and away
     s.setVelocity(Math.cos(ang) * d.flee, Math.sin(ang) * d.flee);
     this.state = "flee";
-    this.timer = this.kind === "bird" ? 1.4 : rand(0.9, 1.4);
+    this.timer = SPECIES[this.kind].flies ? 1.4 : rand(0.9, 1.4);
   }
 
   /** A bird comes down again somewhere in its home range. */

@@ -116,6 +116,7 @@ export const ITEMS: Record<string, ItemDef> = {
   Purslane: { id: "Purslane", value: 1, name: "Purslane", kind: "material", desc: "Fleshy wild greens from the field edges." },
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
   // Rare finds (omens.ts says where they turn up).
+  LionPelt: { id: "LionPelt", value: 70, name: "Lion pelt", greek: "leonte", kind: "material", desc: "The hide of a lion of the high country, mane and all. Heracles wore one. Worth a great deal, and more in glory." },
   Fibula: { id: "Fibula", value: 12, name: "Bronze fibula", greek: "porpe", kind: "find", desc: "A cloak pin, green with age. Someone lost it long ago." },
   Figurine: { id: "Figurine", value: 10, name: "Clay figurine", greek: "kore", kind: "find", desc: "A little clay woman with raised arms: a votive, once offered to a goddess." },
   Arrowhead: { id: "Arrowhead", value: 4, name: "Flint arrowhead", greek: "glochis", kind: "find", desc: "Knapped by hands older than memory. Still sharp: it makes fine arrows." },
@@ -264,6 +265,24 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   lampad: { hp: 2, size: 6, drops: [] },
   // Wandering monsters: Terata Vitality scaled to hits (a boar's 18 Vitality = 3 hits).
   centaur: { hp: 4, size: 10, drops: [["Hide", 1], ["Arrow", 3]] },
+  // The far lands.
+  duck: { hp: 1, size: 5, drops: [["Meat", 1], ["Feather", 2]] },
+  gull: { hp: 1, size: 5, drops: [["Feather", 2]] },
+  pigeon: { hp: 1, size: 4, drops: [["Meat", 1], ["Feather", 1]] },
+  heron: { hp: 1, size: 6, drops: [["Feather", 3]] },
+  eagle: { hp: 2, size: 6, drops: [["Feather", 3]] },
+  crab: { hp: 1, size: 5, drops: [["Meat", 1]] },
+  jackal: { hp: 1, size: 7, drops: [["Hide", 1]] },
+  scorpion: { hp: 1, size: 5, drops: [] },
+  ibex: { hp: 2, size: 8, drops: [["Meat", 2], ["Hide", 1], ["Antler", 1]] },
+  bear: { hp: 5, size: 10, drops: [["Meat", 4], ["Hide", 2]] },
+  horse: { hp: 3, size: 10, drops: [["Meat", 3], ["Hide", 2]] },
+  bustard: { hp: 1, size: 6, drops: [["Meat", 2], ["Feather", 2]] },
+  siren: { hp: 4, size: 7, drops: [["Feather", 3]] },
+  sphinx: { hp: 6, size: 12, drops: [] },
+  lion: { hp: 5, size: 10, drops: [["LionPelt", 1], ["Meat", 3]] },
+  stymphalian: { hp: 2, size: 6, drops: [["Copper", 1], ["Feather", 1]] },
+  strix: { hp: 2, size: 6, drops: [["Feather", 2]] },
   skeleton: { hp: 3, size: 7, drops: [] },
   empousa: { hp: 3, size: 6, drops: [] },
 };
@@ -284,6 +303,7 @@ export const PEACE_FOOD: Record<string, string[]> = {
   boar: ["Millet", "Chickpeas", "Melon"], deer: ["Millet", "Chickpeas", "Melon"], wolf: ["Meat"], fox: ["Meat"],
   myrmex: ["Honey"], eidolon: ["Wine", "Milk", "Honey", "Mint"], lampad: ["Honey", "Milk", "Mint"],
   centaur: ["Wine"], // Terata: "wine offered with respect, not mockery"
+  jackal: ["Meat"], bear: ["Honey", "Meat"], crab: [], scorpion: [], // the bear: "an offering of food left and abandoned"
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
 export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };
