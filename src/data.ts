@@ -73,6 +73,30 @@ export const START_ARETAI: Record<string, number> = {
   Logos: 3, Ourania: 3, Pneuma: 3, Aiolos: 3, Thymos: 3, Kratos: 3,
 };
 
+/** The element each Aretai draws on: the Cosmic Wheel's four quarters. */
+export const ELEMENT_OF: Record<string, "Earth" | "Water" | "Air" | "Fire"> = {
+  Kardia: "Earth", Oikos: "Earth", Techne: "Earth", Metis: "Water", Gnosis: "Water", Logos: "Water",
+  Ourania: "Air", Pneuma: "Air", Aiolos: "Air", Thymos: "Fire", Kratos: "Fire", Phoenix: "Fire",
+};
+/**
+ * Pacing. Every action tests one Aretai and draws on that Aretai's element. Its Essence cost is its effort,
+ * scaled by your skill: 9 / (Aretai + 6), so effort 3 costs 3 at Aretai 3, 2.25 at 6 and 1.5 at 12.
+ * Your pool (the sum of the element's three Aretai) holds a few actions; it refills from empty in
+ * ESSENCE.refillSeconds, more slowly as Fatigue mounts.
+ */
+export const ESSENCE = { refillSeconds: 12, tiredSlowdown: 0.4, runPerSecond: 2 };
+export const EFFORT = {
+  // Fire: Thymos (fighting) and Kratos (heavy labor).
+  strike: 3, shove: 2, throwSpear: 4, chop: 4, sapling: 3, stone: 4, boulder: 6, mine: 5,
+  // Earth: Oikos (field work), Techne (making), Kardia (calming).
+  till: 2, cut: 2, pull: 3, dig: 3, gather: 1, plant: 1, plantCutting: 2, repair: 5, hand: 1, station: 3, calm: 3,
+  // Water: Gnosis (study), Logos (wit).
+  study: 3, mock: 2,
+  // Air: Ourania (aim), Pneuma (rites), Aiolos (running, per second: ESSENCE.runPerSecond).
+  shoot: 3, rite: 3,
+};
+export const skillCost = (effort: number, aretai: number) => (effort * 9) / (Math.max(0, aretai) + 6);
+
 export function essencePools(a: Record<string, number>) {
   return {
     Earth: a.Kardia + a.Oikos + a.Techne,

@@ -4,7 +4,7 @@ import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./texture
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
-import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, type Station } from "./data";
+import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
 import { MOROS_DREAMS } from "./omens";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -47,13 +47,30 @@ interface Target { x: number; y: number; label: string; act: () => void }
 // ------------------------------------------------------------------ helpers
 function ui(scene: Phaser.Scene) { return scene.scene.get("UI") as unknown as UIScene; }
 
-/** Pay for a piece of work: Essence and Fatigue, discounted in the matching hour. */
-function labor(cost: Record<string, number>, fatigue: number, aretai: string): string | null {
+const SPENT: Record<string, string> = {
+  Fire: "Your arms are heavy and your breath short: give your Fire a moment to rekindle.",
+  Earth: "Your hands need a moment: your Earth is spent.",
+  Water: "Your thoughts are muddied: let your Water settle a moment.",
+  Air: "You need to catch your breath: your Air is spent.",
+};
+let lastSpentSay = 0;
+/** What a piece of work would cost you now, in the element of the Aretai it tests. */
+function laborCost(effort: number, aretai: string): [keyof typeof G.essence, number] {
+  return [ELEMENT_OF[aretai] ?? "Earth", skillCost(effort, G.data.aretai[aretai] ?? 3) * G.hourDiscount(aretai)];
+}
+/**
+ * Pay for a piece of work: Essence from the element of the Aretai it tests, cheaper the more skilled you are
+ * and in the matching hour, plus Fatigue. When the element runs dry you must wait for it to refill.
+ */
+function labor(effort: number, fatigue: number, aretai: string): string | null {
   if (G.exhausted) { G.say("You are too exhausted to work. Rest."); return null; }
   const disc = G.hourDiscount(aretai);
-  const c: Record<string, number> = {};
-  for (const [k, v] of Object.entries(cost)) c[k] = v * disc;
-  if (!G.spend(c)) { G.say("You need a moment to catch your breath."); return null; }
+  const [el, cost] = laborCost(effort, aretai);
+  if (!G.spend({ [el]: cost })) {
+    G.spentFlash = { el, at: performance.now() };
+    if (performance.now() - lastSpentSay > 1500) { G.say(SPENT[el]); lastSpentSay = performance.now(); }
+    return null;
+  }
   const zeus = aretai === "Kratos" ? 1 - 0.08 * G.boon("Zeus") : 1; // Zeus eases heavy labor
   G.addFatigue(fatigue * disc * zeus);
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
@@ -86,7 +103,7 @@ function study(id: string): boolean {
   const fails = Math.min(MAX_PERSEVERANCE, G.data.lore.fails[id] ?? 0);
   const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails + G.boon("Hera") - darkPen();
   if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
-  const b = labor({ Water: 3 }, 1, "Gnosis"); if (b === null) return false;
+  const b = labor(EFFORT.study, 1, "Gnosis"); if (b === null) return false;
   G.data.lore.studied[id] = G.dayNumber;
   const roll = 1 + Math.floor(Math.random() * 12);
   const odds = `d12 ${roll}, needed 1–${Math.min(12, target)}${hera ? ", Hera's hour +2" : ""}${fails ? `, perseverance +${fails}` : ""}`;
@@ -131,7 +148,7 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
     // The far lands' plants: black pine falls like an oak, reeds cut like brush, thorn scrub gives kindling.
     if (obj === T.PINE) {
       if (tool !== "axe") { G.say(tool ? "A pine wants the axe." : "You need a tool for that. Choose one with the number keys 1–0."); return true; }
-      const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
+      const b = labor(EFFORT.chop, 4, "Kratos"); if (b === null) return true;
       const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
       const hits = G.toolLevel("axe") >= 2 ? 2 : TREE_HITS;
       if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The pine comes down, smelling of resin: ${give("Wood", 5 + mastery("pine", 2))}${b}`); rollFind("tree", FIND_CHANCE.tree / 2); }
@@ -139,24 +156,24 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
       return true;
     }
     if (obj === T.REEDS) {
-      const b = labor({ Earth: tool === "sickle" ? 2 : 3 }, tool === "sickle" ? 2 : 3, "Oikos"); if (b === null) return true;
+      const b = labor(tool === "sickle" ? EFFORT.cut : EFFORT.pull, tool === "sickle" ? 2 : 3, "Oikos"); if (b === null) return true;
       sc.clearObject(x, y); G.say(`You ${tool === "sickle" ? "cut" : "pull"} the reeds: ${give("Fiber", (tool === "sickle" ? 2 : 1) + mastery("reed"))}${b}`); return true;
     }
     if (obj === T.THORN) {
       if (tool !== "sickle" && tool !== "axe") { G.say(tool ? "Thorn scrub wants the sickle or the axe." : "The thorns tear at your hands. Use the sickle or the axe."); return true; }
-      const b = labor({ Earth: 2, Fire: 1 }, 3, "Oikos"); if (b === null) return true;
+      const b = labor(EFFORT.dig, 3, "Oikos"); if (b === null) return true;
       sc.clearObject(x, y); G.say(`You hack out the thorn scrub for kindling: ${give("Wood", 1 + mastery("thornscrub"))}, ${give("Fiber", 1)}${b}`); return true;
     }
     switch (tool) {
       case "sickle":
-        if (obj === T.BRUSH) { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2 + mastery("bramble"))}${b}`); }
+        if (obj === T.BRUSH) { const b = labor(EFFORT.cut, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2 + mastery("bramble"))}${b}`); }
         else if (obj === T.FLOWERS) { sc.clearObject(x, y); G.say(`You cut wildflowers: ${give("Flowers", 2)}`); }
         else G.say("The sickle is for brush and flowers.");
         return true;
       case "axe":
-        if (obj === T.SAPLING) { const b = labor({ Earth: 3, Fire: 1 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You fell the sapling: ${give("Wood", 2)}${b}`); }
+        if (obj === T.SAPLING) { const b = labor(EFFORT.sapling, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You fell the sapling: ${give("Wood", 2)}${b}`); }
         else if (obj === T.TREE) {
-          const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true;
+          const b = labor(EFFORT.chop, 4, "Kratos"); if (b === null) return true;
           const k = hitKey; G.data.treeHits[k] = (G.data.treeHits[k] ?? 0) + 1;
           const hits = G.toolLevel("axe") >= 2 ? 2 : TREE_HITS;
           if (G.data.treeHits[k] >= hits) { delete G.data.treeHits[k]; sc.clearObject(x, y); G.say(`The oak comes down: ${give("Wood", 6 + mastery("oak", 2))}${b}`); rollFind("tree", FIND_CHANCE.tree * (["Spring", "Summer"].includes(G.month.season) ? 1 : 0.5)); }
@@ -167,15 +184,15 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
         else G.say("Nothing here for the axe.");
         return true;
       case "mattock":
-        if (obj === T.STONE) { const b = labor({ Earth: 3, Fire: 2 }, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2 + mastery("stone"))}${b}`); rollFind("stone", FIND_CHANCE.stone); }
-        else if (obj === T.BOULDER && G.toolLevel("mattock") >= 2) { const b = labor({ Earth: 4, Fire: 3 }, 6, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`The bronze-shod mattock splits the boulder: ${give("Stone", 4 + mastery("stone"))}${b}`); }
+        if (obj === T.STONE) { const b = labor(EFFORT.stone, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You break up the stone: ${give("Stone", 2 + mastery("stone"))}${b}`); rollFind("stone", FIND_CHANCE.stone); }
+        else if (obj === T.BOULDER && G.toolLevel("mattock") >= 2) { const b = labor(EFFORT.boulder, 6, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`The bronze-shod mattock splits the boulder: ${give("Stone", 4 + mastery("stone"))}${b}`); }
         else if (obj === T.BOULDER) G.say("Too big for this mattock. Lykos the smith in the village can shoe it in bronze.");
         else G.say("Nothing here for the mattock.");
         return true;
       default:
         // Bare hands, or a material in hand.
         if (obj === T.FLOWERS) { sc.clearObject(x, y); G.say(`You pick wildflowers: ${give("Flowers", 1)}`); }
-        else if (obj === T.BRUSH) { const b = labor({ Earth: 3 }, 3, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You pull up the brush by hand: ${give("Fiber", 1 + mastery("bramble"))}${b}`); }
+        else if (obj === T.BRUSH) { const b = labor(EFFORT.pull, 3, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You pull up the brush by hand: ${give("Fiber", 1 + mastery("bramble"))}${b}`); }
         else if (obj === T.TREE || obj === T.SAPLING || obj === T.STONE || obj === T.BOULDER) G.say("You need a tool for that. Choose one with the number keys 1–0.");
     }
   return true;
@@ -256,7 +273,7 @@ abstract class PlayScene extends Phaser.Scene {
     let speed = 70;
     const moving = vx !== 0 || vy !== 0;
     if (moving && k.SHIFT.isDown) {
-      const cost = 3 * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
+      const cost = skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
@@ -635,13 +652,13 @@ abstract class PlayScene extends Phaser.Scene {
     const a = this.creatureAhead();
     const reach = (tool ? MELEE_REACH[tool] : undefined) ?? 26, weapon = !!tool && WEAPONS.includes(tool);
     if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > reach) {
-      if (weapon && !(a && a.kind === "goat")) { SOUND.sfx("loose"); if (a && a.kind !== "goat") G.say(`Out of reach: the ${tool === "sword" ? "sword wants you close in" : "spear reaches only so far"}.`); return true; } // a swing at the air
+      if (weapon && !(a && a.kind === "goat")) { if (labor(EFFORT.strike, 0.5, "Thymos") === null) return true; SOUND.sfx("loose"); if (a && a.kind !== "goat") G.say(`Out of reach: the ${tool === "sword" ? "sword wants you close in" : "spear reaches only so far"}.`); return true; } // a swing at the air
       return false;
     }
     if (torch) tool = "torch";
     if (a.kind === "eidolon" && tool !== "torch") { G.say("Your blow passes through the shade like smoke. Only fire touches the dead."); return true; }
     if (a.kind === "skeleton" && a.state === "dead") return false;
-    const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return true;
+    const b = labor(tool ? EFFORT.strike : EFFORT.shove, 1, "Thymos"); if (b === null) return true;
     const name = beast(a.kind);
     if (!tool) { // a shove
       a.bolt(this.player);
@@ -673,7 +690,7 @@ abstract class PlayScene extends Phaser.Scene {
    */
   appease(a: Animal) {
     if (a.kind === "empousa") { this.mock(a); return; }
-    const b = labor({ Water: 2 }, 1, "Kardia"); if (b === null) return;
+    const b = labor(EFFORT.calm, 1, "Kardia"); if (b === null) return;
     const name = beast(a.kind);
     const held = G.selectedItem?.id ?? "";
     const food = (PEACE_FOOD[a.kind] ?? []).includes(held);
@@ -749,7 +766,7 @@ abstract class PlayScene extends Phaser.Scene {
       const left = d.regrow - (G.dayNumber - picked[s.k]);
       G.say(`You've already gathered from this ${name}. ${left > 30 ? "Not again this season." : `It will bear again in ${left} day${left > 1 ? "s" : ""}.`}`); return true;
     }
-    const b = labor({ Earth: 1 }, 0.5, "Oikos"); if (b === null) return true;
+    const b = labor(EFFORT.gather, 0.5, "Oikos"); if (b === null) return true;
     picked[s.k] = G.dayNumber;
     G.say(`You gather from the ${name}: ${give(d.item, d.qty + mastery(d.id))}${b}`);
     this.chips(tx, ty, T.FLOWERS, 4);
@@ -843,7 +860,7 @@ abstract class PlayScene extends Phaser.Scene {
   }
   throwSpear() {
     if (!this.holdingSpear || !this.canHunt) return;
-    const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return;
+    const b = labor(EFFORT.throwSpear, 1, "Thymos"); if (b === null) return;
     const [tx, ty] = this.aimPoint();
     const sx = this.player.x, sy = this.player.y + 4;
     const d = Math.hypot(tx - sx, ty - sy), r = this.spearSpread(d);
@@ -924,7 +941,7 @@ abstract class PlayScene extends Phaser.Scene {
     SOUND.sfx("loose");
     if (this.cooldown > 0) return;
     if (G.count("Arrow") <= 0) { G.say("No arrows left. Craft more from wood and stone (C)."); return; }
-    const b = labor({ Air: 2 }, 0.5, "Ourania"); if (b === null) return;
+    const b = labor(EFFORT.shoot, 0.5, "Ourania"); if (b === null) return;
     G.removeItem("Arrow", 1);
     const [tx, ty] = this.aimPoint();
     const sx = this.player.x, sy = this.player.y + 4;
@@ -1144,7 +1161,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Sincere mockery routs an empousa: a Logos or Phoenix check against CR 8 (d12 + the better of the two). */
   mock(a: Animal) {
-    const b = labor({ Water: 1 }, 0.5, "Logos"); if (b === null) return;
+    const b = labor(EFFORT.mock, 0.5, "Logos"); if (b === null) return;
     const best = Math.max(G.data.aretai.Logos ?? 3, G.data.aretai.Phoenix ?? 3), roll = 1 + Math.floor(Math.random() * 12);
     const odds = `d12 ${roll} + ${best} vs 8`;
     if (roll + best >= 8) {
@@ -1968,7 +1985,7 @@ class FarmScene extends PlayScene {
     const k = `${x},${y}`, crop = seed.slice(5), d = CROPS[crop];
     if (!G.data.ground[k]) { G.say("Seeds need tilled soil. Break the ground with the hoe first."); return; }
     if (!d.seasons.includes(G.month.season)) { G.say(`It isn't the season for ${d.name.toLowerCase()}.`); return; }
-    const b = labor({ Earth: 1 }, 1, "Oikos"); if (b === null) return;
+    const b = labor(EFFORT.plant, 1, "Oikos"); if (b === null) return;
     G.removeItem(seed, 1);
     const hour = d.aretai === "Night" ? !G.isDay : G.patron?.aretai === d.aretai;
     const signed = G.signActive("sow");
@@ -2003,7 +2020,7 @@ class FarmScene extends PlayScene {
     const k = `${x},${y}`;
     if (!G.data.ground[k]) { G.say("Plant the cutting in tilled soil."); return; }
     if (G.data.crops[k] || G.data.vines[k]) { G.say("Something is already growing there."); return; }
-    const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return;
+    const b = labor(EFFORT.plantCutting, 2, "Oikos"); if (b === null) return;
     G.removeItem("Cutting", 1);
     G.data.vines[k] = { planted: G.dayNumber, picked: -1 };
     this.drawYoungVine(k);
@@ -2022,7 +2039,7 @@ class FarmScene extends PlayScene {
     if (!v.repaired) {
       const missing = VAT_REPAIR.filter(([i, n]) => G.count(i) < n);
       if (missing.length) { G.say(`An old stone treading vat, cracked and overgrown. To repair it you need ${VAT_REPAIR.map(([i, n]) => `${n} ${ITEMS[i].name.toLowerCase()}`).join(" and ")}.`); return; }
-      const b = labor({ Earth: 3, Fire: 2 }, 6, "Techne"); if (b === null) return;
+      const b = labor(EFFORT.repair, 6, "Techne"); if (b === null) return;
       for (const [i, n] of VAT_REPAIR) G.removeItem(i, n);
       v.repaired = true; this.breakFx(20, 12, T.STONE);
       G.say(`You patch the cracks and clear the drain. The treading vat is whole again.${b}`);
@@ -2137,7 +2154,7 @@ class FarmScene extends PlayScene {
         if (this.baseGround[y][x] === T.PATH) { G.say("Leave the path to the road."); return; }
         if (inPen(x, y)) { G.say("Not in the goat pen."); return; }
         if (soil) { G.say("This soil is already tilled."); return; }
-        { const b = labor({ Earth: 2 }, 2, "Oikos"); if (b === null) return;
+        { const b = labor(EFFORT.till, 2, "Oikos"); if (b === null) return;
           if (obj === T.FLOWERS) this.clearObject(x, y);
           this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); rollFind("hoe", FIND_CHANCE.hoe); }
         return;
@@ -2888,7 +2905,7 @@ class WildScene extends PlayScene {
     if (sk && sk.state !== "dead") { G.say("It is standing. Break it first."); return; }
     const held = G.selectedItem?.id ?? "";
     if (!GRAVE_OFFERINGS.includes(held)) { G.say(`Old bones, scattered among the stones, unburied. ${G.lore("skeleton") >= 1 ? "Hold out a libation (wine, milk or honey) to give them their rites." : "They seem to want something."}`); return; }
-    const b = labor({ Water: 2 }, 1, "Pneuma"); if (b === null) return;
+    const b = labor(EFFORT.rite, 1, "Pneuma"); if (b === null) return;
     G.removeItem(held, 1);
     const target = (G.data.aretai.Pneuma ?? 3) + 3 + G.boon("Hades"), roll = 1 + Math.floor(Math.random() * 12);
     const odds = `d12 ${roll}, needed 1–${target}`;
@@ -3333,7 +3350,7 @@ class CaveScene extends PlayScene {
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
     if (obj === T.ORE) {
       if (tool !== "mattock") { G.say("Green-stained stone: copper ore. You'll need the mattock."); return; }
-      const b = labor({ Earth: 3, Fire: 2 }, 5 + darkPen(), "Techne"); if (b === null) return;
+      const b = labor(EFFORT.mine, 5 + darkPen(), "Kratos"); if (b === null) return;
       this.clearObject(x, y);
       G.say(`You break out the ore: ${give("Copper", 1 + (Math.random() < 0.4 ? 1 : 0))}${inDark ? " (by feel, in the dark)" : ""}${b}`);
       return;
@@ -3700,50 +3717,47 @@ class UIScene extends Phaser.Scene {
   }
 
   makeHelp(font: { fontFamily: string; color: string }) {
-    const helpText = [
-      "Works & Days · Milestone 1",
+    const left = [
+      "CONTROLS",
+      "Move: WASD or arrows. Run: hold Shift (spends Air).",
+      "Aim: point the mouse at anything within two paces. Mouse outside the window: you act on what you face.",
+      "Left click or Space: work with what you hold. Right click or E: interact. Q: study.",
+      "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap). C: crafting.",
+      "K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help.",
       "",
-      "Move: WASD or arrows     Run: hold Shift (spends Air Essence)",
-      "Choose a tool or item: number keys 1–0, or the mouse wheel",
-      "Use it: Space, on the ground in front of you",
-      "Interact: E, when a prompt appears (doors, bed, hearth, signs)",
-      "Inventory: I or Tab (click two slots to swap them)     Help: H",
-      "Investigate: Q, on a creature, plant, stone or the land itself     What you know: K",
-      "Bow: hold Space to aim, click where the arrow should land. It strikes only there, so lead moving quarry.",
-      "Handwork: C (arrows from wood and stone)",
-      "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
-      "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
-      "Aiming: point with the mouse at anything within two paces. Left click works with what you hold; right click (or E) interacts; Q studies. With the mouse outside the window, you act on what you face.",
-      "Sound: M mutes everything; N turns the music off and on.",
-      "Signs and omens: Hesiod's signs mark the farming year (study one with Q as it happens, and it helps for 4 days). Birds on your right are fair omens, on your left a warning; Pneuma notices them, Gnosis reads them. Watch for glints: rare finds go in your lore book.",
-      "Far from home (3 or more screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
-      "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
-      "Wine: repair the vat by the hut, tread grapes in it (a rhythm), and draw off the wine after 6 days.",
-      "Mythborn: a Naiad's spring and a satyr band are out there. Appease them (E) on separate days to befriend them.",
-      "Danger: some beasts roll Aggression and charge. Run, strike (Space with axe, mattock or sickle), or calm them (E), food in hand.",
-      "Blows cost Fatigue; fall when spent and your Life Thread frays.",
+      "PACING",
+      "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, rites and running Air. Skill makes each act cheaper, and so does the hour of the matching god. An empty bar refills in about 12 seconds (slower when weary): a few blows, then a breath.",
+      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. Your life is saved each dawn.",
       "",
-      "Hoe: till soil · Water jar: water tilled soil, refill at the well",
-      "Sickle: brush and flowers · Axe: saplings and trees · Mattock: stones",
-      "East of the farm lies the wild; south, the road to the village. Each new place stays as you found it.",
-      "Villagers: E to talk, chat daily, give gifts (hold the item). Theron trades, Lykos upgrades tools.",
-      "Crops: choose seeds and press Space on tilled soil; water daily; harvest with Space when ripe.",
-      "Watered every night, or sown in the crop's patron hour, it grows finer (★). Trade at the pithos.",
-      "Goats: pet and milk them daily (E); keep the manger in Fiber and the trough in water.",
-      "Spear: click to thrust (long reach); hold to aim, release to throw, then fetch it. Sword (from Lykos): short reach, hardest blow.",
-      "Crafting (C): handwork anywhere. Make a workbench, hold it and click to set it down; E at it for more.",
-      "The hive gives honey every few days. Wild creatures bolt if you run at them.",
+      "FIGHTING AND HUNTING",
+      "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
+      "Sword (forged by Lykos): short reach, hardest blow. Axe, mattock and sickle serve at a pinch.",
+      "Bow: hold Space to aim, click where the arrow lands. Lead moving quarry.",
+      "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows cost Fatigue; fall when spent and your Life Thread frays.",
+    ];
+    const right = [
+      "THE HOMESTEAD",
+      "Hoe tills, the jar waters (refill at the well), the sickle cuts brush, the axe fells, the mattock breaks stone.",
+      "Sow on tilled soil and water daily; crops watered every night or sown in their god's hour grow finer (★). Sell at the pithos.",
+      "Goats: pet and milk them (E), keep manger and trough full. Honey every few days. Wine: mend the vat, tread grapes, wait 6 days.",
+      "Crafting: handwork anywhere (C). Build a workbench, hold it and click to set it down, then E at it for chests, fences, a kiln and a loom.",
       "",
-      "Each of the day's twelve hours belongs to a god of the Cosmic Wheel.",
-      "Work that matches the hour's Aretai costs less: tilling and brush in",
-      "Demeter's hour (3), felling and stonework in Zeus's (12), running in Hermes's (10).",
+      "THE WILD",
+      "East lies the wild; each place stays as you left it. Forage shows its fruit once you know the plant (Q).",
+      "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
+      "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "",
-      "Work builds Fatigue; each hour of sleep clears about 12%.",
-      "Stay up past the second watch of the night and you will collapse.",
-      "Watered soil dries overnight. Your life is saved each dawn.",
-    ].join("\n");
-    const hbg = this.add.rectangle(W / 2, H / 2, 900, 638, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
-    const ht = this.add.text(W / 2, H / 2, helpText, { ...font, fontSize: "15px", align: "center", lineSpacing: 3 }).setOrigin(0.5);
+      "GODS, SIGNS AND PEOPLE",
+      "Each of the day's twelve hours belongs to a god of the Cosmic Wheel. Pray and make offerings at altars (E).",
+      "Hesiod's signs mark the year: study one as it happens and it helps for 4 days. Birds on your right are fair omens, on your left a warning. Watch for glints: rare finds.",
+      "Villagers: talk daily and give gifts (hold the item, E). Theron trades; Lykos upgrades tools and forges swords.",
+    ];
+    const hbg = this.add.rectangle(W / 2, H / 2, 920, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
+    const title = this.add.text(W / 2, 18, "Works & Days", { ...font, fontSize: "20px" }).setOrigin(0.5, 0);
+    const col = (lines: string[], x: number) => this.add.text(x, 52, lines.join("\n"), { ...font, fontSize: "12.5px", lineSpacing: 2, wordWrap: { width: 420 } });
+    const lt = col(left, W / 2 - 444), rt = col(right, W / 2 + 14);
+    const foot = this.add.text(W / 2, H - 26, "Click or press H to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);
+    const ht = this.add.container(0, 0, [title, lt, rt, foot]);
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
     const closeHelp = () => { if (this.help.visible) { this.help.setVisible(false); this.modal = !!this.inv; } };
@@ -3817,9 +3831,12 @@ class UIScene extends Phaser.Scene {
   drawBars() {
     const g = this.bars; g.clear();
     const x = W - 300, y0 = 22;
+    const flash = G.spentFlash, since = flash ? performance.now() - flash.at : 1e9;
     const bar = (label: string, y: number, frac: number, color: number) => {
       g.fillStyle(0x3a2c22).fillRect(x + 70, y, 210, 11);
       g.fillStyle(color).fillRect(x + 70, y, 210 * Math.max(0, Math.min(1, frac)), 11);
+      // The element you just ran dry of blinks, so you can see what you are waiting on.
+      if (flash && flash.el === label && since < 900 && Math.floor(since / 150) % 2 === 0) g.lineStyle(2, 0xfff3c0, 1).strokeRect(x + 69, y - 1, 212, 13);
       if (!this.labels[label]) this.labels[label] = this.add.text(x, y - 3, label, { fontFamily: FONT, fontSize: "13px", color: "#f2e6c9" });
     };
     bar("Fatigue", y0, G.data.fatigue / 100, G.exhausted ? 0xb02a3a : 0xc98e62);
@@ -4484,7 +4501,7 @@ class UIScene extends Phaser.Scene {
 
   makeRecipe(r: (typeof RECIPES)[number]) {
     const heavy = r.at && r.at !== "hand";
-    if (labor(heavy ? { Fire: 1 } : {}, heavy ? 2 : 1, "Techne") === null) return;
+    if (labor(heavy ? EFFORT.station : EFFORT.hand, heavy ? 2 : 1, "Techne") === null) return;
     for (const [id, n] of r.needs) G.removeItem(id, n);
     const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
     let q: number | undefined, note = "";

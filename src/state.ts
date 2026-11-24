@@ -1,7 +1,7 @@
 import { START_CURRENCIES, type Currency, favorLabel } from "./gods";
 import { SIGNS, SIGN_DAYS, MAGIC_FINDS, type SignEffect, DREAMS, MOROS_DREAMS, OMEN_MEANING } from "./omens";
 import {
-  MONTHS, WHEEL, START_ARETAI, essencePools, DAYLIGHT_REAL_SECONDS, rollWeather, WEATHER_WORD, type Weather,
+  MONTHS, WHEEL, START_ARETAI, essencePools, ESSENCE, DAYLIGHT_REAL_SECONDS, rollWeather, WEATHER_WORD, type Weather,
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
   ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
@@ -111,6 +111,8 @@ export class GameState {
   data: SaveData;
   essence: Essence;
   essenceMax: Essence;
+  /** The element you last ran dry of, for the HUD to blink (not saved). */
+  spentFlash?: { el: string; at: number };
   messages: { text: string; t: number }[] = [];
 
   constructor(data?: SaveData) {
@@ -306,9 +308,10 @@ export class GameState {
     const hours = realSeconds / this.secondsPerClockHour;
     this.data.clock += hours;
     this.addFatigue(hours * 1.0); // being awake wears on you slowly
-    // Essence refills from empty to full in about 5 seconds.
+    // Essence refills from empty in ESSENCE.refillSeconds, slower the wearier you are.
+    const rate = (1 - ESSENCE.tiredSlowdown * (this.data.fatigue / 100)) / ESSENCE.refillSeconds;
     for (const k of Object.keys(this.essence) as (keyof Essence)[]) {
-      this.essence[k] = Math.min(this.essenceMax[k], this.essence[k] + (this.essenceMax[k] / 5) * realSeconds);
+      this.essence[k] = Math.min(this.essenceMax[k], this.essence[k] + this.essenceMax[k] * rate * realSeconds);
     }
     return this.data.clock >= this.collapseClock;
   }
