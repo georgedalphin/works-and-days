@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
+import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS } from "./data";
 import { MOROS_DREAMS } from "./omens";
@@ -110,12 +111,14 @@ function rollFind(table: keyof typeof FIND_TABLES, chance: number): boolean {
   const id = pickFrom(FIND_TABLES[table]), lid = id.toLowerCase();
   const first = (G.data.lore.tier[lid] ?? 0) < 1;
   if (first) G.data.lore.tier[lid] = 1;
+  SOUND.sfx("find");
   G.say(`A find! ${ITEMS[id].desc} ${give(id, 1, 3)}${first ? " (New in your lore book.)" : ""}`);
   return true;
 }
 
 function give(id: string, qty: number, q?: number): string {
   const left = G.addItem(id, qty, q);
+  if (qty - left > 0) SOUND.sfx("pickup");
   if (left > 0) G.say(`Your hands are full: ${left} ${ITEMS[id].name} left on the ground.`);
   return `+${qty - left} ${q && q > 1 ? QUALITY[q] + " " : ""}${ITEMS[id].name}`;
 }
@@ -355,7 +358,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.updateFocus();
     if (this.ambience) { this.maybeSign(dt); this.maybeOmen(dt); }
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
-      if (!bow) { this.gesture("act"); this.useItem(); }
+      if (!bow) { this.gesture("act"); const tool = G.selectedItem?.id; if (tool === "axe" || tool === "mattock" || tool === "hoe" || tool === "sickle") SOUND.sfx("chop"); this.useItem(); }
       else if (!this.canHunt) G.say("Not indoors.");
     }
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.investigate();
@@ -395,6 +398,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** A creature lands a blow: Fatigue, a knock back, and if you were already spent, you fall. */
   struck(a: Animal) {
+    SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
     const dmg = Math.max(1, d.damage - (G.data.health - 4)); // Health from character creation
@@ -639,6 +643,7 @@ abstract class PlayScene extends Phaser.Scene {
   }
 
   loose(tx0: number, ty0: number) {
+    SOUND.sfx("loose");
     if (this.cooldown > 0) return;
     if (G.count("Arrow") <= 0) { G.say("No arrows left. Craft more from wood and stone (C)."); return; }
     const b = labor({ Air: 2 }, 0.5, "Ourania"); if (b === null) return;
@@ -727,6 +732,7 @@ abstract class PlayScene extends Phaser.Scene {
       this.time.delayedCall(60000, () => img.destroy());
     }
     const known = G.lore(s.id) >= 1;
+    SOUND.sfx("sign");
     G.say(known ? `${s.sight} ${s.meaning} (For ${SIGN_DAYS} days, ${EFFECT_WORD[s.effect]}.)` : `${s.sight} (Press Q while it lasts to study it.)`);
   }
 
@@ -756,6 +762,7 @@ abstract class PlayScene extends Phaser.Scene {
     const gnosis = (G.data.aretai.Gnosis ?? 3) + 2 + G.lore("augury"), rRoll = 1 + Math.floor(Math.random() * 12);
     const right = rRoll <= gnosis, belief = right ? good : !good;
     G.data.omen.read = right;
+    SOUND.sfx("omen");
     this.skySubject = { id: "augury", until: this.time.now + 12000 };
     G.say(`${belief ? d.good : d.bad} An omen. ${OMEN_MEANING[d.god][belief ? 0 : 1]}`);
   }
@@ -1018,6 +1025,9 @@ class TitleScene extends Phaser.Scene {
     this.input.keyboard!.on("keydown-SPACE", () => options[sel].go());
     this.add.text(W / 2, H - 100, "Click the game first so it can hear your keys. Your saved life lives in this browser only.", { fontFamily: FONT, fontSize: "14px", color: "#8d877b" }).setOrigin(0.5);
   }
+  /** The title screen has its lyre and a soft wind (once a key or click lets sound begin). */
+  update(_t: number, dms: number) { SOUND.update(dms / 1000, { scene: "Title", terrain: 3, season: "Summer", day: true, dusk: false, weather: "clear", danger: false }); }
+
   begin(state: GameState) {
     if (this.starting) return; // a click and a key in the same frame must not start the game twice
     this.starting = true;
@@ -3308,6 +3318,8 @@ class UIScene extends Phaser.Scene {
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
       if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
+      if (e.key === "m" || e.key === "M") G.say(SOUND.toggleMute() ? "Sound off (M to turn it back on)." : "Sound on.");
+      if (e.key === "n" || e.key === "N") G.say(SOUND.toggleMusic() ? "Music on." : "Music off (N to bring it back). The world still sounds.");
       if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook) { if (this.craft) this.closeCraft(); else this.openCraft(); }
       if ((e.key === "f" || e.key === "F") && !this.talkPanel) { if (this.sheet === "gods") this.closeSheet(); else this.openSheet("gods"); }
       if ((e.key === "p" || e.key === "P") && !this.talkPanel) { if (this.sheet === "self") this.closeSheet(); else this.openSheet("self"); }
@@ -3335,6 +3347,7 @@ class UIScene extends Phaser.Scene {
       "Handwork: C (arrows from wood and stone)",
       "Forage: plants show what they bear only once you know them (Q to investigate), then gather with Space.",
       "Gods: F shows favor with the Twelve; pray and offer at altars (E). P: who you are (birth, Aretai, currencies, Health and Stealth).",
+      "Sound: M mutes everything; N turns the music off and on.",
       "Signs and omens: Hesiod's signs mark the farming year (study one with Q as it happens, and it helps for 4 days). Birds on your right are fair omens, on your left a warning; Pneuma notices them, Gnosis reads them. Watch for glints: rare finds go in your lore book.",
       "Far from home (3 or more screens out) monsters wander, rarely: a centaur in the forests, the dead in the hills at night, a lovely stranger in the valleys at dusk. Q to study them.",
       "Caves: bring torches (C). In the dark every action is at -3. Something keeps the deepest chamber.",
@@ -3381,6 +3394,10 @@ class UIScene extends Phaser.Scene {
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     this.date.setText(`${G.dateLabel()} · ${G.moon} · ${WEATHER_WORD[G.data.weather]}`);
+    const play = this.scene.get(G.data.scene) as PlayScene | undefined;
+    const terrain = G.data.scene === "Wild" ? (G.data.screens[`${G.data.wx},${G.data.wy}`]?.terrain ?? 3) : G.data.scene === "Cave" ? 99 : 3;
+    const danger = !!play?.animals?.some((a) => (a.state === "charge" || a.state === "recoil") && a.sprite.active && Math.hypot(a.sprite.x - play.player.x, a.sprite.y - play.player.y) < 260);
+    SOUND.update(dt, { scene: G.data.scene, terrain, season: G.month.season, day: G.isDay, dusk: G.data.clock >= G.daylight - 1.2 && G.data.clock < G.daylight + 1, weather: G.data.weather, danger });
     this.drawRain(dt);
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
@@ -3497,6 +3514,7 @@ class UIScene extends Phaser.Scene {
 
   /** A conversation card: who, how they feel about you, what they say, and what you can do. */
   showTalk(title: string, sub: string, text: string, opts: { label: string; fn: () => void }[], img?: string) {
+    SOUND.sfx("talk");
     this.talkPanel?.destroy();
     if (this.inv) this.toggleInventory();
     if (this.help.visible) this.help.setVisible(false);
@@ -4287,6 +4305,9 @@ class UIScene extends Phaser.Scene {
 }
 
 // ------------------------------------------------------------------ boot the game
+// Sound can only begin after the player presses a key or clicks.
+for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => SOUND.start());
+(window as unknown as { SOUND: typeof SOUND }).SOUND = SOUND; // for testing
 (window as unknown as { game: Phaser.Game }).game = new Phaser.Game({
   type: Phaser.AUTO,
   width: W, height: H,
