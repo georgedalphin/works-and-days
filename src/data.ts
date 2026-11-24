@@ -100,6 +100,8 @@ export const ITEMS: Record<string, ItemDef> = {
   axe: { id: "axe", name: "Bronze axe", greek: "pelekys", kind: "tool", desc: "Fells saplings, and trees with several swings." },
   bow: { id: "bow", name: "Hunting bow", greek: "toxon", kind: "tool", desc: "Hold Space to draw and aim, click where you want the arrow to land. Arrows strike only where they fall." },
   mattock: { id: "mattock", name: "Mattock", greek: "makele", kind: "tool", desc: "Breaks and lifts stones." },
+  spear: { id: "spear", name: "Spear", greek: "dory", kind: "tool", desc: "Ash shaft, bronze point. Click to thrust: it reaches farther than a sword, but bites a little less. Hold the button (or Space) to aim, release to throw; then go and fetch it." },
+  sword: { id: "sword", name: "Bronze sword", greek: "xiphos", kind: "tool", desc: "A leaf-bladed sword from Lykos' forge. Click to strike: close in, but it hits hardest." },
   Wood: { id: "Wood", value: 1, name: "Wood", kind: "material", desc: "Timber for building and fuel." },
   Stone: { id: "Stone", value: 1, name: "Stone", kind: "material", desc: "Fieldstone for walls and building." },
   Fiber: { id: "Fiber", name: "Fiber", kind: "material", desc: "Plant fiber for cord and thatch, and fodder for the goats." },
@@ -338,7 +340,15 @@ export const PEACE_FOOD: Record<string, string[]> = {
   jackal: ["Meat"], bear: ["Honey", "Meat"], crab: [], scorpion: [], // the bear: "an offering of food left and abandoned"
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
-export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1 };
+export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1, spear: 2, sword: 3 };
+/** How far a blow reaches, in pixels from you to the creature (26 for anything not listed). */
+export const MELEE_REACH: Record<string, number> = { spear: 42, sword: 24 };
+/** Weapons are made for fighting: +1 to land a blow. */
+export const WEAPONS = ["spear", "sword"];
+/** The thrown spear: shorter range than the bow, a heavier blow, and only the one. */
+export const SPEAR_THROW = { range: 120, speed: 210, damage: 3, holdMs: 220 };
+/** The smith forges a sword to order. */
+export const SWORD_ORDER = { silver: 80, copper: 2 };
 
 // ---- the vineyard and the vat ----
 export const VAT_REPAIR: [string, number][] = [["Stone", 6], ["Wood", 4]];

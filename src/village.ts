@@ -93,6 +93,8 @@ export interface Upgrade { tool: string; level: number; name: string; cost: numb
 export const UPGRADES: Upgrade[] = [
   { tool: "mattock", level: 2, name: "Bronze-shod mattock", cost: 60, wood: 5, desc: "Breaks boulders for 4 stone." },
   { tool: "axe", level: 2, name: "Fine bronze axe", cost: 40, wood: 4, desc: "Fells an oak in two blows." },
+  // Not an upgrade: a sword forged to order (see smithOptions). Level 1, so it never shows as an upgrade.
+  { tool: "sword", level: 1, name: "Bronze sword", cost: 80, wood: 0, desc: "Close in, but it hits hardest." },
 ];
 export const toolName = (id: string, level: number, base: string) => UPGRADES.find((u) => u.tool === id && u.level === level)?.name ?? base;
 

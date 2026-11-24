@@ -592,6 +592,8 @@ export function makeTextures(scene: Phaser.Scene) {
 
   // An arrow in flight (pointing right; rotated as it flies) and one stuck in the ground.
   canvasTex(scene, "arrow", 10, 3, (c) => { px(c, 0, 1, 8, 1, "#a87443"); px(c, 8, 0, 2, 3, "#8d877b"); px(c, 0, 0, 2, 1, "#e8e2d0"); px(c, 0, 2, 2, 1, "#e8e2d0"); });
+  canvasTex(scene, "spearFly", 20, 3, (c) => { px(c, 0, 1, 16, 1, "#9c7445"); px(c, 16, 0, 3, 3, "#c98a55"); px(c, 19, 1, 1, 1, "#e8c48a"); px(c, 0, 0, 1, 3, "#c98a55"); });
+  canvasTex(scene, "spearStuck", 7, 18, (c) => { px(c, 3, 3, 1, 14, "#9c7445"); px(c, 2, 0, 3, 3, "#c98a55"); px(c, 3, 0, 1, 1, "#e8c48a"); px(c, 1, 16, 5, 2, "rgba(0,0,0,0.25)"); });
   canvasTex(scene, "arrowStuck", 5, 8, (c) => { px(c, 2, 0, 1, 7, "#a87443"); px(c, 1, 0, 1, 2, "#e8e2d0"); px(c, 3, 0, 1, 2, "#e8e2d0"); px(c, 1, 7, 3, 1, "rgba(0,0,0,0.25)"); });
   canvasTex(scene, "pithos", 12, 16, (c) => {
     px(c, 2, 2, 8, 13, "#b5643b"); px(c, 1, 5, 10, 7, "#c4703f"); px(c, 3, 0, 6, 3, "#9c5532"); px(c, 2, 8, 8, 1, "#2a1d14");
@@ -599,7 +601,7 @@ export function makeTextures(scene: Phaser.Scene) {
 }
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -707,6 +709,8 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "spear": for (let i = 0; i < 11; i++) px(c, o + 2 + i, 13 - i, 1, 1, "#9c7445"); px(c, o + 12, 1, 3, 3, "#c98a55"); px(c, o + 14, 0, 2, 2, "#e8c48a"); px(c, o + 1, 13, 2, 2, "#c98a55"); break;
+    case "sword": for (let i = 0; i < 8; i++) px(c, o + 6 + i, 9 - i, 2, 2, "#d8c890"); px(c, o + 7, 6, 1, 1, "#f4ecc8"); px(c, o + 3, 9, 5, 2, "#8a5a2c"); px(c, o + 5, 7, 2, 6, "#8a5a2c"); px(c, o + 2, 12, 3, 3, "#5e4026"); px(c, o + 1, 14, 2, 2, "#c98a55"); break;
     case "Workbench": px(c, o + 1, 5, 14, 3, "#9c7445"); px(c, o + 1, 5, 14, 1, "#b88d58"); px(c, o + 2, 8, 2, 6, "#5e4026"); px(c, o + 12, 8, 2, 6, "#5e4026"); px(c, o + 4, 3, 4, 2, "#8a8780"); break;
     case "Kiln": px(c, o + 3, 6, 10, 9, "#b0703f"); px(c, o + 5, 3, 6, 3, "#b0703f"); px(c, o + 7, 1, 2, 2, "#6b5a4e"); px(c, o + 6, 10, 4, 4, "#2a1d14"); px(c, o + 7, 12, 2, 2, "#f2c14e"); px(c, o + 2, 14, 12, 1, "#8a8780"); break;
     case "Loom": px(c, o + 2, 1, 2, 14, "#6b4a2b"); px(c, o + 12, 1, 2, 14, "#6b4a2b"); px(c, o + 2, 1, 12, 2, "#8a5f35"); for (let x = 5; x <= 11; x += 2) px(c, o + x, 3, 1, 9, "#e9e1cf"); px(c, o + 4, 3, 8, 4, "#c4703f"); for (let x = 4; x <= 11; x += 2) px(c, o + x, 12, 2, 2, "#a8653a"); break;

@@ -9,7 +9,7 @@ import { MOROS_DREAMS } from "./omens";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, MELEE_REACH, WEAPONS, SPEAR_THROW, SWORD_ORDER, START_LIFE_THREAD } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
@@ -194,6 +194,7 @@ abstract class PlayScene extends Phaser.Scene {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
     this.spots = []; inDark = false;
     this.placedObjs = []; this.ghost = undefined;
+    this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.mouseIn = true;
@@ -203,12 +204,16 @@ abstract class PlayScene extends Phaser.Scene {
     this.input.on("gameover", () => { this.mouseIn = true; });
     this.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
       this.mouseUsed = true;
-      if (this.aiming) { if (p.leftButtonDown()) { const w = p.positionToCamera(this.cameras.main) as Phaser.Math.Vector2; this.loose(w.x, w.y); } return; }
+      if (this.aiming) { if (p.leftButtonDown()) { if (this.holdingSpear) this.releaseSpear(); else { const w = p.positionToCamera(this.cameras.main) as Phaser.Math.Vector2; this.loose(w.x, w.y); } } return; }
       // Like Stardew: left click works with what you hold, right click interacts. Clicks on the hotbar belong to it.
       if (this.paused || p.y > HOTBAR_Y - 8) return;
       if (p.rightButtonDown()) this.interactNow();
-      else if (p.leftButtonDown() && G.selectedItem?.id !== "bow") this.useNow();
+      else if (p.leftButtonDown() && G.selectedItem?.id !== "bow") {
+        if (this.holdingSpear && this.canHunt) { this.spearHold = performance.now(); this.spearBy = "mouse"; } // a tap thrusts, a hold aims to throw
+        else this.useNow();
+      }
     });
+    this.input.on("pointerup", () => { if (this.spearBy === "mouse") this.releaseSpear(); });
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keys = this.input.keyboard!.addKeys("W,A,S,D,E,Q,SPACE,SHIFT") as Record<string, Phaser.Input.Keyboard.Key>;
   }
@@ -531,6 +536,11 @@ abstract class PlayScene extends Phaser.Scene {
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
     this.ambience?.update(dt, this.paused);
+    if (!this.spearChecked) { // your spear, if it lies where you left it
+      this.spearChecked = true;
+      const s = G.data.spearAt;
+      if (s && s.k === this.groundKey()) this.dropItem("spear", 1, s.x, s.y, "spearStuck");
+    }
     this.movePlayer(dt);
     if (this.paused) { ui(this).prompt(null); this.focusGlow?.setVisible(false); this.focusTag?.setVisible(false); this.focusMarks?.clear(); return false; }
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
@@ -541,14 +551,18 @@ abstract class PlayScene extends Phaser.Scene {
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.interactNow();
     const bow = G.selectedItem?.id === "bow";
-    this.aiming = bow && this.canHunt && this.keys.SPACE.isDown;
+    if (this.spearHold && !this.holdingSpear) { this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; }
+    if (this.spearHold && !this.spearAiming && performance.now() - this.spearHold >= SPEAR_THROW.holdMs) this.spearAiming = true;
+    this.aiming = (bow && this.canHunt && this.keys.SPACE.isDown) || this.spearAiming;
     if (this.aiming) this.aimAtPointer();
     this.drawAim();
     this.cooldown = Math.max(0, this.cooldown - dt);
     this.updateFocus(); this.updateGhost();
     if (this.ambience) { this.maybeSign(dt); this.maybeOmen(dt); }
+    if (this.spearBy === "key" && Phaser.Input.Keyboard.JustUp(this.keys.SPACE)) this.releaseSpear();
     if (Phaser.Input.Keyboard.JustDown(this.keys.SPACE)) {
-      if (!bow) this.useNow();
+      if (this.holdingSpear && this.canHunt) { this.spearHold = performance.now(); this.spearBy = "key"; }
+      else if (!bow) this.useNow();
       else if (!this.canHunt) G.say("Not indoors.");
     }
     if (Phaser.Input.Keyboard.JustDown(this.keys.Q)) this.studyNow();
@@ -619,7 +633,11 @@ abstract class PlayScene extends Phaser.Scene {
     const torch = G.selectedItem?.id === "Torch";
     if (tool && !(tool in MELEE)) return false;
     const a = this.creatureAhead();
-    if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > 26) return false;
+    const reach = (tool ? MELEE_REACH[tool] : undefined) ?? 26, weapon = !!tool && WEAPONS.includes(tool);
+    if (!a || a.kind === "goat" || Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > reach) {
+      if (weapon && !(a && a.kind === "goat")) { SOUND.sfx("loose"); if (a && a.kind !== "goat") G.say(`Out of reach: the ${tool === "sword" ? "sword wants you close in" : "spear reaches only so far"}.`); return true; } // a swing at the air
+      return false;
+    }
     if (torch) tool = "torch";
     if (a.kind === "eidolon" && tool !== "torch") { G.say("Your blow passes through the shade like smoke. Only fire touches the dead."); return true; }
     if (a.kind === "skeleton" && a.state === "dead") return false;
@@ -631,13 +649,13 @@ abstract class PlayScene extends Phaser.Scene {
       return true;
     }
     const thymos = G.data.aretai.Thymos ?? 3;
-    const target = thymos + 3 + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
+    const target = thymos + 3 + (weapon ? 1 : 0) + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
     const q = QUARRY[a.kind];
     if (a.hp < 0) a.hp = q.hp;
     // Bare bone shrugs off cuts and shatters under crushing blows (Terata).
-    const dmg = tool === "torch" ? 1 : a.kind === "skeleton" ? ({ mattock: 2, axe: 1, sickle: 0 } as Record<string, number>)[tool] ?? 1 : MELEE[tool];
+    const dmg = tool === "torch" ? 1 : a.kind === "skeleton" ? ({ mattock: 2, axe: 1, sickle: 0, spear: 1, sword: 1 } as Record<string, number>)[tool] ?? 1 : MELEE[tool];
     if (dmg === 0) { G.say(`Your ${tool} skitters off bare bone. It needs a crushing blow.`); return true; }
     a.hp -= dmg;
     if (a.kind === "empousa" && a.state !== "charge" && a.state !== "recoil") { a.charge(6); a.sprite.setTexture("empousaTrue", 0); }
@@ -785,17 +803,86 @@ abstract class PlayScene extends Phaser.Scene {
   aiming = false;
   aimGfx!: Phaser.GameObjects.Graphics;
   cooldown = 0;
-  arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number; from?: Animal }[] = [];
+  arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number; from?: Animal; spear?: boolean }[] = [];
   pickups: { id: string; qty: number; img: Phaser.GameObjects.Image }[] = [];
   get canHunt() { return true; }
 
-  /** Where the pointer is in the world, pulled in to the bow's range. */
+  /** Where the pointer is in the world, pulled in to the bow's range (or the spear's). */
   aimPoint(): [number, number] {
     const w = this.input.activePointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
-    const px = this.player.x, py = this.player.y + 4;
+    const px = this.player.x, py = this.player.y + 4, range = this.holdingSpear ? SPEAR_THROW.range : BOW_RANGE;
     let dx = w.x - px, dy = w.y - py; const d = Math.hypot(dx, dy);
-    if (d > BOW_RANGE) { dx *= BOW_RANGE / d; dy *= BOW_RANGE / d; }
+    if (d > range) { dx *= range / d; dy *= range / d; }
     return [px + dx, py + dy];
+  }
+
+  // ---------------------------------------------------------------- the spear
+  spearHold = 0; // when the button went down with the spear in hand
+  spearBy: "" | "mouse" | "key" = "";
+  spearAiming = false;
+  spearChecked = false;
+  get holdingSpear() { return G.selectedItem?.id === "spear"; }
+  /** Where things you drop and leave are remembered for this map. */
+  groundKey() { return this.placeKey() || this.scene.key; }
+  /** The button comes up: a tap was a thrust, a hold was a throw. */
+  releaseSpear() {
+    const threw = this.spearAiming;
+    this.spearHold = 0; this.spearBy = ""; this.spearAiming = false;
+    if (this.paused) return;
+    if (threw) { this.throwSpear(); this.aiming = false; this.drawAim(); } else this.useNow();
+  }
+  /** How wide a thrown spear may stray: Thymos and Ares steady the arm; distance, weariness and the dark don't. */
+  spearSpread(dist: number) {
+    const thy = G.data.aretai.Thymos ?? 3;
+    let r = Math.max(3, 24 - 2 * thy) * (0.45 + dist / SPEAR_THROW.range);
+    if (G.patron?.aretai === "Thymos") r *= 0.75;
+    r *= Math.max(0.5, 1 - 0.08 * G.boon("Ares"));
+    if (G.exhausted) r *= 1.4;
+    if (inDark) r *= 1.6;
+    return r;
+  }
+  throwSpear() {
+    if (!this.holdingSpear || !this.canHunt) return;
+    const b = labor({ Fire: 2 }, 1, "Thymos"); if (b === null) return;
+    const [tx, ty] = this.aimPoint();
+    const sx = this.player.x, sy = this.player.y + 4;
+    const d = Math.hypot(tx - sx, ty - sy), r = this.spearSpread(d);
+    const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
+    const lx = tx + Math.cos(a) * rr, ly = ty + Math.sin(a) * rr;
+    G.removeItem("spear", 1);
+    this.gesture("act"); SOUND.sfx("loose");
+    const img = this.add.image(sx, sy - 8, "spearFly").setDepth(100001);
+    const shadow = this.add.ellipse(sx, sy, 12, 2, 0x000000, 0.25).setDepth(1);
+    this.arrows.push({ img, shadow, sx, sy: sy - 8, lx, ly, t: 0, T: 0.15 + Math.hypot(lx - sx, ly - sy) / SPEAR_THROW.speed, h: d * 0.16 + 5, spear: true });
+  }
+  /** Where the spear comes down: a heavy blow if it finds a creature, and then it lies there until you fetch it. */
+  landSpear(x: number, y: number) {
+    const hit = this.animals.find((a) => a.state !== "dead" && a.state !== "gone" && a.sprite.visible && a.kind !== "goat"
+      && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= QUARRY[a.kind].size + 3);
+    if (hit && hit.kind === "eidolon") { G.say("Your spear passes through the shade and clatters on the stone."); hit.charge(5); }
+    else if (hit) {
+      const q = QUARRY[hit.kind];
+      if (hit.hp < 0) hit.hp = q.hp;
+      const dmg = hit.kind === "skeleton" ? 1 : SPEAR_THROW.damage;
+      hit.hp -= dmg;
+      if (hit.hp <= 0) { G.say(`Your spear takes the ${beast(hit.kind)} cleanly.`); this.kill(hit); this.creatureEvent(hit, "slain"); }
+      else {
+        hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
+        if (hit.kind === "skeleton") { G.say("Your spear cracks a rib, no more. Bone wants a crushing blow."); if (hit.state !== "charge") hit.charge(40); }
+        else if (this.aggressionRoll(hit, 3)) G.say(`The spear strikes home! The wounded ${beast(hit.kind)} turns on you!`);
+        else if (isMonster(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`The spear strikes home! The ${beast(hit.kind)} turns on you!`); }
+        else { hit.bolt({ x, y: y - 20 }); G.say(`The spear strikes home! The ${beast(hit.kind)} is badly hurt and runs.`); }
+      }
+    } else {
+      for (const a of this.animals) if (a.kind !== "goat" && a.state !== "dead" && a.state !== "gone" && Math.hypot(a.sprite.x - x, a.sprite.y - y) < 48) a.bolt({ x, y });
+    }
+    // It comes to rest on open ground: if it fell in brush or water, where it last skipped.
+    let dx = x, dy = y;
+    const ux = this.player.x - x, uy = this.player.y + 4 - y, ul = Math.hypot(ux, uy) || 1;
+    for (let i = 0; i < 16 && !this.openGround(dx, dy); i++) { dx += (ux / ul) * 6; dy += (uy / ul) * 6; }
+    this.dropItem("spear", 1, dx, dy, "spearStuck");
+    G.data.spearAt = { k: this.groundKey(), x: Math.round(dx), y: Math.round(dy) };
+    if (!hit) G.say("Your spear thuds into the ground. Go and fetch it.");
   }
 
   aimAtPointer() {
@@ -828,7 +915,7 @@ abstract class PlayScene extends Phaser.Scene {
     const d = Math.hypot(tx - sx, ty - sy), h = d * 0.22 + 6;
     g.fillStyle(0x2a1d14, 0.55);
     for (let i = 1; i < 12; i++) { const u = i / 12; g.fillRect(sx + (tx - sx) * u, sy + (ty - sy) * u - 4 * h * u * (1 - u), 1, 1); }
-    const r = this.spread(d);
+    const r = this.holdingSpear ? this.spearSpread(d) : this.spread(d);
     g.lineStyle(1, this.cooldown > 0 ? 0x8d877b : 0xf2c14e, 0.9).strokeCircle(tx, ty, r);
     g.fillStyle(0xf2c14e, 1).fillRect(tx - 1, ty, 3, 1).fillRect(tx, ty - 1, 1, 3);
   }
@@ -862,7 +949,7 @@ abstract class PlayScene extends Phaser.Scene {
       const z = 4 * a.h * u * (1 - u), dz = (4 * a.h * (1 - 2 * u)) / a.T;
       a.img.setPosition(gx, gy - z).setRotation(Math.atan2((a.ly - a.sy) / a.T - dz, (a.lx - a.sx) / a.T));
       a.shadow.setPosition(gx, gy);
-      if (u >= 1) { this.arrows.splice(this.arrows.indexOf(a), 1); a.img.destroy(); a.shadow.destroy(); if (a.from) this.arrowAtYou(a.lx, a.ly, a.from); else this.land(a.lx, a.ly); }
+      if (u >= 1) { this.arrows.splice(this.arrows.indexOf(a), 1); a.img.destroy(); a.shadow.destroy(); if (a.from) this.arrowAtYou(a.lx, a.ly, a.from); else if (a.spear) this.landSpear(a.lx, a.ly); else this.land(a.lx, a.ly); }
     }
   }
 
@@ -1135,7 +1222,8 @@ abstract class PlayScene extends Phaser.Scene {
       if (Math.hypot(p.img.x - this.player.x, p.img.y - (this.player.y + 4)) > 12) continue;
       const left = G.addItem(p.id, p.qty);
       if (left === p.qty) continue; // no room
-      G.say(`+${p.qty - left} ${ITEMS[p.id].name}`);
+      if (p.id === "spear") { G.data.spearAt = null; G.say("You pull your spear out of the ground."); }
+      else G.say(`+${p.qty - left} ${ITEMS[p.id].name}`);
       if (left > 0) { p.qty = left; continue; }
       p.img.destroy(); this.pickups.splice(this.pickups.indexOf(p), 1);
     }
@@ -3642,6 +3730,7 @@ class UIScene extends Phaser.Scene {
       "Crops: choose seeds and press Space on tilled soil; water daily; harvest with Space when ripe.",
       "Watered every night, or sown in the crop's patron hour, it grows finer (★). Trade at the pithos.",
       "Goats: pet and milk them daily (E); keep the manger in Fiber and the trough in water.",
+      "Spear: click to thrust (long reach); hold to aim, release to throw, then fetch it. Sword (from Lykos): short reach, hardest blow.",
       "Crafting (C): handwork anywhere. Make a workbench, hold it and click to set it down; E at it for more.",
       "The hive gives honey every few days. Wild creatures bolt if you run at them.",
       "",
@@ -3910,6 +3999,16 @@ class UIScene extends Phaser.Scene {
         G.data.silver -= price; G.removeItem("Wood", u.wood); G.removeItem(u.tool, 1);
         G.data.smithJob = { tool: u.tool, level: u.level, ready: G.dayNumber + 1 };
         this.talkTo(v, `"Leave it with me. Come back tomorrow."\n\n(${u.desc}${discount < 1 ? " As a friend, you paid a fifth less." : ""})`);
+      } });
+    }
+    if (G.count("sword") <= 0) {
+      const price = Math.round(SWORD_ORDER.silver * discount);
+      const ok = G.data.silver >= price && G.count("Copper") >= SWORD_ORDER.copper;
+      opts.push({ label: `Forge me a sword: ${money(price)} and ${SWORD_ORDER.copper} copper ore${ok ? "" : " (you can't afford it yet)"}`, fn: () => {
+        if (!ok) { this.talkTo(v, `"A sword? ${money(price)}, and bring me ${SWORD_ORDER.copper} lumps of copper ore. I've tin, but copper I have to beg for."`); return; }
+        G.data.silver -= price; G.removeItem("Copper", SWORD_ORDER.copper);
+        G.data.smithJob = { tool: "sword", level: 1, ready: G.dayNumber + 1 };
+        this.talkTo(v, `"A leaf-bladed xiphos, then, the old way. Come back tomorrow, and don't go looking for trouble with it."`);
       } });
     }
   }
