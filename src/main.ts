@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
+import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
+import { WEATHER_WORD } from "./data";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
   CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, START_LIFE_THREAD } from "./data";
@@ -187,6 +189,7 @@ abstract class PlayScene extends Phaser.Scene {
   makePlayer(x: number, y: number) {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
+    this.ambience = undefined;
     this.poseT = 0; this.poseKind = ""; this.walkT = 0; this.trunks = undefined; this.trunkAt.clear(); this.rustleT = 0; this.thornSaid = false;
     this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
     this.focusMarks = this.add.graphics().setDepth(99981);
@@ -321,6 +324,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
+    this.ambience?.update(dt, this.paused);
     this.movePlayer(dt);
     if (this.paused) { ui(this).prompt(null); this.focusGlow?.setVisible(false); this.focusTag?.setVisible(false); this.focusMarks?.clear(); return false; }
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
@@ -659,6 +663,9 @@ abstract class PlayScene extends Phaser.Scene {
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
   /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
   groundSpeed() { return 1; }
+
+  /** Butterflies, swallows, smoke, mist: the small life of the place (outdoor scenes only). */
+  ambience?: Ambience;
 
   // ---------------------------------------------------------------- trunks and bushes
   trunks?: Phaser.Physics.Arcade.StaticGroup;
@@ -1241,11 +1248,14 @@ class FarmScene extends PlayScene {
     this.map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: MW, height: MH });
     const ts = this.map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = this.map.createBlankLayer("ground", ts)!;
+    this.details = this.map.createBlankLayer("details", ts)!;
     this.objects = this.map.createBlankLayer("objects", ts)!;
     this.groundLayer.putTilesAt(ground, 0, 0);
+    this.details.putTilesAt(scatterDetails(3, 0xfa53, objs, (x, y) => ground[y][x] !== this.baseGround[y][x] || ground[y][x] === T.PATH || inPen(x, y), 0.06), 0, 0);
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID);
     this.objects.setDepth(1);
+    varyLayers(G, this.groundLayer, this.objects);
 
     // The hut, the well, the storage jar and the signposts.
     const hut = this.add.image(HUT.tx * TILE, HUT.ty * TILE, "hut").setOrigin(0, 0).setDepth((HUT.ty + 3.4) * TILE);
@@ -1255,6 +1265,7 @@ class FarmScene extends PlayScene {
       b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(w, h);
     };
     solid(hut.x + 32, hut.y + 38, 56, 30);
+    this.chimneys = [[hut.x + 46, hut.y + 6]];
     this.add.image(WELL.tx * TILE + 8, WELL.ty * TILE + 6, "well").setDepth(WELL.ty * TILE + 14);
     solid(WELL.tx * TILE + 8, WELL.ty * TILE + 10, 18, 10);
     const pithos = { x: (HUT.tx + 4.3) * TILE, y: (HUT.ty + 3) * TILE };
@@ -1315,6 +1326,7 @@ class FarmScene extends PlayScene {
     G.data.entry = "";
     G.data.scene = "Farm";
     this.makePlayer(sx, sy);
+    this.ambience = new Ambience(this, G, { outdoor: true, terrain: 3, layer: this.objects, chimneys: this.chimneys });
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.physics.add.collider(this.player, solids);
@@ -1651,10 +1663,13 @@ class FarmScene extends PlayScene {
     this.goTo("House");
   }
 
+  details?: Phaser.Tilemaps.TilemapLayer;
+  chimneys: [number, number][] = [];
   setGround(x: number, y: number, state: "tilled" | "wet" | null) {
+    if (state) this.details?.removeTileAt(x, y);
     const k = `${x},${y}`;
     if (state) G.data.ground[k] = state; else delete G.data.ground[k];
-    this.groundLayer.putTileAt(state === "wet" ? T.WET : state === "tilled" ? T.TILLED : this.baseGround[y][x], x, y);
+    this.groundLayer.putTileAt(state === "wet" ? T.WET : state === "tilled" ? T.TILLED : this.baseGround[y][x], x, y).tint = seasonGroundTint(G);
   }
 
   clearObject(x: number, y: number) {
@@ -1951,9 +1966,11 @@ class WildScene extends PlayScene {
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID).setDepth(1);
+    varyLayers(G, this.groundLayer, this.objects);
     this.targets = [];
     this.water = []; for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER) this.water.push([x, y]);
 
@@ -1969,6 +1986,7 @@ class WildScene extends PlayScene {
     if (e === "C") { sx = CAVE_AT.x * TILE + 8; sy = (CAVE_AT.y + 1.6) * TILE; }
     G.data.entry = ""; G.data.scene = "Wild";
     this.makePlayer(sx, sy);
+    this.ambience = new Ambience(this, G, { outdoor: true, terrain: this.rec.terrain, layer: this.objects });
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.wolvesOut = false;
@@ -2711,10 +2729,13 @@ class VillageScene extends PlayScene {
 
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: VW, height: VH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
-    map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    const vGround = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(3, 0x7111, objs, (x, y) => ground[y][x] === T.PATH, 0.05), 0, 0);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID).setDepth(1);
+    varyLayers(G, vGround, this.objects);
+    const chimneys: [number, number][] = [];
 
     const solids = this.physics.add.staticGroup();
     const solid = (x: number, y: number, w: number, h: number) => {
@@ -2726,6 +2747,7 @@ class VillageScene extends PlayScene {
     for (const b of BUILDINGS) {
       const img = this.add.image(b.tx * TILE, b.ty * TILE, b.key).setOrigin(0, 0).setDepth((b.ty + 3.3) * TILE);
       solid(img.x + b.w / 2, img.y + 38, b.w - 6, 30);
+      chimneys.push([img.x + b.w * 0.72, img.y + 6]);
       const doorX = img.x + b.w / 2, doorY = img.y + 56;
       if (b.who) {
         const v = VILLAGERS[b.who];
@@ -2759,6 +2781,7 @@ class VillageScene extends PlayScene {
     if (G.data.entry === "S") { sx = 20 * TILE + 8; sy = (VH - 1.5) * TILE; }
     G.data.entry = ""; G.data.scene = "Village";
     this.makePlayer(sx, sy);
+    this.ambience = new Ambience(this, G, { outdoor: true, terrain: 3, layer: this.objects, chimneys });
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.physics.add.collider(this.player, solids);
@@ -2820,6 +2843,22 @@ interface Cell { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Imag
 const HOTBAR_X = (W - (SLOT * 10 + GAP * 9)) / 2, HOTBAR_Y = H - SLOT - 14;
 
 class UIScene extends Phaser.Scene {
+  rainGfx?: Phaser.GameObjects.Graphics;
+  drops: { x: number; y: number; v: number }[] = [];
+  /** Rain falls across the screen outdoors, slanting a little. */
+  drawRain(dt: number) {
+    const on = G.data.weather === "rain" && ["Farm", "Wild", "Village"].includes(G.data.scene);
+    if (!this.rainGfx || !this.rainGfx.active) { this.rainGfx = this.add.graphics().setDepth(-1); this.drops = []; this.children.sendToBack(this.rainGfx); this.children.moveAbove(this.rainGfx, this.shade); }
+    this.rainGfx.clear();
+    if (!on) return;
+    while (this.drops.length < 140) this.drops.push({ x: Math.random() * W, y: Math.random() * H, v: 380 + Math.random() * 160 });
+    this.rainGfx.lineStyle(1, 0xc8d8ec, 0.45);
+    for (const d of this.drops) {
+      d.y += d.v * dt; d.x -= d.v * dt * 0.18;
+      if (d.y > H) { d.y = -10; d.x = Math.random() * (W + 60); }
+      this.rainGfx.lineBetween(d.x, d.y, d.x + 2, d.y - 9);
+    }
+  }
   modal = false;
   shade!: Phaser.GameObjects.Rectangle;
   date!: Phaser.GameObjects.Text;
@@ -2966,7 +3005,8 @@ class UIScene extends Phaser.Scene {
 
   update(_t: number, dms: number) {
     const dt = dms / 1000;
-    this.date.setText(`${G.dateLabel()} · ${G.moon}`);
+    this.date.setText(`${G.dateLabel()} · ${G.moon} · ${WEATHER_WORD[G.data.weather]}`);
+    this.drawRain(dt);
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
     this.purse.setText(`Purse: ${money(G.data.silver)}`);
@@ -2987,6 +3027,9 @@ class UIScene extends Phaser.Scene {
     if (c < 0.8) { col = 0xf2a6c4; a = 0.22 * (1 - c / 0.8); }
     else if (c >= day - 1.2 && c < day) { col = 0xd9732e; a = 0.25 * (1 - (day - c) / 1.2); }
     else if (c >= day) { col = 0x0b1630; a = Math.min(0.62, 0.3 + (c - day) * 0.12); }
+    // A grey day: overcast and rain dim the daylight a little.
+    const outdoor = ["Farm", "Wild", "Village"].includes(G.data.scene);
+    if (outdoor && c < day && (G.data.weather === "rain" || G.data.weather === "cloudy")) { const g = G.data.weather === "rain" ? 0.2 : 0.08; if (a < g) { col = 0x3a4250; a = g; } }
     this.shade.setFillStyle(col, a);
 
     this.drawBars();

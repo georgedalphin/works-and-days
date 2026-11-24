@@ -30,6 +30,21 @@ export interface Month {
   daylight: number; // clock hours of daylight, approximate for Greece
 }
 
+/** The day's weather, rolled on a d12 each dawn by season. Rain waters the fields. */
+export type Weather = "clear" | "cloudy" | "rain" | "mist" | "wind";
+export const WEATHER_BY_SEASON: Record<string, [Weather, number][]> = {
+  // [weather, highest d12 roll for it]; anything above the last is clear
+  Summer: [["rain", 1], ["cloudy", 3], ["mist", 4], ["wind", 6]],
+  Autumn: [["rain", 3], ["cloudy", 5], ["mist", 7], ["wind", 8]],
+  Winter: [["rain", 4], ["cloudy", 7], ["mist", 9], ["wind", 10]],
+  Spring: [["rain", 2], ["cloudy", 4], ["mist", 6], ["wind", 8]],
+};
+export function rollWeather(season: string, d12: number): Weather {
+  for (const [w, top] of WEATHER_BY_SEASON[season] ?? []) if (d12 <= top) return w;
+  return "clear";
+}
+export const WEATHER_WORD: Record<Weather, string> = { clear: "Clear", cloudy: "Cloudy", rain: "Rain", mist: "Morning mist", wind: "Windy" };
+
 export const MONTHS: Month[] = [
   { name: "Hekatombaion", season: "Summer", days: 30, daylight: 14.5 },
   { name: "Metageitnion", season: "Summer", days: 29, daylight: 13.5 },

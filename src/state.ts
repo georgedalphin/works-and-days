@@ -1,6 +1,6 @@
 import { START_CURRENCIES, type Currency, favorLabel } from "./gods";
 import {
-  MONTHS, WHEEL, START_ARETAI, essencePools, DAYLIGHT_REAL_SECONDS,
+  MONTHS, WHEEL, START_ARETAI, essencePools, DAYLIGHT_REAL_SECONDS, rollWeather, WEATHER_WORD, type Weather,
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
   ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
@@ -78,6 +78,8 @@ export interface SaveData {
   myth: Record<string, { days: number; last: number; gone: number; name: string; stolen?: string; gift: number }>;
   /** How many times you have met each kind of wandering monster. */
   met: Record<string, number>;
+  /** Today's weather, rolled at dawn. */
+  weather: Weather;
   jarSpring: boolean; // the jar holds the Naiad's water
   vat: { repaired: boolean; must: number; q: number; sealed: number }; // sealed: day the must was sealed to work, or -1
   vines: Record<string, { planted: number; picked: number }>; // young vines on the homestead: picked = year last picked
@@ -120,7 +122,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.weather ??= "clear";
     if (!d.bowGiven) { d.bowGiven = true; if (!d.slots.some((s) => s?.id === "bow")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("bow", 1); g.addItem("Arrow", STARTING_ARROWS); } }
     d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};
@@ -180,7 +182,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, weather: "clear",
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -337,6 +339,12 @@ export class GameState {
       this.data.orders = [];
     }
     for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "wet") this.data.ground[k] = "tilled";
+    // The new day's weather. Rain waters every tilled bed for you.
+    this.data.weather = rollWeather(this.month.season, 1 + Math.floor(Math.random() * 12));
+    if (this.data.weather === "rain") {
+      for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "tilled") this.data.ground[k] = "wet";
+      notes.push("Rain is falling: the fields are watered.");
+    } else if (this.data.weather !== "clear") notes.push(`${WEATHER_WORD[this.data.weather]} today.`);
     // Artemis wants her share of every deer.
     if (this.data.deerDebt > 0) {
       const n = this.data.deerDebt; this.data.deerDebt = 0;

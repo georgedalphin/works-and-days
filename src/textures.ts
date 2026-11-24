@@ -11,9 +11,11 @@ export const T = {
   MEADOW: 17, FOREST: 18, ROCKY: 19, WATER: 20, CAVEWALL: 21, CAVEFLOOR: 22, ORE: 23,
   // The rest of the wheel's lands: grounds, then their plants (Flora & Fauna: black pine, reed, thorn scrub).
   SAND: 24, MUD: 25, DRYGRASS: 26, REDROCK: 27, ALPINE: 28, LIMESTONE: 29, PINE: 30, REEDS: 31, THORN: 32,
+  // Ground details: no effect on play, only on the eye.
+  PEBBLES: 33, LEAVES: 34, TUFT: 35, MUSHRING: 36, TWIGS: 37, SKULL: 38, SHELLS: 39, CRACKS: 40, BLOOMS: 41,
 };
 export const TILE = 16;
-const COUNT = 33;
+const COUNT = 42;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -95,6 +97,15 @@ function drawTile(c: Ctx, i: number) {
       px(c, o + 2, 8, 12, 6, "#7a6a3a"); px(c, o + 4, 6, 8, 3, "#8a7a44");
       for (const [x, y] of [[2, 7], [5, 5], [9, 6], [13, 8], [3, 12], [12, 12], [7, 9]]) px(c, o + x, y, 1, 1, "#e0d8b8");
       px(c, o + 6, 10, 2, 2, "#5a4a28"); break;
+    case T.PEBBLES: for (const [x, y, col] of [[3, 11, "#a8a294"], [6, 12, "#8e897c"], [11, 9, "#b4ae9e"], [9, 13, "#9a958a"], [13, 12, "#8e897c"]] as [number, number, string][]) { px(c, o + x, y, 2, 1, col); px(c, o + x, y + 1, 2, 1, "rgba(0,0,0,0.18)"); } break;
+    case T.LEAVES: for (const [x, y, col] of [[2, 10, "#a8742e"], [6, 12, "#8a5a2a"], [10, 9, "#c08a3a"], [12, 13, "#9a6a30"], [5, 7, "#b0803a"]] as [number, number, string][]) px(c, o + x, y, 2, 1, col); break;
+    case T.TUFT: for (const [x, h] of [[5, 3], [6, 4], [7, 3], [9, 4], [10, 2]] as [number, number][]) px(c, o + x, 13 - h, 1, h, "#5f7f30"); px(c, o + 6, 10, 1, 1, "#7a9a40"); break;
+    case T.MUSHRING: for (let i = 0; i < 7; i++) { const a = (i / 7) * Math.PI * 2, x = 8 + Math.round(Math.cos(a) * 5), y = 9 + Math.round(Math.sin(a) * 4); px(c, o + x - 1, y, 2, 1, "#e8e2d0"); px(c, o + x - 1, y + 1, 1, 1, "#c8c0a8"); } break;
+    case T.TWIGS: px(c, o + 3, 11, 6, 1, "#7a5a33"); px(c, o + 7, 10, 1, 1, "#7a5a33"); px(c, o + 9, 13, 5, 1, "#6b4a2b"); px(c, o + 11, 12, 1, 1, "#6b4a2b"); break;
+    case T.SKULL: px(c, o + 6, 9, 4, 3, "#e4dcc4"); px(c, o + 7, 10, 1, 1, "#3a2e24"); px(c, o + 9, 10, 1, 1, "#3a2e24"); px(c, o + 4, 8, 2, 1, "#d8d0b8"); px(c, o + 10, 8, 2, 1, "#d8d0b8"); px(c, o + 7, 12, 2, 1, "#c8c0a8"); break;
+    case T.SHELLS: for (const [x, y, col] of [[3, 10, "#f0e0d0"], [8, 12, "#e8c8b0"], [12, 9, "#f4ece0"]] as [number, number, string][]) { px(c, o + x, y, 2, 2, col); px(c, o + x, y + 1, 2, 1, "#c8a890"); } break;
+    case T.CRACKS: px(c, o + 2, 8, 4, 1, "rgba(60,30,10,0.35)"); px(c, o + 5, 9, 3, 1, "rgba(60,30,10,0.35)"); px(c, o + 8, 10, 4, 1, "rgba(60,30,10,0.35)"); px(c, o + 7, 11, 1, 3, "rgba(60,30,10,0.3)"); px(c, o + 11, 6, 1, 4, "rgba(60,30,10,0.3)"); break;
+    case T.BLOOMS: for (const [x, y, col] of [[4, 10, "#f2f0e8"], [9, 12, "#e8d040"], [12, 9, "#c890e0"]] as [number, number, string][]) { px(c, o + x, y, 1, 1, col); px(c, o + x, y + 1, 1, 2, "#5e7f34"); } break;
     case T.FENCE:
       px(c, o, 5, 16, 2, "#8a5f35"); px(c, o, 10, 16, 2, "#8a5f35"); px(c, o, 7, 16, 1, "#5a3d22");
       px(c, o + 2, 2, 3, 13, "#6b4a2b"); px(c, o + 11, 2, 3, 13, "#6b4a2b"); px(c, o + 2, 2, 3, 1, "#a87443"); px(c, o + 11, 2, 3, 1, "#a87443");
@@ -118,6 +129,7 @@ export function makeTextures(scene: Phaser.Scene) {
   // Player: four facings in one strip (down, left, right, up), 16x16 each.
   makePlayerTexture(scene, { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" });
   makeGlowTexture(scene);
+  makeAmbientTextures(scene);
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -651,6 +663,32 @@ export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; ha
     }
   });
   for (let i = 0; i < 4 * POSES; i++) player.add(i, 0, i * 16, 0, 16, 16);
+}
+
+/** Little lives and weather: butterflies, swallows, leaves, smoke, mist and cloud shadows. */
+export function makeAmbientTextures(scene: Phaser.Scene) {
+  if (scene.textures.exists("butterfly")) return;
+  const bf = canvasTex(scene, "butterfly", 10, 5, (c) => {
+    px(c, 0, 0, 2, 2, "#ffffff"); px(c, 3, 0, 2, 2, "#ffffff"); px(c, 2, 1, 1, 3, "#3a2e24"); px(c, 0, 2, 2, 1, "#e8e8e8"); px(c, 3, 2, 2, 1, "#e8e8e8"); // wings open
+    px(c, 6, 0, 1, 3, "#ffffff"); px(c, 8, 0, 1, 3, "#ffffff"); px(c, 7, 1, 1, 3, "#3a2e24"); // wings closed
+  });
+  bf.add(0, 0, 0, 0, 5, 5); bf.add(1, 0, 5, 0, 5, 5);
+  const sw = canvasTex(scene, "swallow", 18, 6, (c) => {
+    px(c, 0, 1, 3, 1, "#1f2430"); px(c, 3, 2, 3, 1, "#1f2430"); px(c, 6, 1, 3, 1, "#1f2430"); px(c, 4, 3, 1, 2, "#1f2430"); // wings up
+    px(c, 9, 3, 3, 1, "#1f2430"); px(c, 12, 2, 3, 1, "#1f2430"); px(c, 15, 3, 3, 1, "#1f2430"); px(c, 13, 3, 1, 2, "#1f2430"); // wings down
+  });
+  sw.add(0, 0, 0, 0, 9, 6); sw.add(1, 0, 9, 0, 9, 6);
+  canvasTex(scene, "leaf", 3, 2, (c) => { px(c, 0, 0, 2, 1, "#ffffff"); px(c, 1, 1, 2, 1, "#dddddd"); });
+  canvasTex(scene, "streak", 14, 1, (c) => { px(c, 0, 0, 14, 1, "rgba(255,255,255,0.5)"); px(c, 4, 0, 6, 1, "rgba(255,255,255,0.8)"); });
+  const soft = (key: string, size: number, rgb: string, a0: number) => {
+    const t = scene.textures.createCanvas(key, size, size)!, c = t.getContext();
+    const g = c.createRadialGradient(size / 2, size / 2, 1, size / 2, size / 2, size / 2);
+    g.addColorStop(0, `rgba(${rgb},${a0})`); g.addColorStop(0.6, `rgba(${rgb},${a0 * 0.45})`); g.addColorStop(1, `rgba(${rgb},0)`);
+    c.fillStyle = g; c.fillRect(0, 0, size, size); t.refresh();
+  };
+  soft("puff", 16, "200,196,188", 0.9);
+  soft("mist", 96, "236,240,244", 0.75);
+  soft("cloudShadow", 128, "10,16,30", 1);
 }
 
 /** A soft round light, for showing what you are looking at. */
