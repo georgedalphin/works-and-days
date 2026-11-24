@@ -2,7 +2,9 @@ import Phaser from "phaser";
 import { GameState, rng } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint } from "./ambience";
+import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS } from "./data";
+import { MOROS_DREAMS } from "./omens";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
@@ -2123,6 +2125,7 @@ class WildScene extends PlayScene {
     this.setupBarrow();
     this.maybeMonster();
     this.setupGlint();
+    this.setupHut();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -2299,6 +2302,136 @@ class WildScene extends PlayScene {
       return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- a hut in the wild
+  hutFolk: Walker[] = [];
+  /**
+   * About one screen in fifteen, two or more out from home, someone lives alone or with their family in a hut.
+   * Who depends on the land: shepherds on the plains, a root-cutter in the marsh, a hermit in the badlands.
+   * The hut is rolled once, when the screen is first made, and stays.
+   */
+  setupHut() {
+    this.hutFolk = [];
+    if (this.rec.hut === undefined) {
+      this.rec.hut = null;
+      const kinds = HUT_KINDS.filter((k) => k.terrains.includes(this.rec.terrain));
+      if (this.depth >= 2 && kinds.length && Math.random() < 0.07) {
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        let at: [number, number] | null = null;
+        for (let i = 0; i < 80 && !at; i++) {
+          const tx = 5 + Math.floor(Math.random() * (WW - 12)), ty = 4 + Math.floor(Math.random() * (WH - 10));
+          if (Math.hypot(tx * TILE - this.player.x, ty * TILE - this.player.y) > 120 && this.objects.getTileAt(tx + 1, ty + 2)?.index !== T.WATER) at = [tx, ty];
+        }
+        if (at) this.rec.hut = { tx: at[0], ty: at[1], kind: kind.id, seed: Math.floor(Math.random() * 1e9), god: 1 + Math.floor(Math.random() * 12) <= GOD_CHANCE ? (kind.patron === "Hecate" ? "Hecate" : kind.patron) : "" };
+      }
+    }
+    const hut = this.rec.hut;
+    if (!hut) return;
+    const kind = HUT_KINDS.find((k) => k.id === hut.kind)!;
+    // A clearing around the hut, kept clear.
+    for (let y = hut.ty - 1; y <= hut.ty + 5; y++) for (let x = hut.tx - 2; x <= hut.tx + 4; x++) {
+      const t = this.objects.getTileAt(x, y)?.index ?? -1;
+      if (t !== -1 && t !== T.EDGE && t !== T.WATER) { this.objects.putTileAt(-1, x, y); this.removeTrunk(x, y); }
+    }
+    const img = this.add.image(hut.tx * TILE, hut.ty * TILE, "wildhut").setOrigin(0, 0).setDepth((hut.ty + 2.1) * TILE);
+    const solids = this.physics.add.staticGroup(), b = solids.create(img.x + 20, img.y + 24, "") as Phaser.Physics.Arcade.Sprite;
+    b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(34, 18);
+    this.physics.add.collider(this.player, solids);
+    if (this.ambience) (this.ambience.o.chimneys ??= []).push([img.x + 28, img.y + 2]);
+    const door: [number, number] = [img.x + 20, img.y + 40];
+    // Who lives here, the same every visit.
+    const r = rng(hut.seed >>> 0), used = new Set<string>();
+    const solo = ["hermit", "rootcutter", "charcoal"].includes(kind.id);
+    const members: Folk[] = [makeFolk(r, `h${hut.seed}a`, kind.id === "hermit" || kind.id === "rootcutter" ? "elder" : "adult", kind.id === "rootcutter" ? true : kind.id === "hermit" || kind.id === "hunter" || kind.id === "charcoal" ? false : r() < 0.5, used)];
+    if (!solo) {
+      if (kind.id !== "hunter") members.push(makeFolk(r, `h${hut.seed}b`, "adult", !members[0].female, used));
+      const kids = kind.id === "hunter" ? 2 : Math.floor(r() * 3);
+      for (let i = 0; i < kids; i++) members.push(makeFolk(r, `h${hut.seed}k${i}`, kind.id === "hunter" ? "adult" : "child", kind.id === "hunter" ? false : r() < 0.5, used));
+    }
+    members.forEach((f, i) => {
+      const w = new Walker(this, f, door[0] + (i - 1) * 12, door[1] + 6, door);
+      this.physics.add.collider(w.sprite, this.objects); this.physics.add.collider(w.sprite, solids); this.collideTrunks(w.sprite);
+      this.hutFolk.push(w);
+    });
+    const sc = this;
+    const names = members.filter((m) => m.age !== "child").map((m) => m.name).join(" and ") + (members.some((m) => m.age === "child") ? ", and their children" : "");
+    this.targets.push({ x: door[0], y: door[1] - 2, get label() { return G.isDay ? `Call at the hut` : "Knock at the hut door"; }, act: () => sc.visitHut(kind, names) });
+    for (const w of this.hutFolk) this.targets.push({ get x() { return w.sprite.x; }, get y() { return w.sprite.y + 2; }, get label() { return w.sprite.visible ? `Talk to ${w.folk.name}` : ""; }, act: () => sc.visitHut(kind, names) });
+    if (!hut.met) { hut.met = true; G.say(`A hut stands alone here, smoke rising from its roof. ${kind.title} lives here.`); }
+  }
+
+  /** The hut folk go about their small round by day, and are indoors at night. */
+  directHutFolk(dt: number) {
+    const hut = this.rec.hut; if (!hut) return;
+    for (const w of this.hutFolk) {
+      w.update(dt, this.paused);
+      if (this.paused) continue;
+      w.sprite.setVisible(G.isDay);
+      if (!G.isDay || w.doing !== "idle" || w.wait > 0) continue;
+      const range = w.folk.age === "child" ? 60 : 30;
+      w.goTo(w.home[0] + Phaser.Math.Between(-range, range), w.home[1] + Phaser.Math.Between(4, range));
+      w.wait = w.folk.age === "child" ? 1 + Math.random() * 2 : 3 + Math.random() * 6;
+    }
+  }
+
+  /**
+   * Calling at a hut in the wild: here you are the guest. They will feed you and let you rest; a guest's gift pleases Zeus.
+   * Each kind of household has something of its own to share, and a few goods to trade. One in twelve houses a god.
+   */
+  visitHut(kind: typeof HUT_KINDS[number], names: string) {
+    const hut = this.rec.hut!, u = ui(this), today = G.dayNumber;
+    const opts: { label: string; fn: () => void }[] = [];
+    const again = () => this.visitHut(kind, names);
+    if (hut.hosted !== today) opts.push({ label: "Accept their hospitality", fn: () => {
+      hut.hosted = today;
+      G.data.fatigue = Math.max(0, G.data.fatigue - 30); G.essence = { ...G.essenceMax };
+      u.showTalk(kind.title, names, "They sit you by the fire and put bread, olives and something warm in front of you. You eat, and rest a while. (Fatigue -30, Essence full.)", [{ label: "Back", fn: again }]);
+    } });
+    const held = G.selectedItem;
+    const food = held && (ITEMS[held.id].kind === "crop" || ["Milk", "Honey", "Meat", "Grapes", "Wine", "WildGrapes", "Plum", "Cornel", "Mint", "Thyme"].includes(held.id));
+    if (food && hut.hosted === today && (hut as { gifted?: number }).gifted !== today) opts.push({ label: `Leave them a gift of your ${ITEMS[held!.id].name.toLowerCase()}`, fn: () => {
+      (hut as { gifted?: number }).gifted = today;
+      G.removeItem(held!.id, 1);
+      G.addFavor("Zeus", 1, 6);
+      if (hut.god) {
+        const god = hut.god; hut.god = "";
+        G.addFavor(god, 2, 12);
+        u.showTalk(kind.title, names, `As you set it down, the eldest of them straightens, and is suddenly taller than the doorway, and bright. It was ${god} all along, testing the guest as gods test hosts. "You came as a guest and gave as a guest. Go well." (${god} +2, Zeus +1)`, []);
+      } else u.showTalk(kind.title, names, "They protest, then accept it gladly. A guest who gives is a good guest; Zeus Xenios sees it. (Zeus +1)", [{ label: "Back", fn: again }]);
+    } });
+    if (hut.special !== today) opts.push({ label: kind.special, fn: () => { hut.special = today; this.hutSpecial(kind, names, again); } });
+    for (const [id, price] of kind.goods) if (G.data.silver >= price) opts.push({ label: `Buy ${ITEMS[id].name.toLowerCase()} (${price} silver)`, fn: () => { G.data.silver -= price; give(id, 1); again(); } });
+    if (!hut.sensed) opts.push({ label: "Look closely at them (Pneuma)", fn: () => {
+      hut.sensed = true;
+      const roll = 1 + Math.floor(Math.random() * 12), target = Math.max(1, (G.data.aretai.Pneuma ?? 3) - 2 + G.boon("Dionysus"));
+      const seen = hut.god && roll <= target;
+      u.showTalk(kind.title, names, seen ? `Something about the eldest of them catches at you: eyes a little too bright, a stillness too deep for a hut in the wild. Whoever this is, they are more than they seem. (d12 ${roll}, needed 1–${target})` : `Ordinary folk, weathered by the wild, kind enough. (d12 ${roll}, needed 1–${target})`, [{ label: "Back", fn: again }]);
+    } });
+    u.showTalk(kind.title, `${names} · ${kind.patron}'s folk`, G.isDay ? kind.greeting : `A voice behind the door: "Who's there at this hour?" Then the bar lifts. ${kind.greeting}`, opts);
+  }
+
+  hutSpecial(kind: typeof HUT_KINDS[number], names: string, back: () => void) {
+    const u = ui(this);
+    let text = "";
+    switch (kind.id) {
+      case "shepherd": case "goatherd": text = `They press a skin of milk on you for the road: ${give("Milk", 2)}.`; break;
+      case "charcoal": text = `"Take these. Caves are dark." ${give("Torch", 2)}.`; break;
+      case "fisher": text = `They share the day's catch, and a bundle of sea fennel: ${give("Meat", 1)}, ${give("SeaFennel", 2)}.`; break;
+      case "hunter": G.data.archeryXp += 20; text = "He takes your bow, laughs at your grip, and fixes it. You shoot at a knot in a tree until your fingers sting. (Archery practice +20)"; break;
+      case "rootcutter": {
+        const unknown = Object.keys(FORAGE).filter((id) => G.lore(id) < 1 && LORE[id]);
+        if (unknown.length) { const id = unknown[Math.floor(Math.random() * unknown.length)]; G.data.lore.tier[id] = 1; text = `She shows you ${LORE[id].vague}, and names it: ${LORE[id].name}. "Now you'll see what it bears." (${LORE[id].name}: Basics)`; }
+        else text = "\"You know the plants as well as I do already. Go on with you.\"";
+        break;
+      }
+      case "hermit": {
+        const b = G.data.birth;
+        text = b ? `He looks at you a long time. "I see this: ${(MOROS_DREAMS[b.moros[0]] ?? "a road").replace(/^You dream of /, "").replace(/\.$/, "")}. And this: ${b.hamartia[1].charAt(0).toLowerCase() + b.hamartia[1].slice(1)}" He will say no more.` : "He looks at you a long time and says nothing at all.";
+        break;
+      }
+    }
+    u.showTalk(kind.title, names, text, [{ label: "Back", fn: back }]);
   }
 
   // ---------------------------------------------------------------- glints
@@ -2561,6 +2694,7 @@ class WildScene extends PlayScene {
     const dt = dms / 1000;
     this.updateAnimals(dt);
     this.updateMythborn(dt);
+    this.directHutFolk(dt);
     if (!this.common(dt)) return;
     this.maybeWolves();
     this.monsterTick(dt);
@@ -2866,7 +3000,18 @@ class VillageScene extends PlayScene {
     for (const b of BUILDINGS) for (let y = b.ty + 3; y <= 12; y++) ground[y][b.tx + Math.floor(b.w / 32)] = T.PATH;
     for (const b of BUILDINGS) for (let y = 18; y <= b.ty + 3; y++) ground[y][b.tx + Math.floor(b.w / 32)] = T.PATH;
     // A few olives, flowers and stones about the place.
-    for (const [x, y, t] of [[3, 12, T.OLIVE], [36, 12, T.OLIVE], [3, 16, T.FLOWERS], [36, 16, T.FLOWERS], [15, 3, T.FLOWERS], [24, 3, T.STONE], [16, 26, T.FLOWERS], [24, 27, T.OLIVE], [11, 15, T.FLOWERS], [29, 15, T.FLOWERS]] as [number, number, number][]) objs[y][x] = t;
+    for (const [x, y, t] of [[3, 15, T.OLIVE], [36, 15, T.OLIVE], [3, 17, T.FLOWERS], [36, 17, T.FLOWERS], [17, 2, T.FLOWERS], [27, 2, T.STONE], [17, 27, T.FLOWERS], [21, 27, T.OLIVE], [11, 15, T.FLOWERS], [29, 15, T.FLOWERS]] as [number, number, number][]) objs[y][x] = t;
+    // The ordinary households: a cottage each, with a path from the door to the square.
+    this.households = villageHouseholds(G.data.seed);
+    for (const h of this.households) {
+      const { tx, ty } = h.house, dx = tx + 1, dy = ty + 3;
+      for (let y = ty; y <= ty + 3; y++) for (let x = tx; x <= tx + 2; x++) if (objs[y]?.[x] !== undefined && objs[y][x] !== T.EDGE) objs[y][x] = -1;
+      if (ty < 12) for (let y = dy; y <= 12; y++) { ground[y][dx] = T.PATH; if (dx < 13 || dx > 27) break; }
+      if (ty > 18) for (let y = 18; y < ty; y++) ground[y][dx] = T.PATH;
+      if (tx < 13) for (let x = dx; x <= 13; x++) ground[dy][x] = T.PATH;
+      if (tx > 27) for (let x = 27; x <= dx; x++) ground[dy][x] = T.PATH;
+      if (dy >= 12 && dy <= 18) for (let x = Math.min(dx, 13); x <= Math.max(dx, 27) && (x <= 13 || x >= 27 || x === dx); x++) ground[dy][x] = T.PATH;
+    }
 
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: VW, height: VH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
@@ -2898,6 +3043,12 @@ class VillageScene extends PlayScene {
         this.targets.push({ x: p.x, y: p.y + 2, get label() { return G.isDay ? `Talk to ${v.name}` : `Knock at ${b.label}`; },
           act: () => (G.isDay ? ui(this).talkTo(v) : G.say(`No answer. ${v.name} is asleep; come back by day.`)) });
       }
+    }
+    // The cottages of the ordinary households.
+    for (const h of this.households) {
+      const img = this.add.image(h.house.tx * TILE, h.house.ty * TILE, h.house.key).setOrigin(0, 0).setDepth((h.house.ty + 2.4) * TILE);
+      solid(img.x + 24, img.y + 30, 42, 22);
+      chimneys.push([img.x + 34, img.y + 4]);
     }
     // The village well, and the altar before the shrine.
     this.add.image(16 * TILE + 8, 14 * TILE + 6, "well").setDepth(14 * TILE + 14); solid(16 * TILE + 8, 14 * TILE + 10, 18, 10);
@@ -2931,6 +3082,20 @@ class VillageScene extends PlayScene {
     for (let i = 0; i < 3; i++) { const a = new Animal(this, "bird", 23 * TILE + i * 6, 16 * TILE + (i % 2) * 5, new Phaser.Geom.Rectangle(14 * TILE, 12 * TILE, 13 * TILE, 6 * TILE)); flock.push(a); }
     flock.forEach((a) => (a.flock = flock));
     this.animals = flock;
+    // The households come out by day.
+    this.walkers = [];
+    for (const h of this.households) {
+      const door: [number, number] = [h.house.tx * TILE + 24, h.house.ty * TILE + 50];
+      h.members.forEach((f, i) => {
+        const w = new Walker(this, f, door[0] + (i - 1) * 10, door[1] + 4, door);
+        this.physics.add.collider(w.sprite, this.objects); this.physics.add.collider(w.sprite, solids); this.collideTrunks(w.sprite);
+        w.sprite.setVisible(G.isDay);
+        this.walkers.push({ w, h });
+        const sc = this;
+        this.targets.push({ get x() { return w.sprite.x; }, get y() { return w.sprite.y + 2; },
+          get label() { return w.sprite.visible ? (f.age === "child" ? `Say hello to ${f.name}` : `Talk to ${f.name}`) : ""; }, act: () => sc.talkToFolk(w, h) });
+      });
+    }
     this.cameras.main.fadeIn(250);
     G.say(G.isDay ? "The village. Smoke from the smithy, the creak of the mill." : "The village sleeps. A dog barks somewhere.");
   }
@@ -2945,9 +3110,77 @@ class VillageScene extends PlayScene {
     G.data.stranger = { kind, god, arrived: G.dayNumber, hosted: false, sensed: false };
   }
 
+  households: Household[] = [];
+  walkers: { w: Walker; h: Household }[] = [];
+
+  /**
+   * What the households do with their day: walk to the square or the well, stop to gossip with a neighbor,
+   * sit by their own door, let the children run. At dusk they all go home and in.
+   */
+  directFolk(dt: number) {
+    const dusk = G.data.clock >= G.daylight - 0.4, day = G.isDay;
+    const idleAdults = this.walkers.map(({ w }) => w).filter((w) => w.doing === "idle" && w.folk.age !== "child" && w.sprite.visible && w.wait <= 0);
+    for (const { w, h } of this.walkers) {
+      w.update(dt, this.paused);
+      if (this.paused) continue;
+      const s = w.sprite;
+      if (!day) { if (s.visible) s.setVisible(false); continue; }
+      if (!s.visible) { s.setVisible(true).setPosition(w.home[0], w.home[1] + 4); w.doing = "idle"; w.wait = Math.random() * 4; }
+      if (dusk) {
+        if (w.doing !== "home") { w.talkWith = undefined; w.goTo(w.home[0], w.home[1]); w.doing = "home"; w.wait = 30; }
+        else if (Math.hypot(s.x - w.home[0], s.y - w.home[1]) < 8) s.setVisible(false);
+        continue;
+      }
+      // Gossip: trade lines back and forth for a while.
+      if (w.doing === "talk" && w.talkWith) {
+        w.talkLeft -= dt; w.bubbleT -= dt;
+        if (w.bubbleT <= 0 && w.pair) { if (w.line === 0) w.say(w.pair[0]); else w.talkWith.say(w.pair[1]); w.line++; w.bubbleT = 2.6; if (w.line > 1) { w.pair = pickGossip(); w.line = 0; w.bubbleT = 4; } }
+        if (w.talkLeft <= 0) { const o = w.talkWith; w.doing = "idle"; w.wait = 3; w.talkWith = undefined; if (o) { o.doing = "idle"; o.wait = 3; o.talkWith = undefined; } }
+        continue;
+      }
+      if (w.doing !== "idle" || w.wait > 0) continue;
+      const r = Math.random();
+      if (w.folk.age === "child") {
+        // Children chase each other about, or run to the square.
+        const other = this.walkers.find(({ w: o }) => o !== w && o.folk.age === "child" && o.sprite.visible);
+        if (other && r < 0.6) w.goTo(other.w.sprite.x + Phaser.Math.Between(-12, 12), other.w.sprite.y + Phaser.Math.Between(-10, 10));
+        else w.goTo(Phaser.Math.Between(14, 26) * TILE, Phaser.Math.Between(12, 18) * TILE);
+        w.wait = 1 + Math.random() * 2;
+      } else if (r < 0.25) {
+        const o = idleAdults.find((x) => x !== w && x.doing === "idle");
+        if (o) {
+          // Meet halfway and talk.
+          const mx = (w.sprite.x + o.sprite.x) / 2, my = (w.sprite.y + o.sprite.y) / 2;
+          w.goTo(mx - 7, my); o.goTo(mx + 7, my);
+          w.doing = "talk"; o.doing = "talk"; w.talkWith = o; o.talkWith = w;
+          w.talkLeft = 8 + Math.random() * 8; w.pair = pickGossip(); w.line = 0; w.bubbleT = 2.5; o.talkLeft = 999;
+        } else w.wait = 2;
+      } else if (r < 0.5) w.goTo(Phaser.Math.Between(14, 26) * TILE, Phaser.Math.Between(12, 18) * TILE + 8); // the square
+      else if (r < 0.62) w.goTo(16 * TILE + 8 + Phaser.Math.Between(-14, 14), 15 * TILE + 12); // the well
+      else if (r < 0.85 || w.folk.age === "elder") { w.goTo(w.home[0] + Phaser.Math.Between(-16, 16), w.home[1] + Phaser.Math.Between(2, 10)); } // by their own door
+      else w.wait = 4 + Math.random() * 6; // just stand a while
+    }
+  }
+
+  /** A few words with one of the households. Children have their own questions. */
+  talkToFolk(w: Walker, h: Household) {
+    const f = w.folk, u = ui(this);
+    w.sprite.setVelocity(0, 0); w.doing = "idle"; w.wait = 6;
+    w.facing = Math.abs(this.player.x - w.sprite.x) > Math.abs(this.player.y - w.sprite.y) ? (this.player.x < w.sprite.x ? 1 : 2) : this.player.y < w.sprite.y ? 3 : 0;
+    if (f.age === "child") {
+      const q = ["\"Are you the new farmer? Do you have a goat? Can I see it?\"", "\"I found a beetle this big. Bigger.\"", "\"My mother says not to talk to strangers. Are you a stranger?\"", "\"Is it true there are horse-men in the forest?\""];
+      u.showTalk(f.name, `a child of ${h.trade.name}`, q[Math.floor(Math.random() * q.length)], []);
+      return;
+    }
+    const greet = G.isDay && G.data.clock < 2 ? "Up early." : G.data.weather === "rain" ? "Wet enough for you?" : "Good day to you.";
+    u.showTalk(f.name, `of ${h.trade.name} · ${h.trade.patron} keeps their hearth`, `"${greet}" ${h.trade.lines[Math.floor(Math.random() * h.trade.lines.length)]}`,
+      [{ label: "Ask about their work", fn: () => u.showTalk(f.name, `of ${h.trade.name}`, h.trade.tip, []) }]);
+  }
+
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     for (const p of this.people) p.img.setVisible(G.isDay);
+    this.directFolk(dt);
     this.updateAnimals(dt);
     if (!this.common(dt)) return;
     if (this.knock > 0) return;

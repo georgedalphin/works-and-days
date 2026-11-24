@@ -141,6 +141,24 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 10, 32, 8, 7, "#5a4632"); px(c, 46, 32, 8, 7, "#5a4632");
   });
 
+  // Village cottages, three ways: thatch, weathered thatch, and a flat clay roof.
+  const cottage = (key: string, roof: string, roofD: string, wall: string, flat: boolean) => canvasTex(scene, key, 48, 44, (c) => {
+    px(c, 3, 16, 42, 26, wall); px(c, 3, 38, 42, 4, "#b8a682");
+    if (flat) { px(c, 1, 10, 46, 8, roof); px(c, 1, 16, 46, 2, roofD); px(c, 5, 8, 38, 2, roofD); }
+    else { px(c, 0, 6, 48, 13, roof); px(c, 4, 1, 40, 6, roof); px(c, 0, 17, 48, 2, roofD); for (let x = 2; x < 48; x += 4) px(c, x, 8, 1, 9, roofD); }
+    px(c, 19, 25, 10, 17, "#6b4a2b"); px(c, 21, 27, 6, 14, "#5a3d22");
+    px(c, 7, 24, 7, 6, "#5a4632"); px(c, 35, 24, 6, 6, "#5a4632");
+  });
+  cottage("cottage0", "#c9a35a", "#a9853f", "#e8dcc2", false);
+  cottage("cottage1", "#a89060", "#7a6a48", "#ddd0b4", false);
+  cottage("cottage2", "#b8805a", "#8a5a3a", "#eee4cc", true);
+  // A hut in the wild: fieldstone below, wattle above, brushwood on the roof.
+  canvasTex(scene, "wildhut", 40, 36, (c) => {
+    px(c, 3, 14, 34, 20, "#a89a7a"); for (const [x, y] of [[4, 28], [10, 30], [17, 28], [24, 30], [31, 28], [7, 24], [27, 24]]) px(c, x, y, 5, 3, "#8a7e62");
+    px(c, 0, 4, 40, 12, "#7a6a3a"); px(c, 3, 0, 34, 6, "#8a7a44"); for (let x = 1; x < 40; x += 3) px(c, x, 6, 1, 8, "#5e5030");
+    px(c, 15, 20, 9, 14, "#4a3420"); px(c, 6, 19, 5, 4, "#3a2e24");
+  });
+
   canvasTex(scene, "altar", 16, 20, (c) => {
     px(c, 2, 8, 12, 12, "#d9d0bd"); px(c, 1, 7, 14, 2, "#ece4d2"); px(c, 2, 18, 12, 2, "#b7ac95");
     px(c, 6, 2, 4, 5, "#e8862e"); px(c, 7, 0, 2, 3, "#f2c14e");
@@ -627,11 +645,15 @@ export const POSE = { stand: 0, walk1: 1, walk2: 2, raise: 3, strike: 4, lookA: 
  * The player in 4 facings (down, left, right, up) x 7 poses: standing, two walking steps,
  * raising and striking with a tool, and a hand over the brow looking one way, then the other.
  */
-export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) {
-  if (scene.textures.exists("player")) scene.textures.remove("player");
+export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) { makeFigureTexture(scene, "player", look); }
+
+export interface FigureExtras { beard?: boolean; long?: boolean; veil?: string }
+/** Any walking person: the player, villagers, the folk of the wild huts. Same 28 frames as the player. */
+export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tunic: string; hair: string; skin: string }, ex: FigureExtras = {}) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
   const belt = look.tunic === "#b0412f" ? "#e9e1cf" : "#b0412f";
   const leg = "#6b4a2b", eye = "#2a1d14", tool = "#7a5a33", toolHead = "#9c968a";
-  const player = canvasTex(scene, "player", 16 * 4 * POSES, 16, (c) => {
+  const player = canvasTex(scene, key, 16 * 4 * POSES, 16, (c) => {
     for (let f = 0; f < 4; f++) for (let pose = 0; pose < POSES; pose++) {
       const o = (f * POSES + pose) * 16;
       // Left is drawn as right, mirrored.
@@ -649,6 +671,9 @@ export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; ha
       p(5, 6, 6, 7, look.tunic); p(5, 9, 6, 1, belt);
       p(6, 1, 4, 5, look.skin); p(6, 1, 4, 2, look.hair);
       if (f === 3) p(6, 1, 4, 4, look.hair);
+      if (ex.long) { if (f === 3) p(5, 1, 6, 6, look.hair); else if (side) p(5, 1, 1, 6, look.hair); else { p(5, 2, 1, 5, look.hair); p(10, 2, 1, 5, look.hair); } }
+      if (ex.beard && f !== 3) { if (side) p(8, 5, 2, 1, look.hair); else p(6, 5, 4, 1, look.hair); }
+      if (ex.veil) { if (f === 3) p(5, 0, 6, 7, ex.veil); else if (side) { p(5, 0, 5, 2, ex.veil); p(5, 2, 1, 6, ex.veil); } else { p(5, 0, 6, 2, ex.veil); p(5, 2, 1, 6, ex.veil); p(10, 2, 1, 6, ex.veil); } }
       // Eyes, which wander when looking around.
       if (f === 0) {
         const ex = pose === 5 ? 8 : pose === 6 ? 6 : 7;

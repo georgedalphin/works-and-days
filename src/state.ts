@@ -12,7 +12,9 @@ export interface Slot { id: string; qty: number; q?: number } // q: quality 1-3 
 export interface CropRec { id: string; growth: number; dryNights: number; dryStreak: number; hourBonus: boolean; withered: boolean; picks: number; nymph?: boolean; sign?: boolean }
 /** What a young farmer already knows on the first day. */
 const START_LORE: Record<string, number> = { goat: 1, bees: 1, Millet: 1, Chickpeas: 1, Melon: 1, Mint: 1, vine: 1, olive: 1, t3: 1 };
-export interface ScreenRec { terrain: number; special: boolean; feature: string; cleared: string[]; picked?: Record<string, number>; barrow?: [number, number]; laid?: boolean; glint?: number }
+export interface ScreenRec { terrain: number; special: boolean; feature: string; cleared: string[]; picked?: Record<string, number>; barrow?: [number, number]; laid?: boolean; glint?: number;
+  /** A lonely hut on this screen: who lives there, and what you have done there today. */
+  hut?: { tx: number; ty: number; kind: string; seed: number; god: string; hosted?: number; special?: number; sensed?: boolean; met?: boolean } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";
 
