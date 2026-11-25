@@ -3815,7 +3815,7 @@ class CaveScene extends PlayScene {
       if (tool !== "mattock") { G.say("Green-stained stone: copper ore. You'll need the mattock."); return; }
       const b = labor(EFFORT.mine, 5 + darkPen(), "Kratos"); if (b === null) return;
       this.clearObject(x, y);
-      G.say(`You break out the ore: ${give("Copper", 1 + (Math.random() < 0.4 ? 1 : 0))}${inDark ? " (by feel, in the dark)" : ""}${b}`);
+      G.say(`You break out the ore: ${give("Copper", Math.max(1, 1 + (Math.random() < 0.4 ? 1 : 0) + Math.trunc(G.boon("Hades") / 2)))}${inDark ? " (by feel, in the dark)" : ""}${b}`);
       return;
     }
     if (obj === T.CAVEWALL) { G.say("Solid rock."); return; }
