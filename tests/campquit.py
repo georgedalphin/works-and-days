@@ -23,7 +23,7 @@ async def main():
         await pg.wait_for_timeout(300); print("place:", await msg(pg))
         await pg.evaluate("G.data.clock=G.daylight+1; G.data.fatigue=60"); await pg.wait_for_timeout(500)
         await pg.screenshot(path="/home/claude/test/camp.png")
-        await pg.evaluate(f"(()=>{{const s={Wd}; const o=s.placedObjs.find(o=>o.p.id==='Campfire'); o.t.act();}})()"); await pg.wait_for_timeout(200)
+        await pg.evaluate(f"(()=>{{const s={Wd}; const o=s.placedObjs.find(o=>o.p.id==='Campfire'); o.t.act(); const b={U}.talkPanel.list.find(o=>o.type==='Text'&&o.text.includes('Sleep here')); b.emit('pointerdown');}})()"); await pg.wait_for_timeout(200)
         print("ask:", await pg.evaluate(f"{U}.dialog ? {U}.dialog.list.filter(o=>o.type==='Text').map(o=>o.text).join(' / ').slice(0,250) : 'none'"))
         await pg.keyboard.press("y"); await pg.wait_for_timeout(1800)
         await pg.keyboard.press("Space"); await pg.wait_for_timeout(2500)

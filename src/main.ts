@@ -9,6 +9,7 @@ import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
+import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -26,6 +27,7 @@ import { VILLAGERS, REL_MIN, REL_MAX, relTier, relLabel, UPGRADES, toolName, STR
 import type { ScreenRec } from "./state";
 
 const W = 960, H = 640, ZOOM = 3;
+Object.assign(OFFER_PATRON, DISH_GOD); // a god's own dish is a fitting offering to that god
 let G: GameState;
 /** Underground without a torch: every action is at -3 (World & Wilderness). */
 let inDark = false;
@@ -163,6 +165,24 @@ function rollFind(table: keyof typeof FIND_TABLES, chance: number): boolean {
   return true;
 }
 
+/** What a dish does when eaten, by its quality (1–3). */
+function mealEffect(id: string, q: number): { ar?: string; god?: string; n: number; hours: number } {
+  const named = NAMED.find((n) => dishId(n) === id);
+  if (named) { const e = NAMED_EFFECT[q]!; return { god: named.god, n: e.n, hours: e.hours }; }
+  const e = PLAIN_EFFECT[q]!; return { ar: id.slice(5), n: e.n, hours: e.hours };
+}
+/** An item's name in a sentence: lower case, except names of gods and heroes. */
+const lowerName = (id: string) => /^(Hecate|Prometheus|Kykeon|Kakavia|Melikraton)/.test(ITEMS[id].name) ? ITEMS[id].name : ITEMS[id].name.toLowerCase();
+const effectText = (e: { ar?: string; god?: string; n: number; hours: number }) => e.god ? `${e.god}'s favor counts as ${e.n} higher for ${e.hours} hours` : `${e.ar} +${e.n} for ${e.hours} hours`;
+/** Eat the dish in your hand. */
+function eatHeld() {
+  const i = G.data.selected, s = G.data.slots[i]; if (!s) return;
+  const id = s.id, q = s.q ?? 1, e = mealEffect(id, q), named = NAMED.find((n) => dishId(n) === id);
+  s.qty--; if (s.qty <= 0) G.data.slots[i] = null;
+  G.eatMeal(id, e); G.addFatigue(-(4 + 4 * q)); SOUND.sfx("pickup");
+  G.say(`${named ? named.eaten : `You eat the ${ITEMS[id].name.toLowerCase()}.`} (${effectText(e)}; Fatigue −${4 + 4 * q}.)`);
+}
+
 function give(id: string, qty: number, q?: number): string {
   const left = G.addItem(id, qty, q);
   if (qty - left > 0) SOUND.sfx("pickup");
@@ -286,6 +306,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   knock = 0; // seconds of being thrown back by a blow
   invuln = 0; // seconds before another blow can land
+  mealT = 0;
   /** Has tonight's Noumenia visit been rolled here? */
   noumRolled = false;
   /** On the night of Noumenia the dead come near the houses of the living. */
@@ -483,7 +504,7 @@ abstract class PlayScene extends Phaser.Scene {
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
     else if (p.id === "Boat") o.t = { ...o.t, get label() { return sc.boat ? "" : "Get in the boat"; }, act: () => sc.boardBoat(o) };
     else if (p.id === "Campfire") {
-      o.t = { ...o.t, label: "Sleep by the campfire", act: () => sc.campSleep() };
+      o.t = { ...o.t, label: "The campfire: cook, or sleep", act: () => ui(sc).showTalk("The campfire", "Fire under the open sky", "The fire crackles. A pot sits on the stones at its edge.", [{ label: "Cook something", fn: () => { ui(sc).closeTalk(); ui(sc).openCook("campfire"); } }, { label: "Sleep here until dawn", fn: () => { ui(sc).closeTalk(); sc.campSleep(); } }]) };
       const glow = this.add.image(cx, by - 6, "focusGlow").setDepth(by - 1).setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD);
       this.tweens.add({ targets: glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 380 + Math.random() * 200 });
       this.tweens.add({ targets: img, scaleY: 1.06, yoyo: true, repeat: -1, duration: 260 });
@@ -793,6 +814,7 @@ abstract class PlayScene extends Phaser.Scene {
     const [lx, ly] = this.lookPoint(); if (this.cursorMode) this.faceToward(lx, ly);
     this.gesture("act");
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "place") { this.tryPlace(); return; }
+    if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "meal") { eatHeld(); return; }
     if (G.selectedItem?.id === "axe" || G.selectedItem?.id === "mattock") {
       const [tx, ty] = this.facingTile(), o = this.placedAt(tx, ty);
       if (o) { SOUND.sfx("chop"); this.pickUp(o); return; }
@@ -834,6 +856,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
     this.ambience?.update(dt, this.paused);
+    if ((this.mealT -= dt) <= 0) { this.mealT = 1; for (const m of G.mealTick()) G.say(m); }
     if (!this.spearChecked) { // your spear, if it lies where you left it
       this.spearChecked = true;
       const s = G.data.spearAt;
@@ -2716,7 +2739,7 @@ class HouseScene extends PlayScene {
 
     this.targets = [
       { x: 1.5 * TILE + 8, y: 4.5 * TILE, label: "Sleep", act: () => this.askSleep() },
-      { x: 6 * TILE, y: 4.6 * TILE, get label() { return G.data.arts.length ? "The hearth" : "Tend the hearth"; }, act: () => (G.data.arts.length ? ui(this).hearthMenu(() => this.tendHearth()) : this.tendHearth()) },
+      { x: 6 * TILE, y: 4.6 * TILE, label: "The hearth: tend it, or cook", act: () => ui(this).hearthMenu(() => this.tendHearth()) },
       { x: 10.5 * TILE, y: 2.4 * TILE, label: "The household altar", act: () => ui(this).openAltar("home") },
       { x: 9.5 * TILE, y: 7 * TILE, label: "Look in the storage jar", act: () => G.say("A pithos for grain and oil. Empty, for now.") },
     ];
@@ -3629,7 +3652,7 @@ class WildScene extends PlayScene {
       G.say("You pick up a stone from the road and add it to the heap at the herm's foot. Travelers do; Hermes notices. (Hermes, up to +4)");
       return;
     }
-    const food = ["Honey", "Mushrooms", "Mint", "Meat", "Milk", "Wine", "Plum", "Millet"];
+    const food = ["Honey", "Mushrooms", "Mint", "Meat", "Milk", "Wine", "Plum", "Millet", ...Object.keys(ITEMS).filter((k) => ITEMS[k].kind === "meal")];
     if (!held || !food.includes(held)) { G.say("At night the crossroads is Hecate's. Suppers are left for her here: hold some food (honey, meat, milk, mint, mushrooms) and offer it."); return; }
     if (G.data.offered.hecateSupper === today) { G.say("Your supper for Hecate is already left here tonight."); return; }
     G.data.offered.hecateSupper = today; G.note("hecate");
@@ -3639,8 +3662,10 @@ class WildScene extends PlayScene {
       G.say("The circling dead stop. One by one they bend to Hecate's supper, and are gone.");
     }
     G.removeItem(held, 1);
-    const after = G.addFavor("Hecate", G.moon === "New moon" ? 2 : 1, 6);
-    G.say(`You set the ${ITEMS[held].name.toLowerCase()} at the herm's foot and walk away without looking back, as is proper.${G.moon === "New moon" ? " At the dark of the moon, she is especially near." : ""} (Hecate ${after >= 0 ? "+" : ""}${after})`);
+    const proper = held === "dish_hecate", cooked = ITEMS[held].kind === "meal";
+    const after = G.addFavor("Hecate", (G.moon === "New moon" ? 2 : 1) + (proper ? 2 : cooked ? 1 : 0), proper ? 8 : 6);
+    if (proper) G.say("Her own supper, cooked as it should be. The goddess is very near.");
+    G.say(`You set ${held === "dish_hecate" ? "her own supper" : `the ${lowerName(held)}`} at the herm's foot and walk away without looking back, as is proper.${G.moon === "New moon" ? " At the dark of the moon, she is especially near." : ""} (Hecate ${after >= 0 ? "+" : ""}${after})`);
   }
   /**
    * About one screen in fifteen, two or more out from home, someone lives alone or with their family in a hut.
@@ -4761,6 +4786,9 @@ class UIScene extends Phaser.Scene {
       "",
       "YOUR GUEST",
       "An old blind man, Tiresias, sits about the farm. Talk to him: his small requests lead you through the whole world, one a day.",
+      "",
+      "COOKING",
+      "At a campfire or your hearth (E): up to three foods in the pot. A dish strengthens the Aretai of its rarest food for a while; some old combinations are a god's own dish, and bring that god's favor near. Eat with Space.",
     ];
     const right = [
       "THE HOMESTEAD",
@@ -4820,7 +4848,9 @@ class UIScene extends Phaser.Scene {
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
     this.purse.setText(`Purse: ${money(G.data.silver)}`);
-    const lt = `Life Thread ${"●".repeat(G.data.lifeThread)}${"○".repeat(Math.max(0, START_LIFE_THREAD - G.data.lifeThread))}`;
+    const ml = G.data.meal, hrs = (u: number) => Math.max(1, Math.ceil(u - G.absHour));
+    const fed = [ml.aretai && ml.aretai.until > G.absHour ? `${ml.aretai.ar} +${ml.aretai.n} (${hrs(ml.aretai.until)}h)` : "", ml.favor && ml.favor.until > G.absHour ? `${ml.favor.god} near (${hrs(ml.favor.until)}h)` : ""].filter(Boolean).join(" · ");
+    const lt = `Life Thread ${"●".repeat(G.data.lifeThread)}${"○".repeat(Math.max(0, START_LIFE_THREAD - G.data.lifeThread))}${fed ? `\nFed: ${fed}` : ""}`;
     if (this.thread.text !== lt) this.thread.setText(lt);
     const p = G.patron;
     if (p) {
@@ -5616,7 +5646,7 @@ class UIScene extends Phaser.Scene {
 
   offer(where: "home" | "shrine", item: string, god: string, cap: number) {
     const today = G.dayNumber;
-    const name = ITEMS[item].name.toLowerCase();
+    const name = lowerName(item);
     // The chthonic powers take nothing by daylight, and only in the old ways.
     if (CHTHONIC.includes(god)) {
       if (G.isDay) { this.openAltar(where, `You hold out the ${name}, but it belongs to the one below, and he takes nothing by daylight.`); return; }
@@ -5644,7 +5674,7 @@ class UIScene extends Phaser.Scene {
   }
 
   hearthMenu(tend: () => void) {
-    const opts = [{ label: "Tend the hearth", fn: () => { this.closeTalk(); tend(); } }];
+    const opts = [{ label: "Tend the hearth", fn: () => { this.closeTalk(); tend(); } }, { label: "Cook something", fn: () => { this.closeTalk(); this.openCook("hearth"); } }];
     for (const id of G.data.arts) opts.push({ label: `Plan the ${ARTS[id].name}`, fn: () => this.planRitual(ARTS[id]) });
     this.showTalk("The hearth", "Hestia's fire, the heart of the household", "The fire burns low and steady. Here the household's rites are done.", opts);
   }
@@ -5865,7 +5895,7 @@ class UIScene extends Phaser.Scene {
     this.craftAt = at;
     this.modal = true; this.buildCraft();
   }
-  closeCraft() { this.craft?.destroy(); this.craft = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook; }
+  closeCraft() { this.craft?.destroy(); this.craft = undefined; this.pot = []; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook; }
 
   /** Your hands' skill at a station: Techne, and Hephaestus' boon when he favors you. */
   static craftQuality(): { q: number; roll: number; skill: number } {
@@ -5926,6 +5956,94 @@ class UIScene extends Phaser.Scene {
     const got = give(r.out, qty, q);
     G.say(`${STATION_NAME[r.at ?? "hand"]}: ${got}${note}.${qty > r.qty ? " Hephaestus guides your hands." : ""}`);
     this.buildCraft();
+  }
+
+  // ---------------------------------------------------------------- cooking
+  pot: string[] = [];
+  cookAt: "campfire" | "hearth" = "campfire";
+  /** Cook at a campfire or the hearth: up to three things in the pot. (Shares the crafting panel's place on screen.) */
+  openCook(at: "campfire" | "hearth") {
+    if (this.market || this.dialog || this.loreBook) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.cookAt = at; this.craftAt = "workbench"; this.pot = [];
+    this.modal = true; this.buildCook();
+  }
+  /** How well you cook: Oikos, and more in Demeter's hour. */
+  static cookSkill() { return (G.data.aretai.Oikos ?? 3) + (G.patron?.aretai === "Oikos" ? 2 : 0); }
+  buildCook() {
+    this.craft?.destroy();
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const have = Object.keys(INGREDIENTS).filter((id) => ITEMS[id] && G.count(id) > 0);
+    const inPot = (id: string) => this.pot.filter((x) => x === id).length;
+    const cols = 4, cw = 150, rows = Math.max(1, Math.ceil(have.length / cols));
+    const known = NAMED.filter((n) => G.data.dishes.includes(dishId(n)));
+    const w = 660, h = 230 + rows * 30 + (known.length ? 26 + Math.ceil(known.length / 2) * 17 : 20), x0 = (W - w) / 2, y0 = Math.max(6, (H - h) / 2 - 30);
+    const root = this.add.container(0, 0).setDepth(23); this.craft = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.text(W / 2, y0 + 10, this.cookAt === "hearth" ? "Cooking at the hearth" : "Cooking at the campfire", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 38, "Click foods to put up to three in the pot; click the pot to take them out. Rarer things make stronger dishes.", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    if (!have.length) root.add(this.add.text(W / 2, y0 + 66, "You carry nothing to cook: meat, grain, greens, herbs, fruit, milk, honey, oil or wine.", { ...font, fontSize: "14px", color: "#8d877b" }).setOrigin(0.5, 0));
+    have.forEach((id, i) => {
+      const x = x0 + 24 + (i % cols) * cw, y = y0 + 62 + Math.floor(i / cols) * 30, left = G.count(id) - inPot(id), ing = INGREDIENTS[id];
+      root.add(this.add.image(x + 8, y + 9, "items", id).setScale(1.25));
+      const t = this.add.text(x + 22, y, `${ITEMS[id].name} ${left}${"·".repeat(ing.rarity - 1) ? " " + "★".repeat(ing.rarity - 1) : ""}`, { ...font, fontSize: "13px", color: left > 0 && this.pot.length < 3 ? "#f2e6c9" : "#8d877b" });
+      root.add(t);
+      if (left > 0 && this.pot.length < 3) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => { this.pot.push(id); this.buildCook(); });
+    });
+    // The pot.
+    const py = y0 + 74 + rows * 30;
+    root.add(this.add.text(x0 + 24, py + 10, "The pot:", { ...font, fontSize: "15px" }));
+    for (let k = 0; k < 3; k++) {
+      const bx = x0 + 110 + k * 46;
+      const box = this.add.rectangle(bx, py, 38, 38, 0x3a2c22).setOrigin(0, 0).setStrokeStyle(1, 0x8a6a4a);
+      root.add(box);
+      const id = this.pot[k];
+      if (id) { root.add(this.add.image(bx + 19, py + 19, "items", id).setScale(2)); box.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.pot.splice(k, 1); this.buildCook(); }); }
+    }
+    // What it will make.
+    let preview = "Put something in the pot.";
+    if (this.pot.length) {
+      const r = cookResult(this.pot), stars = ["", "plain", "good", "rich"][r.tier];
+      if (r.named && G.data.dishes.includes(r.id)) preview = `${r.named.name}: ${r.named.god}'s own dish (${stars}). ${effectText(mealEffect(r.id, r.tier))}.`;
+      else {
+        const plain = PLAIN[r.aretai];
+        preview = `${plain.name} (${stars}): ${effectText(mealEffect(`meal_${r.aretai}`, r.tier))}.${r.named ? "\nSomething about this combination smells like a festival..." : ""}`;
+      }
+      preview += `\nA good cook (Oikos ${UIScene.cookSkill()}) may make it richer; so do fine ingredients.`;
+    }
+    root.add(this.add.text(x0 + 260, py - 2, preview, { ...font, fontSize: "13px", color: "#fbe39a", wordWrap: { width: w - 280 } }));
+    const ok = this.pot.length > 0;
+    const btn = this.add.text(x0 + 24, py + 52, "▶ Cook it", { ...font, fontSize: "17px", color: ok ? "#f2c14e" : "#8d877b" });
+    root.add(btn);
+    if (ok) btn.setInteractive({ useHandCursor: true }).on("pointerover", () => btn.setColor("#ffffff")).on("pointerout", () => btn.setColor("#f2c14e")).on("pointerdown", () => this.cook());
+    // The dishes of the gods you have found.
+    let ky = py + 90;
+    if (known.length) {
+      root.add(this.add.text(x0 + 24, ky, "Dishes of the gods you know:", { ...font, fontSize: "13px", color: "#c9b48f" })); ky += 20;
+      known.forEach((n, i) => root.add(this.add.text(x0 + 24 + (i % 2) * 310, ky + Math.floor(i / 2) * 17, `${n.name} (${n.god}): ${n.needs.map((x) => (Array.isArray(x) ? x.map((y) => ITEMS[y].name).join(" or ") : ITEMS[x].name)).join(", ")}`, { ...font, fontSize: "11px", color: "#c9b48f", wordWrap: { width: 300 } })));
+    } else root.add(this.add.text(x0 + 24, ky, "Some old combinations are the gods' own dishes. You'll know one when you cook it.", { ...font, fontSize: "12px", color: "#8d877b" }));
+    root.add(this.add.text(W / 2, y0 + h - 22, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+  cook() {
+    const pot = [...this.pot];
+    if (pot.some((id) => G.count(id) < pot.filter((x) => x === id).length)) { this.pot = []; this.buildCook(); return; }
+    const b = labor(EFFORT.hand, 1, "Oikos"); if (b === null) return;
+    const r = cookResult(pot);
+    // Fine ingredients make a finer dish: if every one can come from your better stock, use it.
+    const fine = pot.every((id) => UIScene.countQ(id, 2) >= pot.filter((x) => x === id).length);
+    for (const id of pot) UIScene.takeQ(id, 1, fine ? 2 : 1);
+    const skill = UIScene.cookSkill(), roll = d12(), well = roll <= Math.ceil(skill / 2);
+    const tier = Math.min(3, r.tier + (fine ? 1 : 0) + (well ? 1 : 0));
+    const first = !G.data.dishes.includes(r.id);
+    if (first) G.data.dishes.push(r.id);
+    G.note("cook"); G.note(`cook:${r.id}`);
+    SOUND.sfx(r.named && first ? "find" : "pickup");
+    const got = give(r.id, 1, tier);
+    const how = [fine && "fine ingredients", well && `well cooked (Oikos d12 ${roll})`].filter(Boolean).join(", ");
+    if (r.named && first) G.say(`A dish of the gods! ${r.named.name}: ${r.named.desc}`);
+    G.say(`You cook: ${got}${how ? ` (${how})` : ""}. Eaten: ${effectText(mealEffect(r.id, tier))}.${b}`);
+    this.pot = []; this.buildCook();
   }
 
   // ---------------------------------------------------------------- chests

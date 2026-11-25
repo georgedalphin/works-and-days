@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { CROPS, seedId } from "./data";
+import { CROPS, seedId, WHEEL } from "./data";
+import { DISH_IDS, NAMED } from "./cooking";
 import { FORAGE } from "./forage";
 import { VILLAGERS } from "./village";
 
@@ -766,7 +767,7 @@ export function makeTextures(scene: Phaser.Scene) {
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
-  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS];
 
 const CROP_COL: Record<string, [string, string]> = {
   Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
@@ -836,6 +837,17 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
 const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel" };
 
 function drawIcon(c: Ctx, o: number, id: string) {
+  if (id.startsWith("meal_") || id.startsWith("dish_")) {
+    // A clay bowl, its food colored by the Aretai (plain dishes) or the god (a god's dish), steam rising.
+    const GOD_COL: Record<string, string> = { Hades: "#5a4a6a", Hecate: "#6a4a8a" };
+    const ar = id.slice(5), named = NAMED.find((n) => `dish_${n.key}` === id);
+    const col = named ? GOD_COL[named.god] ?? WHEEL.find((w) => w.god === named.god)?.color ?? "#c9a35a" : WHEEL.find((w) => w.aretai === ar)?.color ?? "#c9a35a";
+    px(c, o + 2, 8, 12, 1, "#9c5532"); px(c, o + 3, 9, 10, 3, "#c4703f"); px(c, o + 5, 12, 6, 2, "#9c5532");
+    px(c, o + 3, 7, 10, 2, col); px(c, o + 5, 6, 6, 1, col); px(c, o + 6, 7, 2, 1, "rgba(255,255,255,0.45)");
+    if (named) { px(c, o + 7, 10, 2, 1, "#f2d27a"); } // a gold mark: a god's dish
+    px(c, o + 6, 2, 1, 2, "rgba(255,255,255,0.5)"); px(c, o + 9, 1, 1, 3, "rgba(255,255,255,0.4)");
+    return;
+  }
   if (FORAGE_ICON[id]) { drawForage(c, o, FORAGE_ICON[id], false); drawForage(c, o, FORAGE_ICON[id], true); return; }
   if (id.startsWith("seed_")) {
     const [a] = CROP_COL[id.slice(5)];

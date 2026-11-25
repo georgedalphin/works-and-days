@@ -113,6 +113,10 @@ export interface SaveData {
   /** Year each olive tree on the homestead was last picked. */
   olives: Record<string, number>;
   /** Tiresias: which of his tasks you are on, what has happened since it began, where he sits. */
+  /** A meal's effects while they last: one Aretai, one god's favor. `until` is in absolute clock hours (day × 24 + clock). */
+  meal: { aretai?: { ar: string; n: number; until: number; dish: string }; favor?: { god: string; n: number; until: number; dish: string } };
+  /** The dishes you have cooked, so you know them when you see them in the pot. */
+  dishes: string[];
   tir: { step: number; ev: Record<string, number>; base: Record<string, number>; doneDay: number; spot: number; met: boolean; said: number };
   /** The gods at work: gifts and troubles waiting in their domains, powers used, Chosen marks, charges, and days. */
   divine: {
@@ -164,6 +168,33 @@ export class GameState {
   }
 
   /** Bring saves from earlier builds up to date. */
+  /** Now, in clock hours since the world began. */
+  get absHour() { return this.dayNumber * 24 + this.data.clock; }
+  /** A god's dish you ate brings their favor closer for a while. */
+  mealFavor(god: string) { const f = this.data.meal.favor; return f && f.god === god && f.until > this.absHour ? f.n : 0; }
+  /** Eat a dish: its Aretai or its god's favor for a while. A new meal of the same sort replaces the old one. */
+  eatMeal(dish: string, effect: { ar?: string; god?: string; n: number; hours: number }) {
+    this.endMeal("aretai", effect.ar ? undefined : "keep");
+    if (effect.ar) {
+      this.data.aretai[effect.ar] = (this.data.aretai[effect.ar] ?? 3) + effect.n;
+      this.data.meal.aretai = { ar: effect.ar, n: effect.n, until: this.absHour + effect.hours, dish };
+    } else if (effect.god) this.data.meal.favor = { god: effect.god, n: effect.n, until: this.absHour + effect.hours, dish };
+  }
+  /** Take a meal's Aretai back off when it ends (or is replaced). */
+  endMeal(which: "aretai", keep?: string) {
+    const m = this.data.meal.aretai;
+    if (!m || keep) return;
+    this.data.aretai[m.ar] = (this.data.aretai[m.ar] ?? 3) - m.n;
+    this.data.meal.aretai = undefined;
+  }
+  /** Meals wear off. Returns what ended, to say so. */
+  mealTick(): string[] {
+    const now = this.absHour, out: string[] = [], m = this.data.meal;
+    if (m.aretai && m.aretai.until <= now) { out.push(`The ${m.aretai.ar} from your meal wears off.`); this.endMeal("aretai"); }
+    if (m.favor && m.favor.until <= now) { out.push(`The nearness of ${m.favor.god} that came with your meal fades.`); m.favor = undefined; }
+    return out;
+  }
+
   /** Something happened that Tiresias may ask after: count it. */
   note(ev: string, n = 1) { this.data.tir.ev[ev] = (this.data.tir.ev[ev] ?? 0) + n; }
 
@@ -181,7 +212,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.meal ??= {}; d.dishes ??= []; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
     if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
     // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
     if (!d.spearHotbar) {
@@ -253,7 +284,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, meal: {}, dishes: [], tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -347,7 +378,7 @@ export class GameState {
   doomed(god: string) { return this.favor(god) <= -12; }
   /** Favor tier, -4 to +4: what boons and penalties scale by. */
   boon(god: string) {
-    const f = this.favor(god);
+    const f = this.favor(god) + this.mealFavor(god);
     let b = boonOf(f);
     const o = this.data.omen;
     if (o && o.day === this.dayNumber && o.god === god) b += o.good ? 1 : -1; // today's omen, whether you read it or not

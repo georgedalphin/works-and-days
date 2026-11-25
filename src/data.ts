@@ -114,7 +114,7 @@ export const NIGHT_WATCHES_PLAYABLE = 2;
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----
-export type ItemKind = "tool" | "material" | "seed" | "crop" | "find" | "place";
+export type ItemKind = "tool" | "material" | "seed" | "crop" | "find" | "place" | "meal";
 export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string; value?: number }
 
 export const ITEMS: Record<string, ItemDef> = {
