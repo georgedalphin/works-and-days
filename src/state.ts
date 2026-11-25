@@ -94,6 +94,7 @@ export interface SaveData {
   /** Where your thrown spear lies, until you pick it up. */
   spearAt: { k: string; x: number; y: number } | null;
   spearGiven?: boolean;
+  spearHotbar?: boolean;
   /** Villagers' requests you have taken on, and rumors of lands you've been told of. */
   requests: Request[];
   rumors: Rumor[];
@@ -157,7 +158,18 @@ export class GameState {
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
     d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {};
-    if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } } d.weather ??= "clear"; d.signs ??= {};
+    if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
+    // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
+    if (!d.spearHotbar) {
+      d.spearHotbar = true;
+      const i = d.slots.findIndex((s) => s?.id === "spear");
+      if (i >= 10) {
+        let h = d.slots.slice(0, 10).findIndex((s) => !s);
+        if (h < 0) for (let k = 9; k >= 0; k--) if (d.slots[k]?.id.startsWith("seed_")) { h = k; break; }
+        if (h >= 0) [d.slots[h], d.slots[i]] = [d.slots[i], d.slots[h]];
+      }
+    }
+    d.weather ??= "clear"; d.signs ??= {};
     if (!d.bowGiven) { d.bowGiven = true; if (!d.slots.some((s) => s?.id === "bow")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("bow", 1); g.addItem("Arrow", STARTING_ARROWS); } }
     d.lore ??= { tier: { ...START_LORE }, fails: {}, studied: {} };
     d.wx ??= 0; d.wy ??= 0; d.entry ??= ""; d.lastTerrain ??= HOME_TERRAIN; d.screens ??= {};

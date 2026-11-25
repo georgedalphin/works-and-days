@@ -4,8 +4,8 @@ import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./texture
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
-import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
-import { MOROS_DREAMS } from "./omens";
+import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
+import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -3758,6 +3758,7 @@ class UIScene extends Phaser.Scene {
       if (this.talkPanel && e.key >= "1" && e.key <= "9") { const o = this.talkOpts[Number(e.key) - 1]; if (o) o.fn(); return; }
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
+      if (e.key === "`" || e.key === "~") { if (this.devPanel) this.closeDev(); else this.openDev(); }
       if ((e.key === "j" || e.key === "J") && !this.market && !this.inv && !this.craft && !this.chestPanel && !this.loreBook) { if (this.talkPanel) this.closeTalk(); else this.openJournal(); }
       if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
       if (e.key === "m" || e.key === "M") G.say(SOUND.toggleMute() ? "Sound off (M to turn it back on)." : "Sound on.");
@@ -3830,7 +3831,7 @@ class UIScene extends Phaser.Scene {
       else if (this.craft && this.craftAt !== "hand") { this.closeCraft(); this.closedByE = performance.now(); }
     });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.devPanel && k === "ESC") this.closeDev(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); else if (this.talkPanel) this.closeTalk(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -4155,6 +4156,74 @@ class UIScene extends Phaser.Scene {
     const r: Rumor = { key, terrain: ts[Math.floor(Math.random() * ts.length)], from: vid, day: G.dayNumber };
     G.data.rumors.push(r);
     return r;
+  }
+
+  // ---------------------------------------------------------------- testing: jump through the year
+  devPanel?: Phaser.GameObjects.Container;
+  closeDev() { this.devPanel?.destroy(); this.devPanel = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft || !!this.chestPanel; }
+  /** The active play scene, if any. */
+  playScene() { return this.scene.manager.getScenes(true).find((s) => s instanceof PlayScene) as PlayScene | undefined; }
+  /**
+   * A tool for testing (the ` key): jump to the start of any month (always forward, into next year if need be),
+   * see which of Hesiod's signs fall in it, and call up this month's sign at once.
+   */
+  openDev() {
+    if (this.market || this.dialog || this.loreBook || this.craft || this.chestPanel) return;
+    if (this.inv) this.toggleInventory();
+    if (this.help.visible) this.help.setVisible(false);
+    this.modal = true;
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 640, h = 470, x0 = (W - w) / 2, y0 = (H - h) / 2;
+    const root = this.add.container(0, 0).setDepth(30); this.devPanel = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x14100c, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0x6a8fb0));
+    root.add(this.add.text(W / 2, y0 + 10, "Testing · jump through the year", { ...font, fontSize: "18px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 36, `Now: ${G.dateLabel()}. Jumps go forward to the 1st of the month, at dawn; crops and requests count the days skipped.`, { ...font, fontSize: "12px", color: "#9fb4c8", wordWrap: { width: w - 40 }, align: "center" }).setOrigin(0.5, 0));
+    const signsIn = (m: number) => Object.values(SIGN_TABLE).filter((s) => s.months.includes(m)).map((s) => s.id);
+    MONTHS.forEach((mo, i) => {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = x0 + 24 + col * 300, y = y0 + 76 + row * 46;
+      const cur = i === G.data.month;
+      const t = this.add.text(x, y, `${mo.name} · ${mo.season}`, { ...font, fontSize: "15px", color: cur ? "#f2c14e" : "#f2e6c9" });
+      const sg = signsIn(i);
+      root.add([t, this.add.text(x, y + 19, sg.length ? `signs: ${sg.join(", ")}` : "no signs", { ...font, fontSize: "11px", color: "#9fb4c8" })]);
+      t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#9fd0ff")).on("pointerout", () => t.setColor(cur ? "#f2c14e" : "#f2e6c9")).on("pointerdown", () => this.jumpTo(i));
+    });
+    const btn = (label: string, x: number, fn: () => void) => {
+      const t = this.add.text(x, y0 + h - 64, label, { ...font, fontSize: "14px", backgroundColor: "#2a3a4a", padding: { x: 8, y: 4 } as Phaser.Types.GameObjects.Text.TextPadding });
+      t.setInteractive({ useHandCursor: true }).on("pointerdown", fn); root.add(t);
+    };
+    btn("+1 day", x0 + 24, () => this.jumpDays(1));
+    btn("+7 days", x0 + 104, () => this.jumpDays(7));
+    btn("Show this month's sign now", x0 + 194, () => {
+      const ps = this.playScene();
+      const s = Object.values(SIGN_TABLE).find((x) => x.months.includes(G.data.month));
+      if (!ps || !s) { G.say(s ? "Step outside first." : "No sign falls in this month."); return; }
+      delete G.data.signs[s.id]; this.closeDev(); ps.showSign(s);
+    });
+    btn("Forget this year's signs", x0 + 430, () => { G.data.signs = {}; G.say("This year's signs can be seen again."); });
+    root.add(this.add.text(W / 2, y0 + h - 26, "` or Esc to close", { ...font, fontSize: "12px", color: "#9fb4c8" }).setOrigin(0.5, 0));
+  }
+  /** Go forward to the 1st of month m (next year if it's not ahead of us), at dawn, and redraw the world. */
+  jumpTo(m: number) {
+    if (m <= G.data.month) G.data.year += 1;
+    G.data.month = m; G.data.day = 1;
+    this.afterJump();
+  }
+  jumpDays(n: number) {
+    for (let i = 0; i < n; i++) {
+      G.data.day += 1;
+      if (G.data.day > MONTHS[G.data.month].days) { G.data.day = 1; G.data.month += 1; if (G.data.month >= MONTHS.length) { G.data.month = 0; G.data.year += 1; } }
+    }
+    this.afterJump();
+  }
+  afterJump() {
+    G.data.clock = 0.6;
+    G.data.weather = G.data.nextWeather = rollWeather(G.month.season, 1 + Math.floor(Math.random() * 12));
+    this.closeDev();
+    const ps = this.playScene();
+    G.save();
+    G.say(`Testing: it is now ${G.dateLabel()}.`);
+    if (ps) { G.data.entry = ""; ps.scene.restart(); }
   }
 
   openJournal() {
