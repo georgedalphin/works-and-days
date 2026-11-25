@@ -6,6 +6,7 @@ import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
 import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
+import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
@@ -1056,7 +1057,7 @@ abstract class PlayScene extends Phaser.Scene {
   aimGfx!: Phaser.GameObjects.Graphics;
   cooldown = 0;
   arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number; from?: Animal; spear?: boolean }[] = [];
-  pickups: { id: string; qty: number; img: Phaser.GameObjects.Image; q?: number; from?: string }[] = [];
+  pickups: { id: string; qty: number; img: Phaser.GameObjects.Image; q?: number; from?: string; lm?: number }[] = [];
   get canHunt() { return true; }
 
   /** Where the pointer is in the world, pulled in to the bow's range (or the spear's). */
@@ -1477,6 +1478,11 @@ abstract class PlayScene extends Phaser.Scene {
       const left = G.addItem(p.id, p.qty, p.q);
       if (left === p.qty) continue; // no room
       if (p.id === "spear") { G.data.spearAt = null; G.say("You pull your spear out of the ground."); }
+      else if (p.lm !== undefined) {
+        const w = this as unknown as { rec: ScreenRec; lmDangers?: (on: "gather") => void };
+        (w.rec.lmTook ??= {})[p.lm] = seasonKey(G.data.year, G.month.season);
+        G.say(`+${p.qty - left} ${ITEMS[p.id].name}`); w.lmDangers?.("gather");
+      }
       else if (p.from) { G.say(`A gift of ${p.from}: +${p.qty - left} ${p.q && p.q > 1 ? QUALITY[p.q] + " " : ""}${ITEMS[p.id].name}.`); SOUND.sfx("find"); }
       else G.say(`+${p.qty - left} ${ITEMS[p.id].name}`);
       if (left > 0) { p.qty = left; continue; }
@@ -2626,7 +2632,7 @@ class WildScene extends PlayScene {
       // A land someone told you of is what they said it was.
       const rumor = G.data.rumors.find((x) => x.key === this.key && !x.found);
       const roll = rumor ? { terrain: rumor.terrain, special: false } : rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
-      if (rumor) { rumor.found = true; this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
+      if (rumor) { rumor.found = true; if (VILLAGERS[rumor.from]) this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
       const p = profile(roll.terrain);
       G.data.screens[this.key] = { terrain: roll.terrain, special: roll.special, feature: p.features[Math.floor(r() * p.features.length)], cleared: [] };
     }
@@ -2677,10 +2683,20 @@ class WildScene extends PlayScene {
     const cx = 20, cy = 15;
     // The village road runs south from the farm.
     if (wx === 0 && wy >= 2) for (let y = 0; y < WH; y++) { ground[y][cx] = T.PATH; for (let x = cx - 1; x <= cx + 1; x++) if (y > 0 && y < WH - 1 || x === cx || objs[y][x] !== T.EDGE) objs[y][x] = -1; objs[y][cx] = -1; }
-    // The screen's feature, somewhere away from the middle.
-    const fx = gen() < 0.5 ? 4 + Math.floor(gen() * 8) : WW - 12 + Math.floor(gen() * 8);
-    const fy = 4 + Math.floor(gen() * (WH - 8));
-    this.stampFeature(objs, fx, fy, this.rec.feature, gen);
+    // The screen's landmark (or small feature), somewhere away from the middle.
+    const lmDef = LANDMARKS[this.rec.feature];
+    this.lm = null;
+    if (lmDef) {
+      const r = lmDef.r, west = gen() < 0.5;
+      const lx = west ? r + 2 + Math.floor(gen() * Math.max(1, 12 - r)) : WW - r - 3 - Math.floor(gen() * Math.max(1, 12 - r));
+      const ly = r + 2 + Math.floor(gen() * Math.max(1, WH - 2 * r - 4));
+      this.lm = { name: this.rec.feature, def: lmDef, x: lx, y: ly };
+      this.stampLandmark(objs, ground, lx, ly, lmDef, gen);
+    } else {
+      const fx = gen() < 0.5 ? 4 + Math.floor(gen() * 8) : WW - 12 + Math.floor(gen() * 8);
+      const fy = 4 + Math.floor(gen() * (WH - 8));
+      this.stampFeature(objs, fx, fy, this.rec.feature, gen);
+    }
     for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE) objs[y][x] = -1; }
     // Gaps in the border on each open side (matching the neighbour's), each with a winding clear way to the middle.
     this.gates = { N: [], S: [], E: [], W: [] };
@@ -2783,12 +2799,158 @@ class WildScene extends PlayScene {
     this.setupGlint();
     this.setupHut();
     this.setupSites();
+    this.setupLandmark();
     this.drawPlaced();
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
     if (firstVisit) G.say(`New land: ${t.name} (${t.aretai}, ${t.element}). Here: ${this.rec.feature.toLowerCase()}.${this.rec.special ? " Something about this place feels set apart." : ""}`);
     else G.say(`${t.name}, as you left it.`);
+  }
+
+  // ---------------------------------------------------------------- landmarks (landmarks.ts)
+  lm: { name: string; def: LandmarkDef; x: number; y: number } | null = null;
+  lmInside = false; lmGuards: Animal[] = [];
+  /** Lay out a landmark: clear its ground, then its own pattern of trees, stones, water or ruins. */
+  stampLandmark(objs: number[][], ground: number[][], cx: number, cy: number, d: LandmarkDef, gen: () => number) {
+    const r = d.r, propAt = new Set(d.props.map(([, dx, dy]) => `${cx + dx},${cy + dy}`));
+    const nearProp = (x: number, y: number) => d.props.some(([, dx, dy]) => Math.abs(x - cx - dx) <= 2 && Math.abs(y - cy - dy) <= 2);
+    const grove = this.rec.feature === "Olive grove" ? T.OLIVE : this.rec.terrain === 12 || this.rec.terrain === 9 ? T.PINE : T.TREE;
+    for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) {
+      if (x < 2 || y < 2 || x >= WW - 2 || y >= WH - 2) continue;
+      const dist = Math.hypot(x - cx, y - cy);
+      if (dist > r + 0.4 || objs[y][x] === T.EDGE) continue;
+      const edge = dist > r - 1.2, ring = Math.max(Math.abs(x - cx), Math.abs(y - cy));
+      let t = -1;
+      const roll = gen();
+      switch (d.layout) {
+        case "grove": t = dist > 2 && roll < d.density ? grove : -1; break;
+        case "rocks": t = roll < d.density ? (gen() < 0.4 ? T.BOULDER : T.STONE) : -1; break;
+        case "scree": t = roll < d.density ? T.STONE : roll < d.density + 0.05 ? T.BOULDER : -1; if (this.rec.terrain === 8) ground[y][x] = T.SAND; break;
+        case "meadow": t = roll < d.density ? T.FLOWERS : -1; break;
+        case "thicket": t = roll < d.density ? (this.rec.terrain === 11 ? T.THORN : T.BRUSH) : -1; break;
+        case "field": t = roll < d.density ? T.BRUSH : -1; break;
+        case "reeds": t = roll < d.density ? T.REEDS : roll < d.density + 0.08 ? T.WATER : -1; break;
+        case "pool": t = dist <= r * 0.38 ? T.WATER : roll < d.density ? (this.rec.terrain === 8 ? -1 : gen() < 0.5 ? T.REEDS : T.FLOWERS) : -1; break;
+        case "ruin": t = ring === r - 1 && roll < d.density ? (gen() < 0.6 ? T.BOULDER : T.STONE) : ring < r - 1 && roll < 0.06 ? T.STONE : -1; break;
+        case "mound": t = edge && roll < d.density ? T.STONE : -1; break;
+        case "beach": ground[y][x] = T.SAND; t = roll < d.density ? T.STONE : -1; break;
+        case "clearing": t = roll < d.density ? T.STONE : -1; break;
+      }
+      if (nearProp(x, y) || propAt.has(`${x},${y}`)) t = -1;
+      objs[y][x] = t;
+    }
+  }
+
+  /** Draw the landmark's props, lay out what can be found there this season, and its cache and special action. */
+  setupLandmark() {
+    this.lmInside = false; this.lmGuards = [];
+    const lm = this.lm; if (!lm) return;
+    const d = lm.def, sk = seasonKey(G.data.year, G.month.season), sc = this, rec = this.rec;
+    rec.lmTook ??= {};
+    for (const [key, dx, dy, solid] of d.props) {
+      const x = (lm.x + dx) * TILE + 8, y = (lm.y + dy) * TILE + 14;
+      const img = this.add.image(x, y, key).setOrigin(0.5, 1).setDepth(y);
+      if (solid) this.solidAt(x, y - 4, Math.min(img.width - 6, 40), 8);
+    }
+    // Things lying about: the same spots each visit, gone once taken until the season turns.
+    const r = rng((screenSeed(G.data.wx, G.data.wy) ^ 0x1a2d) >>> 0);
+    for (let i = 0; i < d.nFinds; i++) {
+      const [item, qty] = d.finds[i % d.finds.length];
+      let placed = false;
+      for (let k = 0; k < 40 && !placed; k++) {
+        const a = r() * Math.PI * 2, dist = 1 + r() * (d.r - 1);
+        const x = (lm.x + Math.cos(a) * dist) * TILE + 8, y = (lm.y + Math.sin(a) * dist) * TILE + 8;
+        if (!this.openGround(x, y)) continue;
+        placed = true;
+        if (rec.lmTook[i] === sk) continue;
+        this.dropItem(item, qty, x, y);
+        this.pickups[this.pickups.length - 1].lm = i;
+      }
+    }
+    const [ax, ay] = d.props.length ? [(lm.x + d.props[0][1]) * TILE + 8, (lm.y + d.props[0][2]) * TILE + 18] : [lm.x * TILE + 8, lm.y * TILE + 8];
+    if (d.cache) this.targets.push({ x: ax, y: ay, get label() { return rec.lmCache === sk ? "" : d.cache!.label; }, act: () => sc.searchLandmark() });
+    if (d.action === "lookout") this.targets.push({ x: ax + 6, y: ay - 4, label: `Look out from the ${lm.name.toLowerCase()}`, act: () => sc.lookout() });
+    if (d.action === "dig") this.targets.push({ x: lm.x * TILE + 8, y: lm.y * TILE + 8, label: "Dig in the riverbed for water", act: () => sc.digWater() });
+    if (d.action === "offer" && d.god) this.targets.push({ x: ax, y: ay - 2, label: `Make an offering to ${d.god} here`, act: () => ui(sc).priestTalk(d.god!, "", `the ${lm.name.toLowerCase()}`, true, 6) });
+    if (rec.feature === "Burial mound") { rec.barrow ??= [lm.x, lm.y + 2]; this.setupBarrow(); }
+  }
+
+  /** Stepping into the landmark: its sight the first time, and the dangers that wait for whoever comes. */
+  landmarkTick() {
+    const lm = this.lm; if (!lm || this.paused || this.leaving) return;
+    const tx = this.player.x / TILE, ty = (this.player.y + 4) / TILE;
+    const inside = Math.hypot(tx - lm.x - 0.5, ty - lm.y - 0.5) <= lm.def.r;
+    if (inside && !this.lmInside) {
+      if (!this.rec.lmSeen) { this.rec.lmSeen = true; G.say(lm.def.sight); }
+      this.lmDangers("enter");
+    }
+    this.lmInside = inside;
+  }
+  lmDangers(on: "enter" | "search" | "gather") {
+    const lm = this.lm!; const rain = G.data.weather === "rain" || G.data.weather === "wind";
+    for (const dg of lm.def.dangers) {
+      if ((dg.kind === "hazard" ? dg.on : dg.on ?? "enter") !== on) continue;
+      if (dg.kind !== "hazard" && dg.when && (dg.when === "night") === G.isDay) continue;
+      if (dg.kind === "hazard" && dg.rain && !rain) continue;
+      if (dg.kind === "hazard" && dg.cause === "bees" && on === "search" && G.selectedItem?.id === "Torch") { G.say("You hold the torch to the hollow: the smoke sends the bees drowsy."); continue; }
+      if (Math.random() >= dg.chance) continue;
+      if (dg.kind === "hazard") { this.harm(dg.dmg, dg.text, dg.cause); continue; }
+      if (on === "enter" && this.lmGuards.length) continue; // they've already come for you this visit
+      G.say(dg.text);
+      if (dg.kind === "monster") {
+        if (dg.monster === "skeleton") { this.rec.barrow = [lm.x, lm.y + 2]; this.setupBarrow(); }
+        this.spawnMonster(dg.monster);
+        if (this.monster && dg.monster !== "skeleton") { this.monster.sprite.setPosition(lm.x * TILE + 8, lm.y * TILE + 8); this.monster.charge(8); }
+        if (this.monster) this.lmGuards.push(this.monster);
+      } else {
+        const free = (x: number, y: number) => this.free(x, y);
+        for (let i = 0; i < (dg.n ?? 1); i++) {
+          const x = (lm.x + (i - 1) * 1.5) * TILE + 8, y = (lm.y + 1) * TILE + 8;
+          const a = new Animal(this, dg.species as Species, x, y, new Phaser.Geom.Rectangle(x - lm.def.r * TILE, y - lm.def.r * TILE, lm.def.r * TILE * 2, lm.def.r * TILE * 2), free);
+          this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+          if (dg.species === "eidolon") { a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 0.85, duration: 1200 }); }
+          this.animals.push(a); this.lmGuards.push(a);
+          a.charge(7); this.alarm(a);
+        }
+      }
+    }
+  }
+  /** Search the landmark's cache: worth doing once a season, and not always safe. */
+  searchLandmark() {
+    const lm = this.lm!, d = lm.def, sk = seasonKey(G.data.year, G.month.season);
+    if (this.rec.lmCache === sk) { G.say("You've already been through it this season. Come back when the season turns."); return; }
+    const b = labor(EFFORT.pull, 2, "Oikos"); if (b === null) return;
+    this.rec.lmCache = sk; this.gesture("look");
+    const got = d.cache!.items.filter(() => Math.random() < 0.75).map(([id, n]) => give(id, n));
+    if (!got.length) got.push(give(d.cache!.items[0][0], d.cache!.items[0][1]));
+    G.say(`${d.cache!.text} ${got.join(", ")}.${b}`);
+    this.lmDangers("search");
+  }
+  /** From the heights you can see what lies around: the lands you will meet are fixed by what you saw. */
+  lookout() {
+    const lm = this.lm!, far = lm.name === "Ruined watchtower" || lm.name === "Acropolis ruins" ? 2 : 1;
+    this.gesture("look");
+    const seen: string[] = [];
+    const dirs: [number, number, string][] = [[0, -1, "north"], [1, -1, "northeast"], [1, 0, "east"], [1, 1, "southeast"], [0, 1, "south"], [-1, 1, "southwest"], [-1, 0, "west"], [-1, -1, "northwest"]];
+    for (let k = 1; k <= far; k++) for (const [dx, dy, name] of dirs) {
+      const x = G.data.wx + dx * k, y = G.data.wy + dy * k, key = `${x},${y}`;
+      if (x === 0 && (y === 0 || y === 1)) continue;
+      let t = G.data.screens[key]?.terrain ?? G.data.rumors.find((q) => q.key === key)?.terrain;
+      if (t === undefined) {
+        t = rollTerrain(this.rec.terrain, rng((screenSeed(x, y) ^ 0x5ee) >>> 0)).terrain;
+        G.data.rumors.push({ key, terrain: t, from: "lookout", day: G.dayNumber, told: true });
+      }
+      seen.push(`${k > 1 ? "far " : ""}${name}: ${terrain(t).name.toLowerCase()}`);
+    }
+    G.say(`From up here you can see the lands around. ${seen.slice(0, 8).join("; ")}.`);
+    if (seen.length > 8) G.say(`And further off: ${seen.slice(8).join("; ")}.`);
+  }
+  digWater() {
+    if (G.data.jarWater >= jarCap()) { G.say("Your jar is already full."); return; }
+    const b = labor(EFFORT.dig, 2, "Oikos"); if (b === null) return;
+    this.gesture("act");
+    G.data.jarWater = jarCap(); G.say(`You dig down through the sand of the riverbed until water seeps in, and fill your jar.${b}`);
   }
 
   stampFeature(objs: number[][], fx: number, fy: number, name: string, gen: () => number) {
@@ -3550,6 +3712,7 @@ class WildScene extends PlayScene {
     this.updateMythborn(dt);
     this.directHutFolk(dt);
     this.directSiteFolk(dt);
+    this.landmarkTick();
     if (!this.common(dt)) return;
     this.maybeWolves();
     this.monsterTick(dt);
@@ -4653,9 +4816,9 @@ class UIScene extends Phaser.Scene {
     return lines.join("\n");
   }
   /** Speak with a priest, priestess or keeper of a god (or stand at the god's altar). */
-  priestCtx: [string, string, string, boolean] = ["", "", "", false];
-  priestTalk(god: string, name: string, role: string, atAltar = false) {
-    this.priestCtx = [god, name, role, atAltar];
+  priestCtx: [string, string, string, boolean, number] = ["", "", "", false, 9];
+  priestTalk(god: string, name: string, role: string, atAltar = false, cap = 9) {
+    this.priestCtx = [god, name, role, atAltar, cap];
     const d = DIVINE[god], dv = G.data.divine, held = G.selectedItem?.id;
     const who = name ? `${name}, ${role}` : role[0].toUpperCase() + role.slice(1);
     const chthonic = CHTHONIC.includes(god);
@@ -4680,12 +4843,12 @@ class UIScene extends Phaser.Scene {
     if (held && ITEMS[held]?.kind !== "tool") opts.push({ label: `Offer the ${ITEMS[held].name.toLowerCase()} to ${god}`, fn: () => {
       if (chthonic && G.isDay) { this.priestTalk2(god, who, `"Not by daylight. The ones below take their offerings in the dark."`); return; }
       if (G.data.offered[god] === G.dayNumber) { this.priestTalk2(god, who, `${god} has had your offering today.`); return; }
-      if (G.favor(god) >= 9) { this.priestTalk2(god, who, `"${god} knows you well. Greater favor comes from deeds, and from what ${god} asks of you."`); return; }
+      if (G.favor(god) >= cap) { this.priestTalk2(god, who, `${name ? `"${god} knows you well.` : `${god} knows you well here.`} Greater favor comes from deeds, and from what ${god} asks of you${name ? '."' : "."}`); return; }
       const slot = G.data.slots.find((s) => s && s.id === held && s.q === 3) ?? G.data.slots.find((s) => s && s.id === held);
       const fine = slot?.q === 3, liked = (OFFER_PATRON[held] ?? "") === god || d.wants.some(([i]) => i === held);
       G.removeItem(held, 1); G.data.offered[god] = G.dayNumber;
-      const after = G.addFavor(god, (fine ? 2 : 1) + (liked ? 1 : 0), 9);
-      this.priestTalk2(god, who, `The ${ITEMS[held].name.toLowerCase()} is given to ${god}${liked ? ", and it is the kind of thing the god loves" : ""}. (favor ${after >= 0 ? "+" : ""}${after}; a country shrine raises favor as far as +9)`);
+      const after = G.addFavor(god, (fine ? 2 : 1) + (liked ? 1 : 0), cap);
+      this.priestTalk2(god, who, `The ${ITEMS[held].name.toLowerCase()} is given to ${god}${liked ? ", and it is the kind of thing the god loves" : ""}. (favor ${after >= 0 ? "+" : ""}${after}; offerings here raise favor as far as +${cap})`);
     } });
     const line = name ? (chthonic ? `"Speak softly here. What do you need of the ${god === "Hades" ? "lord below" : "goddess of the crossroads"}?"` : `"Be welcome at ${god}'s shrine. What do you seek?"`)
       : atAltar ? `${chthonic ? "The graves are quiet." : `${god}'s altar, its fire tended.`} ${held ? "" : "Hold something to offer it."}` : "";

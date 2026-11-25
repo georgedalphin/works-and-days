@@ -283,6 +283,79 @@ export function makeTextures(scene: Phaser.Scene) {
     for (const [x, h] of [[3, 14], [11, 11], [19, 15]] as [number, number][]) { px(c, x, 26 - h, 5, h, "#c4bcaa"); px(c, x, 26 - h, 5, 1, "#e0d8c6"); px(c, x + 1, 26 - h - 2, 3, 2, "#c4bcaa"); px(c, x + 1, 26 - h + 4, 3, 1, "#8a8270"); }
     px(c, 0, 26, 48, 2, "#8a8780"); for (let x = 0; x < 48; x += 6) px(c, x, 25, 4, 1, "#a49e91");
   });
+  // ---- landmarks
+  const sh = (c: Ctx, x: number, y: number, w: number) => px(c, x, y, w, 3, "rgba(0,0,0,0.22)");
+  canvasTex(scene, "bigoak", 48, 56, (c) => {
+    sh(c, 8, 52, 32); px(c, 20, 30, 9, 24, "#5e4026"); px(c, 20, 30, 2, 24, "#7a5a33"); px(c, 16, 50, 6, 4, "#5e4026"); px(c, 27, 50, 7, 4, "#5e4026");
+    for (const [x, y, r, col] of [[24, 18, 17, "#3f6b34"], [12, 24, 11, "#3f6b34"], [36, 24, 11, "#3f6b34"], [22, 12, 11, "#4f7f40"], [32, 16, 8, "#4f7f40"], [16, 20, 7, "#5a8a48"]] as [number, number, number, string][]) {
+      c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    px(c, 18, 34, 2, 6, "#e9e1cf"); px(c, 29, 32, 2, 5, "#c94c4c"); // ribbons
+  });
+  canvasTex(scene, "beetree", 28, 40, (c) => {
+    sh(c, 4, 37, 20); px(c, 9, 14, 10, 24, "#6b4a2b"); px(c, 9, 14, 2, 24, "#8a6038"); px(c, 12, 22, 4, 6, "#1f1408");
+    c.fillStyle = "#4f7f40"; c.beginPath(); c.arc(14, 10, 12, 0, Math.PI * 2); c.fill(); c.fillStyle = "#5a8a48"; c.beginPath(); c.arc(10, 8, 6, 0, Math.PI * 2); c.fill();
+    for (const [x, y] of [[17, 24], [19, 21], [16, 29], [21, 27]]) px(c, x, y, 1, 1, "#f2c14e");
+  });
+  canvasTex(scene, "den", 28, 18, (c) => {
+    sh(c, 2, 15, 24); px(c, 2, 4, 24, 12, "#8a8780"); px(c, 4, 2, 18, 4, "#a49e91"); px(c, 2, 4, 3, 3, "#a49e91");
+    c.fillStyle = "#140c06"; c.beginPath(); c.ellipse(14, 13, 7, 5, 0, Math.PI, 0); c.fill(); px(c, 7, 13, 14, 3, "#140c06");
+  });
+  canvasTex(scene, "lmbones", 22, 12, (c) => {
+    for (let i = 0; i < 5; i++) { px(c, 4 + i * 3, 3, 1, 7, "#e9e1cf"); } px(c, 3, 6, 15, 1, "#d8d0bc");
+    px(c, 17, 6, 4, 4, "#e9e1cf"); px(c, 18, 7, 1, 1, "#1f1408"); px(c, 20, 7, 1, 1, "#1f1408"); px(c, 0, 9, 4, 1, "#d8d0bc");
+  });
+  canvasTex(scene, "log", 64, 22, (c) => {
+    sh(c, 4, 19, 56); px(c, 6, 6, 50, 12, "#6b4a2b"); px(c, 6, 6, 50, 2, "#8a6038"); px(c, 6, 16, 50, 2, "#4a3220");
+    c.fillStyle = "#8a6038"; c.beginPath(); c.ellipse(57, 12, 5, 7, 0, 0, Math.PI * 2); c.fill(); c.fillStyle = "#c9a26a"; c.beginPath(); c.ellipse(57, 12, 3, 5, 0, 0, Math.PI * 2); c.fill();
+    for (const x of [2, 0, 4]) px(c, x, 3 + x * 2, 6, 2, "#5e4026"); px(c, 20, 4, 6, 3, "#5e7a3a"); px(c, 38, 15, 5, 3, "#c4a070"); px(c, 30, 5, 3, 2, "#d8c890");
+  });
+  canvasTex(scene, "stele", 8, 18, (c) => { sh(c, 0, 15, 8); px(c, 1, 2, 6, 14, "#c4bcaa"); px(c, 2, 0, 4, 2, "#c4bcaa"); px(c, 1, 2, 1, 14, "#e0d8c6"); for (let y = 5; y < 13; y += 2) px(c, 2, y, 4, 1, "#8a8270"); });
+  canvasTex(scene, "pressruin", 40, 28, (c) => {
+    sh(c, 2, 25, 36); px(c, 2, 12, 36, 14, "#a49e91"); px(c, 2, 12, 36, 2, "#c4bcaa"); px(c, 12, 14, 14, 12, "#5e5a54");
+    px(c, 4, 4, 3, 9, "#a49e91"); px(c, 30, 6, 3, 7, "#a49e91"); px(c, 6, 18, 6, 6, "#c4bcaa"); px(c, 28, 20, 8, 4, "#8a8780");
+    c.fillStyle = "#bdb5a2"; c.beginPath(); c.arc(19, 21, 5, 0, Math.PI * 2); c.fill(); px(c, 18, 20, 2, 2, "#5e5a54");
+  });
+  canvasTex(scene, "boat", 36, 14, (c) => { sh(c, 2, 11, 32); px(c, 4, 4, 28, 7, "#6b4a2b"); px(c, 2, 3, 32, 2, "#8a6038"); px(c, 6, 5, 24, 3, "#3a2a1a"); px(c, 14, 0, 1, 5, "#8a6038"); px(c, 20, 9, 12, 2, "rgba(60,90,110,0.6)"); });
+  canvasTex(scene, "wreck", 56, 30, (c) => {
+    sh(c, 2, 27, 52); px(c, 6, 14, 44, 12, "#5e4026"); px(c, 6, 14, 44, 2, "#7a5a33");
+    for (let i = 0; i < 6; i++) px(c, 8 + i * 7, 4 + (i % 2) * 3, 3, 12, "#6b4a2b"); px(c, 28, 0, 2, 16, "#7a5a33"); px(c, 20, 18, 8, 6, "#2a1d14"); px(c, 40, 20, 6, 5, "#c4703f");
+  });
+  canvasTex(scene, "nest", 18, 10, (c) => { px(c, 1, 4, 16, 5, "#7a5a33"); for (let x = 0; x < 18; x += 3) px(c, x, 3 + (x % 2), 4, 1, "#9c7445"); px(c, 6, 3, 3, 2, "#e9e1cf"); px(c, 10, 3, 3, 2, "#d8d0bc"); });
+  canvasTex(scene, "palm", 24, 40, (c) => {
+    sh(c, 6, 37, 12); for (let y = 12; y < 38; y++) px(c, 11 + Math.round(Math.sin(y / 8) * 2), y, 3, 1, y % 3 ? "#8a6038" : "#6b4a2b");
+    for (const [dx, dy] of [[-10, 4], [10, 4], [-8, -3], [8, -3], [0, -6]] as [number, number][]) { c.strokeStyle = "#4f7f40"; c.lineWidth = 3; c.beginPath(); c.moveTo(12, 12); c.quadraticCurveTo(12 + dx / 2, 6 + dy, 12 + dx, 12 + dy); c.stroke(); }
+    px(c, 10, 12, 5, 3, "#8a5a2c");
+  });
+  canvasTex(scene, "cairn", 22, 24, (c) => {
+    sh(c, 1, 21, 20); for (const [x, y, w] of [[2, 16, 18], [4, 11, 14], [6, 7, 10], [8, 3, 6]] as [number, number, number][]) { px(c, x, y, w, 5, "#a49e91"); px(c, x, y, w, 1, "#c4bcaa"); }
+    px(c, 9, 0, 4, 3, "#8a8780"); px(c, 14, 18, 3, 2, "#c94c4c"); px(c, 4, 19, 3, 2, "#f2c14e");
+  });
+  canvasTex(scene, "mound", 64, 30, (c) => {
+    sh(c, 4, 26, 56); c.fillStyle = "#5e7a3a"; c.beginPath(); c.ellipse(32, 26, 30, 20, 0, Math.PI, 0); c.fill();
+    c.fillStyle = "#6f8a4a"; c.beginPath(); c.ellipse(28, 24, 20, 13, 0, Math.PI, 0); c.fill();
+    px(c, 28, 16, 8, 10, "#8a8780"); px(c, 29, 18, 6, 8, "#2a1d14");
+  });
+  canvasTex(scene, "spears", 18, 22, (c) => {
+    for (const [x, lean] of [[3, 2], [9, -1], [14, 1]] as [number, number][]) { for (let y = 2; y < 20; y++) px(c, x + Math.round((lean * (20 - y)) / 20), y, 1, 1, "#7a5a33"); px(c, x + lean - 1, 0, 3, 3, "#8a7058"); }
+    px(c, 4, 18, 8, 3, "#8a8780"); px(c, 6, 17, 4, 2, "#a49e91");
+  });
+  canvasTex(scene, "tower", 40, 64, (c) => {
+    sh(c, 2, 61, 36); px(c, 6, 14, 28, 48, "#a49e91"); px(c, 6, 14, 3, 48, "#c4bcaa"); px(c, 31, 14, 3, 48, "#8a8780");
+    for (let y = 18; y < 62; y += 6) for (let x = 6 + ((y / 6) % 2) * 4; x < 34; x += 8) px(c, x, y, 1, 4, "#8a8780");
+    for (let y = 16; y < 62; y += 6) px(c, 6, y, 28, 1, "#8a8780");
+    px(c, 6, 8, 6, 6, "#a49e91"); px(c, 16, 10, 6, 4, "#a49e91"); px(c, 28, 6, 6, 8, "#a49e91"); // broken crown
+    px(c, 16, 48, 8, 14, "#2a1d14"); px(c, 16, 26, 4, 6, "#2a1d14"); px(c, 36, 56, 4, 4, "#a49e91"); px(c, 0, 58, 5, 4, "#a49e91");
+  });
+  canvasTex(scene, "columns", 26, 46, (c) => {
+    sh(c, 1, 43, 24); for (const [x, h] of [[2, 40], [15, 30]] as [number, number][]) { px(c, x, 44 - h, 8, h, "#e6dfcd"); px(c, x, 44 - h, 2, h, "#f4efe2"); px(c, x + 3, 44 - h, 1, h, "#c4bcaa"); px(c, x - 1, 44 - h - 2, 10, 3, "#d8d0bc"); }
+    px(c, 12, 41, 12, 4, "#d8d0bc");
+  });
+  canvasTex(scene, "statue", 18, 40, (c) => {
+    sh(c, 1, 37, 16); px(c, 2, 30, 14, 8, "#c4bcaa"); px(c, 2, 30, 14, 1, "#e0d8c6");
+    px(c, 6, 6, 6, 24, "#e6dfcd"); px(c, 7, 1, 4, 5, "#e6dfcd"); px(c, 4, 10, 2, 12, "#e6dfcd"); px(c, 12, 8, 2, 10, "#e6dfcd"); px(c, 13, 4, 1, 6, "#e6dfcd");
+    px(c, 7, 22, 2, 8, "#c4bcaa"); px(c, 10, 22, 2, 8, "#c4bcaa"); px(c, 8, 2, 1, 1, "#8a8270"); px(c, 10, 2, 1, 1, "#8a8270");
+  });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
     px(c, 1, 3, 14, 10, "#7a5a33"); px(c, 1, 2, 14, 3, "#9c7445"); px(c, 1, 2, 14, 1, "#b88d58");
