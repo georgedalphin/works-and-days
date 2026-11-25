@@ -71,6 +71,8 @@ export class Animal {
   rolled = false;
   rerollT = 0;
   appeased = false;
+  /** A ghost circling a crossroads or graveyard on the night of Noumenia: the center, radius and its place in the ring. */
+  orbit?: { cx: number; cy: number; r: number; phase: number };
   /** The scene decides what happens when it notices you (the Aggression roll) and when it lands a blow. */
   decide?: (a: Animal) => void;
   strikes?: (a: Animal) => void;

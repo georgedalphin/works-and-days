@@ -3,7 +3,7 @@ import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } fro
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
-import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
+import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
 import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
@@ -132,6 +132,23 @@ function study(id: string): boolean {
 const rungOf = (days: number) => RUNG_DAYS.reduce((r, need, i) => (days >= need ? i : r), 0);
 const mythRec = (id: string) => (G.data.myth[id] ??= { days: 0, last: -1, gone: -1, name: id === "naiad" ? NAIAD_NAMES[G.data.seed % NAIAD_NAMES.length] : SATYR_NAMES[G.data.seed % SATYR_NAMES.length], gift: -1 });
 
+/**
+ * Creatures that answer to an Aretai: at 6 and above it lowers their Aggression (6: -2, 7: -3, 8: -4).
+ * The dead know Pneuma; Artemis' beasts know Kardia; the farm's raiders know Oikos; Ares' wolf and the lion know Thymos.
+ */
+export const CALMED_BY: Record<string, string[]> = {
+  eidolon: ["Pneuma"], lampad: ["Pneuma"], deer: ["Kardia"], ibex: ["Kardia"], bear: ["Kardia"], fox: ["Oikos"], boar: ["Oikos", "Kratos"],
+  jackal: ["Aiolos"], crab: ["Metis"], wolf: ["Thymos"], lion: ["Thymos"], sphinx: ["Logos"], myrmex: ["Gnosis"], scorpion: ["Ourania"], strix: ["Ourania"],
+  stymphalian: ["Techne"], centaur: ["Phoenix"], empousa: ["Phoenix"],
+};
+const aretaiCalm = (kind: string): [number, string] => {
+  let best = 0, by = "";
+  for (const ar of CALMED_BY[kind] ?? []) { const v = (G.data.aretai[ar] ?? 3) - 4; if (v >= 2 && v > best) { best = v; by = ar; } }
+  return [best, by];
+};
+/** Noumenia: the first day of the month. That night the dead gather at the crossroads, and wander near the living. */
+const noumeniaNight = () => G.data.day === 1 && !G.isDay;
+
 /** Poseidon's favor deepens your water jar. */
 const jarCap = () => Math.max(10, JAR_CAPACITY + 5 * G.boon("Poseidon"));
 
@@ -223,7 +240,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.spots = []; inDark = false;
     this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false;
     this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
-    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
+    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0; this.wounds = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.mouseIn = true;
     this.input.mouse?.disableContextMenu();
@@ -269,8 +286,28 @@ abstract class PlayScene extends Phaser.Scene {
 
   knock = 0; // seconds of being thrown back by a blow
   invuln = 0; // seconds before another blow can land
+  /** Has tonight's Noumenia visit been rolled here? */
+  noumRolled = false;
+  /** On the night of Noumenia the dead come near the houses of the living. */
+  noumeniaVisit(spots: [number, number][], chance: number, maxN: number, say: string) {
+    if (G.isDay) { this.noumRolled = false; return; }
+    if (this.noumRolled || !noumeniaNight()) return;
+    this.noumRolled = true;
+    if (Math.random() >= chance) return;
+    const n = 1 + Math.floor(Math.random() * maxN);
+    for (let i = 0; i < n; i++) {
+      const [tx, ty] = spots[Math.floor(Math.random() * spots.length)], x = tx * TILE + 8 + (i ? 18 : 0), y = ty * TILE + 8;
+      const a = new Animal(this, "eidolon", x, y, new Phaser.Geom.Rectangle(x - 60, y - 40, 120, 80));
+      a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 0.85, duration: 1500 });
+      this.animals.push(a);
+    }
+    G.say(say);
+  }
+  /** Blows taken while already spent: it takes a few to fell you (big beasts count double). */
+  wounds = 0;
 
   movePlayer(dt: number) {
+    if (this.wounds && G.data.fatigue < 100) this.wounds = 0;
     if (this.invuln > 0) { this.invuln -= dt; this.player.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 12) % 2 ? 0.4 : 1); }
     if (this.knock > 0) { this.knock -= dt; return; }
     const k = this.keys, c = this.cursors;
@@ -848,9 +885,13 @@ abstract class PlayScene extends Phaser.Scene {
     if (beastly && G.doomed("Artemis")) bonus += 3;
     // Beasts answer to Artemis and the hunter's hour; a monster to the god whose domain it is.
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
-    const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus;
+    const [calm, by] = aretaiCalm(a.kind);
+    const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus - calm;
     const roll = 1 + Math.floor(Math.random() * 12);
-    if (roll > agg) return false;
+    if (roll > agg) {
+      if (calm && roll <= agg + calm && d.aggression >= 2) G.say(`The ${beast(a.kind)} eyes you, then lets you be. ${by === "Pneuma" && (a.kind === "eidolon" || a.kind === "lampad") ? "The dead know a soul that has seen past the veil." : `Something in you (${by} ${G.data.aretai[by]}) holds it back.`}`);
+      return false;
+    }
     a.charge(a.kind === "wolf" ? 7 : a.kind === "skeleton" ? 40 : a.kind === "centaur" ? 12 : 5);
     this.alarm(a);
     if (a.kind === "empousa") a.sprite.setTexture("empousaTrue", 0);
@@ -886,7 +927,19 @@ abstract class PlayScene extends Phaser.Scene {
     const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${dmg} Fatigue)`);
-    if (G.data.fatigue >= 100) this.struckDown(a);
+    if (this.spentBlow(d.damage)) this.struckDown(a);
+  }
+
+  /**
+   * A creature's blow when you are spent (Fatigue 100): you stagger on. The third such blow fells you,
+   * or the second from a beast that hits hard (10 or more). Small creatures alone can never fell you in one bite.
+   */
+  spentBlow(dmg: number): boolean {
+    if (G.data.fatigue < 100) return false;
+    this.wounds += dmg >= 10 ? 1.5 : 1;
+    if (this.wounds >= 3) { this.wounds = 0; return true; }
+    G.say(this.wounds < 2 ? "You're spent, and staggering: a couple more blows will fell you. Get away, or end it!" : "You can barely stand. One more blow and you fall.");
+    return false;
   }
 
   struckDown(a: Animal | string) {
@@ -1491,7 +1544,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
     G.say(from.kind === "stymphalian" ? `A bronze feather slices into you! (+${dmg} Fatigue)` : `An arrow from the ${beast(from.kind)} finds you! (+${dmg} Fatigue)`);
-    if (G.data.fatigue >= 100) this.struckDown(from);
+    if (this.spentBlow(8)) this.struckDown(from);
   }
 
   /** A creature looses an arrow at where you will be, leading you a little. */
@@ -1637,7 +1690,15 @@ abstract class PlayScene extends Phaser.Scene {
     const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
     const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.data.stealth - 4));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
-    if (!this.paused) for (const a of this.animals) a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
+    if (!this.paused) for (const a of this.animals) {
+      a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
+      // Noumenia: the gathered dead circle their crossroads or graveyard, until something draws them.
+      if (a.orbit && (a.state === "idle" || a.state === "walk")) {
+        const o = a.orbit, t = this.time.now / 1000 * 0.35 + o.phase, tx = o.cx + Math.cos(t) * o.r, ty = o.cy + Math.sin(t) * o.r * 0.6;
+        const dx = tx - a.sprite.x, dy = ty - a.sprite.y, d = Math.hypot(dx, dy) || 1, sp = Math.min(16, d * 2);
+        a.sprite.setVelocity((dx / d) * sp, (dy / d) * sp); a.state = "walk"; a.timer = 1;
+      }
+    }
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
   }
 }
@@ -2357,6 +2418,7 @@ class FarmScene extends PlayScene {
     this.drawBees(dt);
     if (!this.common(dt)) return;
     this.tiresiasTick(dt);
+    this.noumeniaVisit([[26, 13], [21, 12], [29, 12]], 0.45, 1, "It is the night of Noumenia. A shade has come up to your hut, and stands by the door as if it once lived here.");
     this.maybeFox();
     // Walking off the east or south edge leads into the wild.
     if (this.knock > 0) return;
@@ -3183,7 +3245,8 @@ class WildScene extends PlayScene {
         if (this.monster) this.lmGuards.push(this.monster);
       } else {
         const free = (x: number, y: number) => this.free(x, y);
-        for (let i = 0; i < (dg.n ?? 1); i++) {
+        const many = dg.species === "eidolon" ? (noumeniaNight() ? (dg.n ?? 1) + 1 : 1) : dg.n ?? 1; // the dead walk in company only at Noumenia
+        for (let i = 0; i < many; i++) {
           const x = (lm.x + (i - 1) * 1.5) * TILE + 8, y = (lm.y + 1) * TILE + 8;
           const a = new Animal(this, dg.species as Species, x, y, new Phaser.Geom.Rectangle(x - lm.def.r * TILE, y - lm.def.r * TILE, lm.def.r * TILE * 2, lm.def.r * TILE * 2), free);
           this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
@@ -3454,21 +3517,55 @@ class WildScene extends PlayScene {
       s.w.goTo(s.home[0] + Phaser.Math.Between(-24, 24), s.home[1] + Phaser.Math.Between(-6, 18));
       s.w.wait = 4 + Math.random() * 6;
     }
-    // Night falls on a crossroads or a graveyard: the dead may walk.
-    if (!G.isDay && !this.ghostsRolled && (this.rec.crossroads || this.rec.graveyard)) {
-      this.ghostsRolled = true;
-      if (Math.random() < 0.4) {
-        const [gx, gy] = this.rec.graveyard ? [this.rec.graveyard[0] * TILE + 24, this.rec.graveyard[1] * TILE + 30] : [20 * TILE + 8, 15 * TILE + 8];
-        const free = (x: number, y: number) => this.free(x, y);
-        for (let i = 0; i < 1 + Math.floor(Math.random() * 2); i++) {
-          const a = new Animal(this, "eidolon", gx + (i ? 20 : -10), gy + 10, new Phaser.Geom.Rectangle(gx - 80, gy - 60, 160, 120), free);
-          a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 0.85, duration: 1500 });
-          this.physics.add.collider(a.sprite, this.objects); this.animals.push(a);
-        }
-        G.say(this.rec.graveyard ? "Pale shapes rise among the graves." : "At the crossroads, in the dark, the dead are walking.");
-      }
-    }
+    // Night falls: the dead may walk.
+    if (!G.isDay && !this.ghostsRolled) { this.ghostsRolled = true; this.rollGhosts(); }
     if (G.isDay) this.ghostsRolled = false;
+  }
+
+  /**
+   * The dead at night. On an ordinary night: one, rarely two, at a crossroads or a graveyard; now and then one on a road,
+   * a little more often in a marsh. On the night of Noumenia they gather: a ring of them circles every crossroads and graveyard,
+   * and they come close to the huts of the living, and may turn up anywhere.
+   */
+  rollGhosts() {
+    const rec = this.rec, nou = G.data.day === 1, R = Math.random;
+    const site: [number, number] | null = rec.graveyard ? [rec.graveyard[0] * TILE + 24, rec.graveyard[1] * TILE + 34] : rec.crossroads ? [20 * TILE + 8, 15 * TILE + 8] : null;
+    let n = 0, at: [number, number] | null = null, ring = false, say = "";
+    if (site && nou) {
+      n = 3 + Math.floor(R() * 3); at = site; ring = true;
+      say = rec.graveyard ? "It is the night of Noumenia. The dead have risen among the graves, and circle them, and circle." : "It is the night of Noumenia, and the dead have gathered at the crossroads. They circle the herm, waiting for Hecate's supper.";
+    } else if (site && R() < 0.35) {
+      n = R() < 0.25 ? 2 : 1; at = site;
+      say = rec.graveyard ? (n > 1 ? "Two pale shapes stand among the graves." : "A pale shape rises among the graves.") : "At the crossroads, in the dark, a shade is standing.";
+    } else if (nou && rec.hut && R() < 0.6) {
+      n = R() < 0.4 ? 2 : 1; at = [rec.hut.tx * TILE + 30, rec.hut.ty * TILE + 44];
+      say = "On Noumenia night the dead come near the living: a shade stands by the hut, looking in.";
+    } else {
+      const road = !!rec.roads?.length, p = nou ? 0.25 : rec.terrain === 5 ? 0.12 : road ? 0.06 : 0;
+      if (R() < p) { n = 1; at = (road && rec.terrain !== 5 && this.roadSpot()) || this.openSpot(); say = rec.terrain === 5 ? "Out over the marsh, something pale is drifting." : road ? "Down the road, a pale figure walks without a sound." : "Something pale is standing in the dark."; }
+    }
+    if (!n || !at) return;
+    const [gx, gy] = at, free = (x: number, y: number) => this.free(x, y);
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2, r = ring ? 30 : 14;
+      const a = new Animal(this, "eidolon", gx + Math.cos(ang) * r, gy + Math.sin(ang) * r, new Phaser.Geom.Rectangle(gx - 80, gy - 60, 160, 120), free);
+      a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 0.85, duration: 1500 });
+      if (ring) a.orbit = { cx: gx, cy: gy, r, phase: ang };
+      else this.physics.add.collider(a.sprite, this.objects);
+      this.animals.push(a);
+    }
+    G.say(say);
+  }
+  /** A spot on a road, for a walking ghost. */
+  roadSpot(): [number, number] | null {
+    const spots: [number, number][] = [];
+    for (let y = 3; y < WH - 3; y++) for (let x = 3; x < WW - 3; x++) if (this.groundLayer?.getTileAt(x, y)?.index === T.PATH && (this.objects.getTileAt(x, y)?.index ?? -1) === -1) spots.push([x, y]);
+    if (!spots.length) return null;
+    const [x, y] = spots[Math.floor(Math.random() * spots.length)]; return [x * TILE + 8, y * TILE + 8];
+  }
+  openSpot(): [number, number] {
+    for (let i = 0; i < 60; i++) { const x = (4 + Math.random() * (WW - 8)) * TILE, y = (4 + Math.random() * (WH - 8)) * TILE; if (this.free(x, y)) return [x, y]; }
+    return [20 * TILE + 8, 15 * TILE + 8];
   }
 
   setupSites() {
@@ -3536,6 +3633,11 @@ class WildScene extends PlayScene {
     if (!held || !food.includes(held)) { G.say("At night the crossroads is Hecate's. Suppers are left for her here: hold some food (honey, meat, milk, mint, mushrooms) and offer it."); return; }
     if (G.data.offered.hecateSupper === today) { G.say("Your supper for Hecate is already left here tonight."); return; }
     G.data.offered.hecateSupper = today; G.note("hecate");
+    const ring = this.animals.filter((a) => a.orbit && a.state !== "dead" && a.state !== "gone");
+    if (ring.length) {
+      for (const a of ring) { a.appeased = true; a.state = "idle"; a.sprite.setVelocity(0, 0); this.tweens.add({ targets: a.sprite, alpha: 0, duration: 2500, delay: 400 + Math.random() * 800, onComplete: () => { a.state = "gone"; a.sprite.setVisible(false); } }); }
+      G.say("The circling dead stop. One by one they bend to Hecate's supper, and are gone.");
+    }
     G.removeItem(held, 1);
     const after = G.addFavor("Hecate", G.moon === "New moon" ? 2 : 1, 6);
     G.say(`You set the ${ITEMS[held].name.toLowerCase()} at the herm's foot and walk away without looking back, as is proper.${G.moon === "New moon" ? " At the dark of the moon, she is especially near." : ""} (Hecate ${after >= 0 ? "+" : ""}${after})`);
@@ -4494,6 +4596,7 @@ class VillageScene extends PlayScene {
     this.directFolk(dt);
     this.updateAnimals(dt);
     if (!this.common(dt)) return;
+    this.noumeniaVisit(HOUSE_SPOTS.map(([x, y]) => [x + 2, y + 4] as [number, number]), 0.7, 2, "It is the night of Noumenia. The dead have come into the village: pale shapes stand at the doors, where the living have set out suppers for Hecate.");
     if (this.knock > 0) return;
     if (this.player.y < 6) this.leaveVillage("Farm");
     else if (this.player.y > VH * TILE - 12) this.leaveVillage("Wild");
