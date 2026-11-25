@@ -233,10 +233,10 @@ export const SOFT_GID = 4000;
  * eroded raggedly and laid over base ground, and base tiles beside a patch get a ragged fringe of it.
  * Returns the overlay layer (create it right after the ground layer so it draws above it, below details).
  */
-export function softenPatches(map: Phaser.Tilemaps.Tilemap, _groundLayer: Phaser.Tilemaps.TilemapLayer, ground: number[][], patch: number, base: number, tint: number): Phaser.Tilemaps.TilemapLayer | null {
+export function softenPatches(map: Phaser.Tilemaps.Tilemap, _groundLayer: Phaser.Tilemaps.TilemapLayer, ground: number[][], patch: number, base: number, tint: number, name = "soft"): Phaser.Tilemaps.TilemapLayer | null {
   const ts = map.getTileset("tilesSoft") ?? map.addTilesetImage("tilesSoft", "tilesSoft", 16, 16, 0, 0, SOFT_GID);
   if (!ts) return null;
-  const soft = map.createBlankLayer("soft", ts)!;
+  const soft = map.createBlankLayer(name, ts)!;
   const H = ground.length, W = ground[0].length;
   const at = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? -1 : ground[y][x]);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {

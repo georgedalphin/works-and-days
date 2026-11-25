@@ -6,6 +6,7 @@ import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
 import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
+import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -26,7 +27,8 @@ const W = 960, H = 640, ZOOM = 3;
 let G: GameState;
 /** Underground without a torch: every action is at -3 (World & Wilderness). */
 let inDark = false;
-const darkPen = () => (inDark ? 3 : 0);
+/** The dark hinders you (−3 to every action), less with Hecate's favor; not at all in her light or under her protection. */
+const darkPen = () => (!inDark || G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber ? 0 : Math.max(0, Math.min(6, 3 - G.boon("Hecate"))));
 
 /** Things that fill a tile: arrows and dropped things are lost in them. */
 const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
@@ -66,13 +68,14 @@ function laborCost(effort: number, aretai: string): [keyof typeof G.essence, num
 function labor(effort: number, fatigue: number, aretai: string): string | null {
   if (G.exhausted) { G.say("You are too exhausted to work. Rest."); return null; }
   const disc = G.hourDiscount(aretai);
-  const [el, cost] = laborCost(effort, aretai);
+  let [el, cost] = laborCost(effort, aretai);
+  if (aretai === "Thymos" && G.data.divine.day.fury === G.dayNumber) cost /= 2; // Ares' battle-fury
   if (!G.spend({ [el]: cost })) {
     G.spentFlash = { el, at: performance.now() };
     if (performance.now() - lastSpentSay > 1500) { G.say(SPENT[el]); lastSpentSay = performance.now(); }
     return null;
   }
-  const zeus = aretai === "Kratos" ? 1 - 0.08 * G.boon("Zeus") : 1; // Zeus eases heavy labor
+  const zeus = aretai === "Kratos" ? (G.warded("Zeus") ? 0 : 1 - 0.08 * G.boon("Zeus")) : 1; // Zeus eases heavy labor
   G.addFatigue(fatigue * disc * zeus);
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
@@ -106,7 +109,10 @@ function study(id: string): boolean {
   if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
   const b = labor(EFFORT.study, 1, "Gnosis"); if (b === null) return false;
   G.data.lore.studied[id] = G.dayNumber;
-  const roll = 1 + Math.floor(Math.random() * 12);
+  const ch = G.data.divine.charges;
+  if (ch.dull) { ch.dull = 0; G.say(`You study ${loreName(id)}, but your thoughts slide away like water. Athena withholds her light today.`); return false; }
+  let roll = 1 + Math.floor(Math.random() * 12);
+  if (ch.Athena) { ch.Athena--; roll = 1; G.say(`Athena's owl-eyed clarity: you see it whole.${ch.Athena ? ` (${ch.Athena} more)` : ""}`); }
   const odds = `d12 ${roll}, needed 1–${Math.min(12, target)}${hera ? ", Hera's hour +2" : ""}${fails ? `, perseverance +${fails}` : ""}`;
   if (roll <= target) {
     G.data.lore.tier[id] = tier + 1; G.data.lore.fails[id] = 0;
@@ -274,7 +280,7 @@ abstract class PlayScene extends Phaser.Scene {
     let speed = 70;
     const moving = vx !== 0 || vy !== 0;
     if (moving && k.SHIFT.isDown) {
-      const cost = skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
+      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
@@ -500,6 +506,221 @@ abstract class PlayScene extends Phaser.Scene {
     this.ghost.setPosition(tx * TILE + 8, ty * TILE + 15).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
   }
 
+  // ---------------------------------------------------------------- the gods at work (divine.ts)
+  divineT = 0; hazardT: Record<string, number> = {}; madUntil = 0; powerHinted = false;
+  /** The wild screen's record, if this is one. */
+  get wildRec(): ScreenRec | null { return this.scene.key === "Wild" ? (this as unknown as { rec: ScreenRec }).rec : null; }
+  get outdoors() { return this.scene.key !== "House" && this.scene.key !== "Cave"; }
+  /** Is this place (now) in the god's domain? */
+  inDomain(god: string): boolean {
+    const def = DIVINE[god]; if (!def) return false;
+    const key = this.scene.key, w = this.wildRec;
+    if (w && def.terrains.includes(w.terrain)) return true;
+    for (const p of def.places) {
+      if (p === "farm" && key === "Farm") return true;
+      if (p === "home" && (key === "House" || key === "Farm")) return true;
+      if (p === "village" && key === "Village") return true;
+      if (p === "road" && (key === "Village" || !!w?.roads?.length)) return true;
+      if (p === "crossroads" && w?.crossroads) return true;
+      if (p === "crossnight" && w?.crossroads && !G.isDay) return true;
+      if (p === "graveyard" && w?.graveyard) return true;
+      if (p === "gravenight" && w?.graveyard && !G.isDay) return true;
+      if (p === "cave" && key === "Cave") return true;
+      if (p === "storm" && this.outdoors && (G.data.weather === "rain" || G.data.weather === "wind")) return true;
+    }
+    return false;
+  }
+  /** Where the god's -12 danger reaches: their domain, and for the gods below, anywhere outdoors at night. */
+  dangerHere(god: string) { return this.inDomain(god) || ((god === "Hades" || god === "Hecate") && this.outdoors && !G.isDay); }
+  /** Can the god's +8 power be called on here, now? Returns why not, or null. */
+  powerBlocked(god: string): string | null {
+    const f = G.favor(god);
+    if (f < 8) return `${god} does not yet approve of you that much (+8).`;
+    const used = G.data.divine.powerUsed[god];
+    if (used !== undefined && G.dayNumber - used < powerRecharge(f)) return `Not again so soon: ${powerRecharge(f) - (G.dayNumber - used)} more days.`;
+    if (!this.inDomain(god)) return `Only in ${DIVINE[god].domain}.`;
+    return null;
+  }
+
+  /** Every few seconds: gifts and troubles waiting here, the god's wrath, and the dangers of -12. */
+  divineTick(dt: number) {
+    if (this.paused || this.leaving) return;
+    this.divineT -= dt;
+    if (this.divineT > 0) return;
+    this.divineT = 4;
+    const dv = G.data.divine, today = G.dayNumber;
+    for (const god of ALL_GODS) {
+      const here = this.inDomain(god), f = G.favor(god);
+      if (here) {
+        const gi = dv.gifts.findIndex((g) => g.god === god);
+        if (gi >= 0 && this.outdoors) { const g = dv.gifts.splice(gi, 1)[0]; this.layGift(g); }
+        const ti = dv.troubles.indexOf(god);
+        if (ti >= 0) { dv.troubles.splice(ti, 1); this.trouble(god); }
+        if (dv.wrathDay[god] !== today && f <= -8) { dv.wrathDay[god] = today; if (Math.random() < wrathChance(f)) this.wrath(god); }
+        if (f >= 8 && !this.powerHinted && !this.powerBlocked(god)) { this.powerHinted = true; G.say(`You feel ${god} near. You could call on them here (F).`); }
+      }
+      if (f <= -12 && this.dangerHere(god)) {
+        this.hazardT[god] = (this.hazardT[god] ?? 20 + Math.random() * 30) - 4;
+        if (this.hazardT[god] <= 0) { this.hazardT[god] = 40 + Math.random() * 50; this.danger(god); }
+      }
+    }
+  }
+
+  /** A gift of the god, left somewhere near you in their domain, glinting. */
+  layGift(g: { god: string; item: string; qty: number; q?: number }) {
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2, d = 50 + Math.random() * 110;
+      const x = this.player.x + Math.cos(a) * d, y = this.player.y + Math.sin(a) * d;
+      if (!this.openGround(x, y)) continue;
+      this.dropItem(g.item, g.qty, x, y, undefined, g.q, g.god);
+      const p = this.pickups[this.pickups.length - 1];
+      this.tweens.add({ targets: p.img, alpha: 0.55, yoyo: true, repeat: -1, duration: 600 });
+      const glint = this.add.image(x, y - 6, "glint").setDepth(99990).setScale(0.8);
+      this.tweens.add({ targets: glint, alpha: 0, scale: 1.4, duration: 1400, repeat: 2, onComplete: () => glint.destroy() });
+      G.say(`Something lies on the ground nearby that wasn't there before. A gift of ${g.god}?`);
+      return;
+    }
+  }
+
+  /** A creature sent against you, coming from a little way off. */
+  summon(kind: Species, n = 1) {
+    const free = (this as unknown as { free?: (x: number, y: number) => boolean }).free?.bind(this) ?? ((x: number, y: number) => this.openGround(x, y));
+    const objs = (this as unknown as { objects?: Phaser.Tilemaps.TilemapLayer }).objects;
+    for (let k = 0; k < n; k++) for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2, d = 140 + Math.random() * 60;
+      const x = this.player.x + Math.cos(a) * d, y = this.player.y + Math.sin(a) * d;
+      if (!free(x, y)) continue;
+      const b = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - 200, y - 200, 400, 400), free);
+      if (objs) this.physics.add.collider(b.sprite, objs);
+      this.collideTrunks(b.sprite);
+      if (kind === "eidolon") { b.sprite.setAlpha(0); this.tweens.add({ targets: b.sprite, alpha: 0.85, duration: 1200 }); }
+      this.animals.push(b); b.charge(kind === "wolf" ? 9 : 7); this.alarm(b);
+      break;
+    }
+  }
+  /** Harm from no creature (lightning, fever, falling rocks): Fatigue, and if spent, you fall. */
+  harm(dmg: number, what: string, cause: string) {
+    if (this.leaving) return;
+    G.addFatigue(dmg); SOUND.sfx("hurt");
+    this.cameras.main.shake(160, 0.006);
+    this.player.setTint(0xff7070); this.time.delayedCall(220, () => this.player.clearTint());
+    G.say(`${what} (+${dmg} Fatigue)`);
+    if (G.data.fatigue >= 100) this.struckDown(cause);
+  }
+  /** Hades holds back the shears: at +12 always, or once after you've called on him. */
+  spareFromBelow(): boolean {
+    const ch = G.data.divine.charges;
+    if (!G.warded("Hades") && !ch.Hades) return false;
+    if (!G.warded("Hades")) ch.Hades = 0;
+    G.data.fatigue = 85;
+    for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); b.bolt(this.player); }
+    G.say("You fall, and the earth will not take you. Hades holds back the Fates' shears, and you rise.");
+    return true;
+  }
+  /** A flash and a crack: Zeus' lightning, at a spot. */
+  lightning(x: number, y: number) {
+    const flash = this.add.rectangle(this.cameras.main.worldView.centerX, this.cameras.main.worldView.centerY, W * 2, H * 2, 0xffffff, 0.8).setDepth(100005);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 450, onComplete: () => flash.destroy() });
+    const bolt = this.add.graphics().setDepth(100004);
+    bolt.lineStyle(2, 0xfff6c0, 1); bolt.beginPath(); bolt.moveTo(x, y - 200);
+    for (let i = 1; i <= 8; i++) bolt.lineTo(x + (Math.random() - 0.5) * 22, y - 200 + i * 25);
+    bolt.strokePath(); this.time.delayedCall(260, () => bolt.destroy());
+    this.cameras.main.shake(260, 0.012); SOUND.sfx("chop");
+  }
+  nearestBeast() {
+    return this.animals.filter((a) => a.kind !== "goat" && a.state !== "dead" && a.state !== "gone" && a.sprite.visible && !isMonster(a.kind))
+      .sort((p, q) => Math.hypot(p.sprite.x - this.player.x, p.sprite.y - this.player.y) - Math.hypot(q.sprite.x - this.player.x, q.sprite.y - this.player.y))[0];
+  }
+  growingCrops() { return Object.entries(G.data.crops).filter(([, c]) => !c.withered); }
+  redrawFarm() { const f = this as unknown as { drawCrop?: (k: string) => void }; if (f.drawCrop) for (const k of Object.keys(G.data.crops)) f.drawCrop(k); }
+  someone() { const ids = Object.keys(VILLAGERS); return VILLAGERS[ids[Math.floor(Math.random() * ids.length)]]; }
+
+  /** -4: a small trouble, waiting for you in the god's domain. */
+  trouble(god: string) {
+    const ch = G.data.divine.charges, day = G.data.divine.day, today = G.dayNumber;
+    const at = `${god} is displeased with you.`;
+    switch (god) {
+      case "Aphrodite": { const v = this.someone(); ui(this).changeRel(v.id, -1); G.say(`${v.name} greets you coolly today. ${at} (-1)`); break; }
+      case "Artemis": case "Ares": { const b = this.nearestBeast(); if (b) { b.charge(6); this.alarm(b); G.say(`The ${beast(b.kind)} turns on you without warning. ${at}`); } else G.say(`The birds fall silent. Something here wishes you gone. ${at}`); break; }
+      case "Demeter": { const cs = this.growingCrops(); if (cs.length) { const [, c] = cs[Math.floor(Math.random() * cs.length)]; c.growth = Math.max(0, c.growth - 2); c.dryStreak++; this.redrawFarm(); G.say(`One of your crops has withered back overnight. ${at}`); } break; }
+      case "Hephaestus": ch.botch = 1; G.say(`Your hands feel clumsy today. ${at}`); break;
+      case "Poseidon": G.data.jarWater = 0; G.addFatigue(5); G.say(`You slip in the wet and your jar spills empty. ${at}`); break;
+      case "Hera": { const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 1; G.say(`${g.name} is off her milk today. ${at}`); } break; }
+      case "Athena": ch.dull = 1; G.say(`Your thoughts are slow and muddled today. ${at}`); break;
+      case "Apollo": this.harm(10, `A headache throbs behind your eyes. ${at}`, "Apollo's fever"); break;
+      case "Dionysus": if (G.data.vat.must > 0) { G.data.vat.q = Math.max(1, G.data.vat.q - 1); G.say(`Your must smells off today: the wine will be poorer. ${at}`); } else this.harm(8, `Your head aches as if after a feast you never had. ${at}`, "Dionysus' madness"); break;
+      case "Hermes": { const n = Math.max(2, Math.round(G.data.silver * 0.08)); G.data.silver = Math.max(0, G.data.silver - n); G.say(`A few coins have slipped from your purse somewhere on the road (-${money(n)}). ${at}`); break; }
+      case "Zeus": G.data.weather = "rain"; this.harm(8, `A sudden squall soaks you to the skin. ${at}`, "a storm"); break;
+      case "Hades": this.harm(10, `A chill rises from the earth into your bones. ${at}`, "the cold of the grave"); break;
+      case "Hecate": G.removeItem("Torch", 1); G.say(`A cold wind finds your torches and snuffs one out for good. ${at}`); break;
+    }
+  }
+
+  /** -8 and worse: the god's anger breaks out here. */
+  wrath(god: string) {
+    const day = G.data.divine.day, today = G.dayNumber;
+    const at = `${god} is angry with you.`;
+    switch (god) {
+      case "Aphrodite": { const v = this.someone(); ui(this).changeRel(v.id, -2); G.say(`Word reaches you that ${v.name} has turned against you. ${at} (-2)`); break; }
+      case "Artemis": G.say(`A wolf's howl, close. ${at}`); this.summon("wolf"); break;
+      case "Demeter": { const cs = this.growingCrops(); const n = Math.ceil(cs.length / 3); for (let i = 0; i < n; i++) cs[Math.floor(Math.random() * cs.length)][1].withered = true; this.redrawFarm(); if (n) G.say(`Blight: ${n} of your crops have blackened on the stalk. ${at}`); break; }
+      case "Hephaestus": { const t = Object.entries(G.data.tools).filter(([, l]) => l >= 2); if (t.length) { const [id] = t[Math.floor(Math.random() * t.length)]; G.data.tools[id]--; G.say(`The edge of your ${ITEMS[id].name.toLowerCase()} chips and dulls: it is a lesser tool now. ${at}`); } else { const n = Math.floor(G.count("Arrow") / 2); G.removeItem("Arrow", n); G.say(`Your arrows warp and split${n ? ` (-${n})` : ""}. ${at}`); } break; }
+      case "Poseidon": day.wellDry = today + 3; G.data.jarWater = 0; G.say(`The ground shudders underfoot. Your well will be dry for three days. ${at}`); break;
+      case "Hera": { const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 3; g.affection = Math.max(0, g.affection - 2); G.say(`${g.name} has fallen sick: no milk for three days. ${at}`); } break; }
+      case "Athena": { const k = Object.entries(G.data.lore.tier).filter(([, t]) => t > 0); if (k.length) { const [id] = k[Math.floor(Math.random() * k.length)]; G.data.lore.tier[id]--; G.say(`Something you knew about ${LORE[id]?.name.toLowerCase() ?? id} slips from your mind. ${at}`); } break; }
+      case "Apollo": this.harm(30, `A fever burns through you. ${at}`, "Apollo's fever"); break;
+      case "Dionysus": if (G.data.vat.must > 0) { G.data.vat.must = 0; G.data.vat.sealed = -1; G.say(`The wine in your vat has soured to vinegar. ${at}`); } else this.harm(20, `The world tilts and roars like a feast gone wrong. ${at}`, "Dionysus' madness"); break;
+      case "Hermes": { const n = Math.round(G.data.silver * 0.2); G.data.silver -= n; G.say(`Thieves! Your purse is lighter by ${money(n)}. ${at}`); break; }
+      case "Ares": { const w = this as unknown as { spawnMonster?: (k: MonsterKind) => void; rec?: ScreenRec }; const k = w.rec ? monsterFor(w.rec.terrain)?.kind : undefined; if (w.spawnMonster && k) { G.say(`${at} Something terrible comes.`); w.spawnMonster(k); } else { G.say(at); this.summon("boar"); } break; }
+      case "Zeus": { this.lightning(this.player.x + 40, this.player.y - 10); G.essence.Fire = 0; this.harm(20, `Lightning strikes beside you! ${at}`, "lightning"); break; }
+      case "Hades": G.say(`The ground breathes cold. A shade rises. ${at}`); this.summon("eidolon"); break;
+      case "Hecate": G.say(`Dogs howl where no dogs are. The dead gather. ${at}`); this.summon("eidolon", 2); break;
+    }
+  }
+
+  /** -12: genuine danger, every so often, wherever the god's anger reaches. */
+  danger(god: string) {
+    const alive = (k: string) => this.animals.filter((a) => a.kind === k && a.state !== "dead" && a.state !== "gone").length;
+    switch (god) {
+      case "Artemis": if (alive("wolf") < 3) { G.say("Wolves, hunting you through Artemis' woods."); this.summon("wolf", 2); } break;
+      case "Hephaestus": this.harm(14, "Rocks come crashing down the hillside onto you!", "falling rocks"); break;
+      case "Poseidon": this.harm(12, "The ground turns to sucking water beneath you and drags you down!", "the water"); break;
+      case "Apollo": this.harm(10, "Fever: an unseen arrow of Apollo finds you.", "plague"); break;
+      case "Dionysus": this.madUntil = this.time.now + 5000; G.say("Madness! Your feet will not go where you will them."); break;
+      case "Hermes": { const n = Math.max(1, Math.round(G.data.silver * 0.1)); G.data.silver -= n; this.harm(8, `You lose your way, and your purse (-${money(n)}).`, "the road"); break; }
+      case "Ares": { const w = this as unknown as { spawnMonster?: (k: MonsterKind) => void; rec?: ScreenRec; monster?: Animal }; const k = w.rec ? monsterFor(w.rec.terrain)?.kind : undefined; if (w.spawnMonster && k && !w.monster) w.spawnMonster(k); else if (alive("boar") < 2) this.summon("boar"); break; }
+      case "Zeus": { this.lightning(this.player.x, this.player.y); this.harm(18, "Lightning strikes you!", "lightning"); break; }
+      case "Hades": case "Hecate": if (alive("eidolon") < 3) { G.say(god === "Hades" ? "The dead are hunting you." : "Hecate's ghosts come for you out of the dark."); this.summon("eidolon"); } break;
+    }
+  }
+
+  /** +8: call on the god for their power, here in their domain. */
+  invokePower(god: string) {
+    const why = this.powerBlocked(god);
+    if (why) { G.say(why); return; }
+    const dv = G.data.divine, today = G.dayNumber, def = DIVINE[god];
+    dv.powerUsed[god] = today;
+    SOUND.sfx("omen");
+    let said = "";
+    switch (god) {
+      case "Aphrodite": for (const id of Object.keys(VILLAGERS)) ui(this).changeRel(id, 2); said = "Everyone you meet today seems glad of you. (+2 with each)"; break;
+      case "Artemis": dv.day.calm = today; for (const a of this.animals) if (!isMonster(a.kind) && (a.state === "charge" || a.state === "recoil")) { a.state = "idle"; a.sprite.setVelocity(0, 0); a.appeased = true; } said = "The beasts lower their heads. None will attack you today."; break;
+      case "Demeter": for (const [, c] of this.growingCrops()) { const d = CROPS[c.id]; c.growth = c.picks > 0 && d.regrow ? d.regrow : d.days; } this.redrawFarm(); said = "The fields swell and ripen before your eyes."; break;
+      case "Hephaestus": dv.charges.Hephaestus = 3; said = "Your hands feel the god's own skill: your next three pieces of station work will be excellent."; break;
+      case "Poseidon": { const f = this as unknown as { setGround?: (x: number, y: number, s: "wet") => void }; for (const [k, s] of Object.entries(G.data.ground)) if (s === "tilled") { if (f.setGround) { const [x, y] = k.split(",").map(Number); f.setGround(x, y, "wet"); } else G.data.ground[k] = "wet"; } G.data.jarWater = jarCap(); said = "Springs rise under every furrow, and your jar is full."; break; }
+      case "Hera": G.data.fatigue = 0; G.essence = { ...G.essenceMax }; for (const g of G.data.goats) { g.fed = true; g.affection = Math.min(10, g.affection + 1); } said = "The warmth of the hearth fills you. Your weariness is gone, and your goats are content."; break;
+      case "Athena": dv.charges.Athena = 5; said = "Your eyes see as an owl's: your next five studies will succeed."; break;
+      case "Apollo": dv.charges.Apollo = 6; said = "Your aim is the god's: your next six shots will fly true."; break;
+      case "Dionysus": if (G.data.vat.must > 0) { if (G.data.vat.sealed < 0) G.data.vat.sealed = today; G.data.vat.sealed = Math.min(G.data.vat.sealed, today - FERMENT_DAYS); } G.data.fatigue = 0; said = G.data.vat.must > 0 ? "Your must is wine, now, and your heart is light." : "Your heart is light, and your weariness falls away."; break;
+      case "Hermes": G.data.px = DOOR_X; G.data.py = (DOOR.ty + 1) * TILE + 8; said = "Wings at your heels: in a breath you stand at your own door."; G.say(`You call on ${god}. ${said}`); G.data.entry = ""; this.goTo("Farm"); return;
+      case "Ares": dv.day.fury = today; said = "Battle-fury fills you: today your blows cost half the Fire and land more surely."; break;
+      case "Zeus": { let n = 0; for (const a of this.animals) if (a.state !== "dead" && a.state !== "gone" && a.kind !== "goat" && (a.state === "charge" || isMonster(a.kind) || a.kind === "eidolon")) { this.lightning(a.sprite.x, a.sprite.y); this.kill(a); n++; } if (!n) this.lightning(this.player.x + 60, this.player.y - 30); said = n ? `Lightning strikes ${n > 1 ? `${n} times` : "once"}, and what threatened you is ash.` : "Thunder answers you, rolling across the sky."; break; }
+      case "Hades": dv.charges.Hades = 1; said = "The earth will hold you up: the next time you would fall, you will not."; break;
+      case "Hecate": dv.day.hecateLight = today; for (const a of this.animals) if (a.kind === "eidolon" || a.kind === "lampad") { a.appeased = true; a.state = "idle"; a.sprite.setVelocity(0, 0); } said = "A torch kindles by itself at your shoulder. The dark is no dark to you today, and the dead step aside."; break;
+    }
+    G.say(`You call on ${god}: ${def.power.name}. ${said}`);
+  }
+
   tooFar() { G.say("That's too far. Come within two paces of it."); }
   /** E or a right click: use whatever is under the cursor (or in front of you). */
   interactNow() {
@@ -560,6 +781,8 @@ abstract class PlayScene extends Phaser.Scene {
       if (s && s.k === this.groundKey()) this.dropItem("spear", 1, s.x, s.y, "spearStuck");
     }
     this.movePlayer(dt);
+    if (this.madUntil > this.time.now && !G.warded("Dionysus")) { const v = this.player.body!.velocity; this.player.setVelocity(-v.x, -v.y); }
+    this.divineTick(dt);
     if (this.paused) { ui(this).prompt(null); this.focusGlow?.setVisible(false); this.focusTag?.setVisible(false); this.focusMarks?.clear(); return false; }
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
     G.data.px = this.player.x; G.data.py = this.player.y;
@@ -597,6 +820,10 @@ abstract class PlayScene extends Phaser.Scene {
   aggressionRoll(a: Animal, bonus = 0): boolean {
     const d = SPECIES[a.kind];
     if (d.aggression <= 0 || a.appeased) return false;
+    const beastly = !isMonster(a.kind) && a.kind !== "eidolon" && a.kind !== "lampad";
+    if (beastly && (G.warded("Artemis") || G.data.divine.day.calm === G.dayNumber)) return false; // the Mistress of beasts holds them
+    if ((a.kind === "eidolon" || a.kind === "lampad") && (G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber)) return false;
+    if (beastly && G.doomed("Artemis")) bonus += 3;
     // Beasts answer to Artemis and the hunter's hour; a monster to the god whose domain it is.
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
     const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus;
@@ -624,8 +851,10 @@ abstract class PlayScene extends Phaser.Scene {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
-    const dmg = Math.max(1, d.damage - armor()); // Health from character creation, and a cloak
+    let dmg = Math.max(1, d.damage - armor()); // Health from character creation, and a cloak
+    if (G.warded("Ares")) dmg = Math.max(1, Math.floor(dmg / 2)); // Ares turns the blow
     G.addFatigue(dmg);
+    if (G.warded("Ares")) G.data.fatigue = Math.min(G.data.fatigue, 99);
     this.invuln = 1; this.knock = 0.22;
     const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
     const throwV = a.kind === "centaur" ? 280 : 170; // the hooved charge knocks you sprawling
@@ -638,10 +867,15 @@ abstract class PlayScene extends Phaser.Scene {
     if (G.data.fatigue >= 100) this.struckDown(a);
   }
 
-  struckDown(a: Animal) {
+  struckDown(a: Animal | string) {
+    if (this.spareFromBelow()) return;
     G.data.lifeThread = Math.max(0, G.data.lifeThread - 1);
     G.data.currencies.Pathos++; // what suffering teaches
     for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); }
+    if (typeof a === "string") {
+      if (G.data.lifeThread <= 0) { ui(this).death(a); return; }
+      ui(this).sleep(this, true, `You are struck down by ${a}. Someone finds you and carries you home.\nYour Life Thread frays: ${G.data.lifeThread} of ${START_LIFE_THREAD} remain.`); return;
+    }
     if (G.data.lifeThread <= 0) { ui(this).death(`${LORE[a.kind]?.name ?? a.kind}`); return; }
     ui(this).sleep(this, true, `You are struck down by the ${beast(a.kind)}. A shepherd finds you and carries you home.\nYour Life Thread frays: ${G.data.lifeThread} of ${START_LIFE_THREAD} remain.`);
   }
@@ -667,7 +901,7 @@ abstract class PlayScene extends Phaser.Scene {
       return true;
     }
     const thymos = G.data.aretai.Thymos ?? 3;
-    const target = thymos + 3 + (weapon ? 1 : 0) + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
+    const target = thymos + 3 + (weapon ? 1 : 0) + (G.data.divine.day.fury === G.dayNumber ? 2 : 0) + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
     const q = QUARRY[a.kind];
@@ -822,7 +1056,7 @@ abstract class PlayScene extends Phaser.Scene {
   aimGfx!: Phaser.GameObjects.Graphics;
   cooldown = 0;
   arrows: { img: Phaser.GameObjects.Image; shadow: Phaser.GameObjects.Ellipse; sx: number; sy: number; lx: number; ly: number; t: number; T: number; h: number; from?: Animal; spear?: boolean }[] = [];
-  pickups: { id: string; qty: number; img: Phaser.GameObjects.Image }[] = [];
+  pickups: { id: string; qty: number; img: Phaser.GameObjects.Image; q?: number; from?: string }[] = [];
   get canHunt() { return true; }
 
   /** Where the pointer is in the world, pulled in to the bow's range (or the spear's). */
@@ -839,6 +1073,8 @@ abstract class PlayScene extends Phaser.Scene {
   spearBy: "" | "mouse" | "key" = "";
   spearAiming = false;
   spearChecked = false;
+  /** Apollo's Far-darter: this shot flies true. */
+  trueShot() { const ch = G.data.divine.charges; if (!ch.Apollo) return false; ch.Apollo--; return true; }
   get holdingSpear() { return G.selectedItem?.id === "spear"; }
   /** Where things you drop and leave are remembered for this map. */
   groundKey() { return this.placeKey() || this.scene.key; }
@@ -865,7 +1101,7 @@ abstract class PlayScene extends Phaser.Scene {
     const [tx, ty] = this.aimPoint();
     const sx = this.player.x, sy = this.player.y + 4;
     const d = Math.hypot(tx - sx, ty - sy), r = this.spearSpread(d);
-    const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
+    const a = Math.random() * Math.PI * 2, rr = this.trueShot() ? 0 : r * Math.sqrt(Math.random());
     const lx = tx + Math.cos(a) * rr, ly = ty + Math.sin(a) * rr;
     G.removeItem("spear", 1);
     this.gesture("act"); SOUND.sfx("loose");
@@ -947,7 +1183,7 @@ abstract class PlayScene extends Phaser.Scene {
     const [tx, ty] = this.aimPoint();
     const sx = this.player.x, sy = this.player.y + 4;
     const d = Math.hypot(tx - sx, ty - sy), r = this.spread(d);
-    const a = Math.random() * Math.PI * 2, rr = r * Math.sqrt(Math.random());
+    const a = Math.random() * Math.PI * 2, rr = this.trueShot() ? 0 : r * Math.sqrt(Math.random());
     const lx = tx + Math.cos(a) * rr, ly = ty + Math.sin(a) * rr;
     const before = G.archery;
     G.data.archeryXp += ARCHERY.perShot;
@@ -1056,7 +1292,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.omenVisual(d, good);
     if (!noticed) { G.say(d.plain); return; }
     const gnosis = (G.data.aretai.Gnosis ?? 3) + 2 + G.lore("augury"), rRoll = 1 + Math.floor(Math.random() * 12);
-    const right = rRoll <= gnosis, belief = right ? good : !good;
+    const right = rRoll <= gnosis || G.warded("Athena"), belief = right ? good : !good;
     G.data.omen.read = right;
     SOUND.sfx("omen");
     this.skySubject = { id: "augury", until: this.time.now + 12000 };
@@ -1135,7 +1371,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** A creature's arrow falls: only where it lands, as with yours. Keep moving. */
   arrowAtYou(x: number, y: number, from: Animal) {
-    if (Math.hypot(this.player.x - x, this.player.y + 4 - y) > 9 || this.invuln > 0 || this.leaving) {
+    if (Math.hypot(this.player.x - x, this.player.y + 4 - y) > 9 || this.invuln > 0 || this.leaving || G.warded("Apollo")) {
       if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
@@ -1228,19 +1464,20 @@ abstract class PlayScene extends Phaser.Scene {
     });
   }
 
-  dropItem(id: string, qty: number, x: number, y: number, tex?: string) {
+  dropItem(id: string, qty: number, x: number, y: number, tex?: string, q?: number, from?: string) {
     const img = tex ? this.add.image(x, y - 3, tex) : this.add.image(x, y, "items", id).setScale(0.75);
     img.setDepth(y);
-    this.pickups.push({ id, qty, img });
+    this.pickups.push({ id, qty, img, q, from });
   }
 
   /** Walk over what lies on the ground to pick it up. */
   updatePickups() {
     for (const p of [...this.pickups]) {
       if (Math.hypot(p.img.x - this.player.x, p.img.y - (this.player.y + 4)) > 12) continue;
-      const left = G.addItem(p.id, p.qty);
+      const left = G.addItem(p.id, p.qty, p.q);
       if (left === p.qty) continue; // no room
       if (p.id === "spear") { G.data.spearAt = null; G.say("You pull your spear out of the ground."); }
+      else if (p.from) { G.say(`A gift of ${p.from}: +${p.qty - left} ${p.q && p.q > 1 ? QUALITY[p.q] + " " : ""}${ITEMS[p.id].name}.`); SOUND.sfx("find"); }
       else G.say(`+${p.qty - left} ${ITEMS[p.id].name}`);
       if (left > 0) { p.qty = left; continue; }
       p.img.destroy(); this.pickups.splice(this.pickups.indexOf(p), 1);
@@ -1874,6 +2111,8 @@ class FarmScene extends PlayScene {
       g.pettedDay = today; g.affection = Math.min(10, g.affection + 1);
       this.heart(a.sprite.x, a.sprite.y);
       G.say(`${g.name} leans into your hand. (Affection ${g.affection}/10)`);
+    } else if (g.fed && g.milkedDay !== today && (G.data.divine.day[`sick_${g.name}`] ?? 0) > today) {
+      G.say(`${g.name} is sick and off her milk. Hera's displeasure is on your household.`);
     } else if (g.fed && g.milkedDay !== today) {
       g.milkedDay = today; G.addFatigue(1);
       const n = g.affection >= (G.lore("goat") >= 3 ? 5 : 6) ? 2 : 1;
@@ -2172,12 +2411,15 @@ class FarmScene extends PlayScene {
           this.setGround(x, y, "tilled"); G.say(`You break the ground.${b}`); rollFind("hoe", FIND_CHANCE.hoe); }
         return;
       case "jar":
-        if (isWell) { G.data.jarWater = jarCap(); G.data.jarSpring = false; G.say("You fill the water jar at the well."); return; }
+        if (isWell) {
+          if ((G.data.divine.day.wellDry ?? 0) > G.dayNumber) { G.say("The well is dry. Poseidon has turned the water away from you."); return; }
+          G.data.jarWater = jarCap(); G.data.jarSpring = false; G.say("You fill the water jar at the well."); return;
+        }
         if (x === PEN.x1 - 1 && y === PEN.y0 + 1) { this.fillTrough(); return; }
         if (!soil) { G.say("Water only does good on tilled soil."); return; }
         if (soil === "wet") { G.say("This soil is already watered."); return; }
         if (G.data.jarWater <= 0) { G.say("The jar is empty. Fill it at the well."); return; }
-        G.data.jarWater -= 1; this.setGround(x, y, "wet");
+        if (!G.warded("Poseidon")) G.data.jarWater -= 1; this.setGround(x, y, "wet");
         if (G.data.jarSpring && G.data.crops[`${x},${y}`]) { G.data.crops[`${x},${y}`].nymph = true; G.say("The Naiad's water sinks in, and the plant seems to lift."); }
         if (G.data.jarWater === 0) G.say("You water the soil. The jar is empty now.");
         return;
@@ -2316,6 +2558,20 @@ function edgeGates(kind: "H" | "V", x: number, y: number): number[] {
   }
   return gates.sort((a, b) => a - b);
 }
+/**
+ * Which of an edge's gaps carry a road: about one in four, decided by the edge itself so both screens agree.
+ * The farm's east gate and the village's road south are always roads.
+ */
+function edgeRoads(kind: "H" | "V", x: number, y: number): number[] {
+  const gates = edgeGates(kind, x, y);
+  if (kind === "V" && x === 0 && y === 0) return gates;
+  if (kind === "H" && x === 0 && y >= 1) return gates.filter((g) => g === 20);
+  const r = rng((Math.imul(G.data.seed ^ 0x70ad, 17) ^ Math.imul(x + (kind === "H" ? 7 : 3), 2654435761) ^ Math.imul(y, 40503)) >>> 0);
+  return gates.filter(() => r() < 0.17);
+}
+function sideRoads(wx: number, wy: number, side: Side): number[] {
+  return side === "N" ? edgeRoads("H", wx, wy - 1) : side === "S" ? edgeRoads("H", wx, wy) : side === "W" ? edgeRoads("V", wx - 1, wy) : edgeRoads("V", wx, wy);
+}
 /** The gaps on one side of a wild screen. */
 function sideGates(wx: number, wy: number, side: Side): number[] {
   return side === "N" ? edgeGates("H", wx, wy - 1) : side === "S" ? edgeGates("H", wx, wy) : side === "W" ? edgeGates("V", wx - 1, wy) : edgeGates("V", wx, wy);
@@ -2430,22 +2686,36 @@ class WildScene extends PlayScene {
     this.gates = { N: [], S: [], E: [], W: [] };
     const carve = (x: number, y: number) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = -1; };
     const ggen = rng(screenSeed(wx, wy) ^ 0x6a7e);
+    const roadSides: Side[] = [];
     for (const sd of ["N", "S", "E", "W"] as Side[]) {
       if (!this.open[sd]) continue;
+      const roads = sideRoads(wx, wy, sd);
       for (const g of (this.gates[sd] = sideGates(wx, wy, sd))) {
         const [sx0, sy0] = sd === "N" ? [g, 0] : sd === "S" ? [g, WH - 1] : sd === "W" ? [0, g] : [WW - 1, g];
         for (let i = -1; i <= 1; i++) { if (sd === "N" || sd === "S") objs[sy0][sx0 + i] = -1; else objs[sy0 + i][sx0] = -1; }
-        // Off-centre gaps wander in toward the middle; a path meets the others there.
+        // Off-centre gaps wander in toward the middle; a road runs all the way, and is trodden bare.
+        const road = roads.includes(g);
+        if (road && !roadSides.includes(sd)) roadSides.push(sd);
         let x = sx0, y = sy0;
-        const tx = cx + Math.round((ggen() - 0.5) * 6), ty = cy + Math.round((ggen() - 0.5) * 4);
-        for (let step = 0; step < 90 && (Math.abs(x - tx) > 1 || Math.abs(y - ty) > 1); step++) {
+        const tx = road ? cx : cx + Math.round((ggen() - 0.5) * 6), ty = road ? cy : cy + Math.round((ggen() - 0.5) * 4);
+        for (let step = 0; step < 90 && (Math.abs(x - tx) > (road ? 0 : 1) || Math.abs(y - ty) > (road ? 0 : 1)); step++) {
           carve(x - 1, y - 1);
+          if (road) ground[y][x] = T.PATH;
+          const px0 = x;
           if (ggen() < 0.7) { x += Math.sign(tx - x); y += Math.sign(ty - y); }
           else if (sd === "N" || sd === "S") x += ggen() < 0.5 ? -1 : 1; else y += ggen() < 0.5 ? -1 : 1;
           x = Math.max(1, Math.min(WW - 2, x)); y = Math.max(1, Math.min(WH - 2, y));
+          if (road) { ground[y][px0] = T.PATH; ground[y][x] = T.PATH; } // keep the track joined, not stepping on corners
         }
+        if (road) ground[y][x] = T.PATH;
       }
     }
+    // Roads: where three or more meet in the middle there is a crossroads, and a herm stands at it.
+    this.rec.roads = roadSides;
+    const nRoads = roadSides.reduce((n, sd) => n + sideRoads(wx, wy, sd).filter((g) => this.gates[sd].includes(g)).length, 0);
+    this.rec.crossroads = nRoads >= 3;
+    if (nRoads) { ground[cy][cx] = T.PATH; for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1]]) if (this.rec.crossroads) ground[cy + dy][cx + dx] = T.PATH; }
+    if (this.rec.crossroads) for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 2; x <= cx + 2; x++) if (objs[y][x] !== T.EDGE) objs[y][x] = -1;
     const ring0 = (cx0: number, cy0: number, rad: number, fn: (x: number, y: number) => void) => {
       for (let y = cy0 - rad; y <= cy0 + rad; y++) for (let x = cx0 - rad; x <= cx0 + rad; x++) if (x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && Math.hypot(x - cx0, y - cy0) <= rad + 0.3) fn(x, y);
     };
@@ -2470,6 +2740,7 @@ class WildScene extends PlayScene {
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
     this.groundData = ground;
     if (p.ground2 !== p.ground) softenPatches(map, this.groundLayer, ground, p.ground2, p.ground, seasonGroundTint(G));
+    if (this.rec.roads?.length) softenPatches(map, this.groundLayer, ground, T.PATH, p.ground, seasonGroundTint(G), "softRoad");
     jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
@@ -2511,6 +2782,7 @@ class WildScene extends PlayScene {
     this.maybeMonster();
     this.setupGlint();
     this.setupHut();
+    this.setupSites();
     this.drawPlaced();
     this.cameras.main.fadeIn(250);
 
@@ -2611,8 +2883,10 @@ class WildScene extends PlayScene {
       const type: CaveType = roll <= 6 ? "common" : roll <= 9 ? "sacred" : "chthonic";
       G.data.caves[this.key] = { type, boss: "alive", hoard: false, mined: {} };
     }
-    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0;
-    if (G.count("Lamp") > 0) G.say("You light your clay lamp and duck inside. Its steady flame throws the light wide.");
+    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || G.data.divine.day.hecateLight === G.dayNumber;
+    if (G.doomed("Hecate") && !G.data.divine.day.hecateLight) { G.data.torchLit = false; G.say("Your light will not catch. Hecate denies you fire in the dark."); }
+    else if (G.data.divine.day.hecateLight === G.dayNumber) G.say("Hecate's torch goes before you into the dark.");
+    else if (G.count("Lamp") > 0) G.say("You light your clay lamp and duck inside. Its steady flame throws the light wide.");
     else if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
     else G.say("You have no torch. You feel your way into the dark: every action is at -3. (Make torches with C.)");
     G.data.cave = { key: this.key, level: 1 }; G.data.entry = "N"; G.data.scene = "Cave";
@@ -2694,6 +2968,136 @@ class WildScene extends PlayScene {
 
   // ---------------------------------------------------------------- a hut in the wild
   hutFolk: Walker[] = [];
+  // ---------------------------------------------------------------- holy places: herms, shrines, graveyards
+  siteFolk: { w: Walker; god: string; when: "day" | "night"; home: [number, number] }[] = [];
+  ghostsRolled = false;
+  /** An open patch of ground for a holy place, away from where you stand; cleared, and kept clear. */
+  siteSpot(w: number, h: number, seed: number): [number, number] | null {
+    const r = rng(seed >>> 0);
+    for (let i = 0; i < 120; i++) {
+      const tx = 4 + Math.floor(r() * (WW - w - 8)), ty = 4 + Math.floor(r() * (WH - h - 8));
+      let ok = Math.abs(tx - 20) > 3 || Math.abs(ty - 15) > 3;
+      for (let y = ty; y < ty + h && ok; y++) for (let x = tx; x < tx + w && ok; x++) { const t = this.objects.getTileAt(x, y)?.index ?? -1; if (t === T.WATER || t === T.EDGE) ok = false; }
+      if (this.rec.hut && Math.abs(tx - this.rec.hut.tx) < 8 && Math.abs(ty - this.rec.hut.ty) < 8) ok = false;
+      if (ok) return [tx, ty];
+    }
+    return null;
+  }
+  clearSite(tx: number, ty: number, w: number, h: number) {
+    for (let y = ty - 1; y <= ty + h; y++) for (let x = tx - 1; x <= tx + w; x++) {
+      const t = this.objects.getTileAt(x, y)?.index ?? -1;
+      if (t !== -1 && t !== T.EDGE && t !== T.WATER) { this.objects.putTileAt(-1, x, y); this.removeTrunk(x, y); }
+    }
+  }
+  solidAt(x: number, y: number, w: number, h: number) {
+    const z = this.add.zone(x, y, w, h); this.physics.add.existing(z, true); this.physics.add.collider(this.player, z);
+  }
+  /** A priest, priestess or keeper who tends the place, and speaks for the god. */
+  siteKeeper(god: string, seed: number, x: number, y: number, when: "day" | "night", role: string) {
+    const r = rng(seed >>> 0), female = ["Aphrodite", "Artemis", "Demeter", "Hera", "Athena", "Hecate"].includes(god) ? true : god === "Hades" ? r() < 0.5 : r() < 0.3;
+    const folk = makeFolk(r, `site${seed}`, r() < 0.5 ? "elder" : "adult", female, new Set());
+    const w = new Walker(this, folk, x, y, [x, y]);
+    this.physics.add.collider(w.sprite, this.objects); this.collideTrunks(w.sprite);
+    this.siteFolk.push({ w, god, when, home: [x, y] });
+    const sc = this;
+    this.targets.push({ get x() { return w.sprite.x; }, get y() { return w.sprite.y + 2; }, get label() { return w.sprite.visible ? `Talk to ${folk.name}, ${role}` : ""; },
+      act: () => ui(sc).priestTalk(god, folk.name, role) });
+  }
+  directSiteFolk(dt: number) {
+    for (const s of this.siteFolk) {
+      s.w.update(dt, this.paused);
+      const on = s.when === "day" ? G.isDay : !G.isDay && this.rec.hecateNight === G.dayNumber;
+      s.w.sprite.setVisible(on);
+      if (this.paused || !on || s.w.doing !== "idle" || s.w.wait > 0) continue;
+      s.w.goTo(s.home[0] + Phaser.Math.Between(-24, 24), s.home[1] + Phaser.Math.Between(-6, 18));
+      s.w.wait = 4 + Math.random() * 6;
+    }
+    // Night falls on a crossroads or a graveyard: the dead may walk.
+    if (!G.isDay && !this.ghostsRolled && (this.rec.crossroads || this.rec.graveyard)) {
+      this.ghostsRolled = true;
+      if (Math.random() < 0.4) {
+        const [gx, gy] = this.rec.graveyard ? [this.rec.graveyard[0] * TILE + 24, this.rec.graveyard[1] * TILE + 30] : [20 * TILE + 8, 15 * TILE + 8];
+        const free = (x: number, y: number) => this.free(x, y);
+        for (let i = 0; i < 1 + Math.floor(Math.random() * 2); i++) {
+          const a = new Animal(this, "eidolon", gx + (i ? 20 : -10), gy + 10, new Phaser.Geom.Rectangle(gx - 80, gy - 60, 160, 120), free);
+          a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 0.85, duration: 1500 });
+          this.physics.add.collider(a.sprite, this.objects); this.animals.push(a);
+        }
+        G.say(this.rec.graveyard ? "Pale shapes rise among the graves." : "At the crossroads, in the dark, the dead are walking.");
+      }
+    }
+    if (G.isDay) this.ghostsRolled = false;
+  }
+
+  setupSites() {
+    this.siteFolk = []; this.ghostsRolled = false;
+    const sc = this, rec = this.rec, cx = 20, cy = 15;
+    // The herm at the crossroads: Hermes' by day, Hecate's by night.
+    if (rec.crossroads) {
+      const hx = (cx + 1) * TILE + 6, hy = (cy - 1) * TILE + 14;
+      this.add.image(hx, hy, "herm").setOrigin(0.5, 1).setDepth(hy);
+      this.solidAt(hx, hy - 3, 8, 6);
+      if (Math.abs(rec.hecateNight ?? 0) !== G.dayNumber) rec.hecateNight = Math.random() < 0.35 ? G.dayNumber : -G.dayNumber; // some nights she is there
+      this.siteKeeper("Hecate", screenSeed(G.data.wx, G.data.wy) ^ 0x4ec, hx - 20, hy + 10, "night", "Hecate's wise woman");
+      this.targets.push({ x: hx, y: hy - 6, get label() { return G.isDay ? "Add a stone to the herm" : "Leave a supper for Hecate"; }, act: () => sc.atHerm() });
+      if (!rec.met) G.say("A crossroads, and a herm standing at it: roads to three or four lands.");
+    }
+    // A country shrine to the god of this land, with someone to tend it.
+    if (rec.shrine === undefined) {
+      rec.shrine = null;
+      if (this.depth >= 2 && Math.random() < 0.07) {
+        const seed = Math.floor(Math.random() * 1e9), at = this.siteSpot(4, 3, seed);
+        if (at) rec.shrine = { tx: at[0], ty: at[1], god: WHEEL[rec.terrain - 1].god, seed };
+      }
+    }
+    if (rec.shrine) {
+      const s = rec.shrine; this.clearSite(s.tx, s.ty, 3, 3);
+      const x = s.tx * TILE + 24, y = s.ty * TILE + 30;
+      this.add.image(x, y, "wshrine").setOrigin(0.5, 1).setDepth(y);
+      this.add.rectangle(x, y - 26, 4, 4, Phaser.Display.Color.HexStringToColor(WHEEL.find((w) => w.god === s.god)!.color).color).setDepth(y + 1);
+      this.solidAt(x, y - 4, 30, 8);
+      this.siteKeeper(s.god, s.seed, x + 22, y + 10, "day", `${["Aphrodite", "Artemis", "Demeter", "Hera", "Athena", "Hecate"].includes(s.god) ? "priestess" : "priest"} of ${s.god}`);
+      this.targets.push({ x, y: y - 6, label: `The shrine of ${s.god}`, act: () => ui(sc).priestTalk(s.god, "", `shrine of ${s.god}`, true) });
+      if (!rec.met) G.say(`A small shrine of ${s.god} stands here, its altar fire kept burning.`);
+    }
+    // A graveyard: Hades' shrine. The dead are buried far from the living.
+    if (rec.graveyard === undefined) {
+      rec.graveyard = null;
+      if (this.depth >= 2 && !rec.shrine && Math.random() < 0.045) {
+        const at = this.siteSpot(4, 3, Math.floor(Math.random() * 1e9));
+        if (at) rec.graveyard = at;
+      }
+    }
+    if (rec.graveyard) {
+      const [tx, ty] = rec.graveyard; this.clearSite(tx, ty, 3, 3);
+      const x = tx * TILE + 24, y = ty * TILE + 30;
+      this.add.image(x, y, "graves").setOrigin(0.5, 1).setDepth(y);
+      this.solidAt(x + 12, y - 8, 20, 10);
+      this.siteKeeper("Hades", tx * 977 + ty * 131 + G.data.seed, x - 30, y + 12, "day", "keeper of the graves");
+      this.targets.push({ x: x - 8, y: y - 6, get label() { return G.isDay ? "Look at the graves" : "Pour an offering for the dead"; }, act: () => ui(sc).priestTalk("Hades", "", "the graves", true) });
+      if (!rec.met) G.say("A graveyard, far from any living house: Hades' ground.");
+    }
+    rec.met = true;
+  }
+
+  /** A herm: a stone for Hermes by day; at night, a supper for Hecate. */
+  atHerm() {
+    const today = G.dayNumber, held = G.selectedItem?.id;
+    if (G.isDay) {
+      if (G.data.offered.herm === today) { G.say("You've added your stone today. Hermes keeps count."); return; }
+      G.data.offered.herm = today;
+      G.addFavor("Hermes", 1, 4);
+      G.say("You pick up a stone from the road and add it to the heap at the herm's foot. Travelers do; Hermes notices. (Hermes, up to +4)");
+      return;
+    }
+    const food = ["Honey", "Mushrooms", "Mint", "Meat", "Milk", "Wine", "Plum", "Millet"];
+    if (!held || !food.includes(held)) { G.say("At night the crossroads is Hecate's. Suppers are left for her here: hold some food (honey, meat, milk, mint, mushrooms) and offer it."); return; }
+    if (G.data.offered.hecateSupper === today) { G.say("Your supper for Hecate is already left here tonight."); return; }
+    G.data.offered.hecateSupper = today;
+    G.removeItem(held, 1);
+    const after = G.addFavor("Hecate", G.moon === "New moon" ? 2 : 1, 6);
+    G.say(`You set the ${ITEMS[held].name.toLowerCase()} at the herm's foot and walk away without looking back, as is proper.${G.moon === "New moon" ? " At the dark of the moon, she is especially near." : ""} (Hecate ${after >= 0 ? "+" : ""}${after})`);
+  }
   /**
    * About one screen in fifteen, two or more out from home, someone lives alone or with their family in a hut.
    * Who depends on the land: shepherds on the plains, a root-cutter in the marsh, a hermit in the badlands.
@@ -2847,13 +3251,14 @@ class WildScene extends PlayScene {
   heatSaid = false;
   /** Mud drags at your feet; sand slows you a little. */
   groundSpeed() {
+    if (G.warded("Poseidon")) return 1;
     const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE);
     const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
     return t === T.MUD ? 0.7 : t === T.SAND ? 0.88 : 1;
   }
   /** The desert sun wears you down by day, except in the shade by water. */
   desertHeat(dt: number) {
-    if (this.rec.terrain !== 8 || !G.isDay) return;
+    if (this.rec.terrain !== 8 || !G.isDay || G.warded("Apollo")) return;
     const tx = this.player.x / TILE, ty = this.player.y / TILE;
     if (this.water.some(([x, y]) => Math.hypot(x - tx, y - ty) < 5)) return;
     G.addFatigue(dt * 0.05);
@@ -3144,6 +3549,7 @@ class WildScene extends PlayScene {
     this.updateAnimals(dt);
     this.updateMythborn(dt);
     this.directHutFolk(dt);
+    this.directSiteFolk(dt);
     if (!this.common(dt)) return;
     this.maybeWolves();
     this.monsterTick(dt);
@@ -3809,6 +4215,7 @@ class UIScene extends Phaser.Scene {
       "",
       "GODS, SIGNS AND PEOPLE",
       "Each of the day's twelve hours belongs to a god of the Cosmic Wheel. Pray and make offerings at altars (E).",
+      "Favor (F) steps up at 1, 4, 8, 10, 12: help, gifts in the god's domain, a power to call on there, their Aretai +1, protection. Disfavor mirrors it, to real danger at -12. It drifts back toward 0. Country shrines, graveyards and crossroads herms have keepers who will tell you what their god wants.",
       "Hesiod's signs mark the year: study one as it happens and it helps for 4 days. Birds on your right are fair omens, on your left a warning. Watch for glints: rare finds.",
       "Villagers: talk daily and give gifts (hold the item, E). Theron trades; Lykos upgrades tools and forges swords.",
       "Ask villagers if they need anything, and for rumors of lands they've heard of. J: your journal of promises and rumors.",
@@ -3993,7 +4400,7 @@ class UIScene extends Phaser.Scene {
   }
   closeTalk() { if (!this.talkPanel) return; this.talkPanel.destroy(); this.talkPanel = undefined; this.talkOpts = []; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft; }
 
-  changeRel(id: string, d: number) { const r = G.npcRec(id); r.rel = Math.max(REL_MIN, Math.min(REL_MAX, r.rel + d)); return r.rel; }
+  changeRel(id: string, d: number) { const r = G.npcRec(id); if (d < 0 && G.warded("Aphrodite")) return r.rel; r.rel = Math.max(REL_MIN, Math.min(REL_MAX, r.rel + d)); return r.rel; }
 
   talkTo(v: Villager, said?: string) {
     const rec = G.npcRec(v.id), today = G.dayNumber;
@@ -4226,12 +4633,76 @@ class UIScene extends Phaser.Scene {
     if (ps) { G.data.entry = ""; ps.scene.restart(); }
   }
 
+  // ---------------------------------------------------------------- the gods' servants
+  /** What applies with a god right now: the tier, its words, and what each step brings. */
+  static standing(god: string): string {
+    const f = G.favor(god), t = tierOf(f), d = DIVINE[god];
+    const lines = [`${god}: ${f >= 0 ? "+" : ""}${f}, ${TIER_WORDS[t]}.`];
+    if (t === 0) lines.push(`${god} does not know you yet.`);
+    if (t >= 1) lines.push(`Noticed: ${d.passive}`);
+    if (t >= 4) lines.push(`Known: gifts are left for you in ${d.domain}.`);
+    if (t >= 8) lines.push(`Approval: you may call on ${d.power.name.toLowerCase()} there. ${d.power.desc}`);
+    if (t >= 10) lines.push(`Chosen: your ${d.aretai} is one higher while it lasts.`);
+    if (t >= 12) lines.push(`Protection: ${d.ward}`);
+    if (t <= -1) lines.push(`Displeased: ${d.passive.replace(/\(or ([^)]*)\)/g, "($1)")} works against you.`);
+    if (t <= -4) lines.push(`Disapproval: troubles wait for you in ${d.domain}: ${d.trouble.toLowerCase()}`);
+    if (t <= -8) lines.push(`Anger: ${d.wrath}`);
+    if (t <= -10) lines.push(`Accursed: your ${d.aretai} is one lower until you make amends.`);
+    if (t <= -12) lines.push(`Doom: ${d.danger}`);
+    if (f !== 0) lines.push(`Left alone, it will drift back toward nothing.`);
+    return lines.join("\n");
+  }
+  /** Speak with a priest, priestess or keeper of a god (or stand at the god's altar). */
+  priestCtx: [string, string, string, boolean] = ["", "", "", false];
+  priestTalk(god: string, name: string, role: string, atAltar = false) {
+    this.priestCtx = [god, name, role, atAltar];
+    const d = DIVINE[god], dv = G.data.divine, held = G.selectedItem?.id;
+    const who = name ? `${name}, ${role}` : role[0].toUpperCase() + role.slice(1);
+    const chthonic = CHTHONIC.includes(god);
+    const opts: { label: string; fn: () => void }[] = [];
+    if (name) {
+      opts.push({ label: `What pleases ${god}?`, fn: () => this.priestTalk2(god, who, `"${d.pleases}"`) });
+      opts.push({ label: `What angers ${god}?`, fn: () => this.priestTalk2(god, who, `"${d.angers}"`) });
+      opts.push({ label: `How do I stand with ${god}?`, fn: () => this.priestTalk2(god, who, UIScene.standing(god)) });
+      const q = dv.quests[god];
+      if (q && UIScene.countQ(q.item) >= q.qty) opts.push({ label: `Give the ${q.qty} ${ITEMS[q.item].name.toLowerCase()} for ${god}`, fn: () => {
+        UIScene.takeQ(q.item, q.qty); dv.quests[god] = undefined;
+        const after = G.addFavor(god, 2, 10); G.data.currencies.Kleos += 1;
+        this.priestTalk2(god, who, `"${god} will know of this." The gifts are laid before the god with the proper words.\n\n(${god} ${after >= 0 ? "+" : ""}${after}, +1 Kleos)`);
+      } });
+      else if (q) opts.push({ label: `About what ${god} asked…`, fn: () => this.priestTalk2(god, who, `"${god} asks for ${q.qty} ${ITEMS[q.item].name.toLowerCase()}. You have ${UIScene.countQ(q.item)}. Bring them to any shrine of ${god}."`) });
+      else opts.push({ label: `What would ${god} have of me?`, fn: () => {
+        const [item, qty] = d.wants[Math.floor(Math.random() * d.wants.length)];
+        dv.quests[god] = { item, qty, posted: G.dayNumber };
+        this.priestTalk2(god, who, `"Bring ${qty} ${ITEMS[item].name.toLowerCase()} for ${god}, to this shrine or any of the god's. It would be well received."\n\n(Your journal, J, keeps it. Reward: favor +2, up to +10, and Kleos.)`);
+      } });
+    }
+    if (held && ITEMS[held]?.kind !== "tool") opts.push({ label: `Offer the ${ITEMS[held].name.toLowerCase()} to ${god}`, fn: () => {
+      if (chthonic && G.isDay) { this.priestTalk2(god, who, `"Not by daylight. The ones below take their offerings in the dark."`); return; }
+      if (G.data.offered[god] === G.dayNumber) { this.priestTalk2(god, who, `${god} has had your offering today.`); return; }
+      if (G.favor(god) >= 9) { this.priestTalk2(god, who, `"${god} knows you well. Greater favor comes from deeds, and from what ${god} asks of you."`); return; }
+      const slot = G.data.slots.find((s) => s && s.id === held && s.q === 3) ?? G.data.slots.find((s) => s && s.id === held);
+      const fine = slot?.q === 3, liked = (OFFER_PATRON[held] ?? "") === god || d.wants.some(([i]) => i === held);
+      G.removeItem(held, 1); G.data.offered[god] = G.dayNumber;
+      const after = G.addFavor(god, (fine ? 2 : 1) + (liked ? 1 : 0), 9);
+      this.priestTalk2(god, who, `The ${ITEMS[held].name.toLowerCase()} is given to ${god}${liked ? ", and it is the kind of thing the god loves" : ""}. (favor ${after >= 0 ? "+" : ""}${after}; a country shrine raises favor as far as +9)`);
+    } });
+    const line = name ? (chthonic ? `"Speak softly here. What do you need of the ${god === "Hades" ? "lord below" : "goddess of the crossroads"}?"` : `"Be welcome at ${god}'s shrine. What do you seek?"`)
+      : atAltar ? `${chthonic ? "The graves are quiet." : `${god}'s altar, its fire tended.`} ${held ? "" : "Hold something to offer it."}` : "";
+    this.showTalk(who, d.domain, line, opts);
+  }
+  priestTalk2(god: string, who: string, text: string) {
+    this.showTalk(who, DIVINE[god].domain, text, [{ label: "Back", fn: () => this.priestTalk(...this.priestCtx) }]);
+  }
+
   openJournal() {
     const reqs = G.data.requests.map((q) => `• ${UIScene.reqText(q)}`);
     const rum = G.data.rumors.filter((r) => !r.told).map((r) => {
       const [x, y] = r.key.split(",").map(Number);
       return `• ${VILLAGERS[r.from].name}: ${r.found ? `you found the ${terrain(r.terrain).name.toLowerCase()}; tell ${VILLAGERS[r.from].name}` : `${RUMOR_WORDS[r.terrain].split(",")[0]}, ${directions(x, y)}`}.`;
     });
+    const gq = Object.entries(G.data.divine.quests).filter(([, q]) => q).map(([g, q]) => `• ${g}: ${q!.qty} ${ITEMS[q!.item].name.toLowerCase()}, to any shrine of ${g}. You have ${UIScene.countQ(q!.item)}.`);
+    reqs.push(...gq);
     const text = `REQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
@@ -4530,24 +5001,38 @@ class UIScene extends Phaser.Scene {
   buildGods() {
     const om = G.data.omen && G.data.omen.day === G.dayNumber && G.data.omen.noticed ? G.data.omen : null;
     const omenLine = om ? `  Today's omen, as you read it: ${OMEN_MEANING[om.god][(om.read ? om.good : !om.good) ? 0 : 1]}` : "";
-    const { root, font, x0, y0, h } = this.sheetFrame("The Twelve", `Favor runs from -12 to +12. Each tier of three brings more of a god's boon, or more of their anger.${omenLine}`, 540);
+    const { root, font, x0, y0, h } = this.sheetFrame("The gods", `Favor runs from -12 to +12; what it brings steps up at 1, 4, 8, 10 and 12, and it drifts back toward nothing. Point at a god for more.${omenLine}`, 600);
     const g = this.add.graphics(); root.add(g);
-    TWELVE.forEach((god, i) => {
-      const y = y0 + 64 + i * 34, f = G.favor(god), w = WHEEL[i];
-      root.add(this.add.rectangle(x0 + 20, y + 3, 10, 10, Phaser.Display.Color.HexStringToColor(w.color).color).setOrigin(0, 0));
-      root.add(this.add.text(x0 + 38, y, `${god}`, { ...font, fontSize: "14px" }));
-      root.add(this.add.text(x0 + 130, y + 1, `${w.aretai}`, { ...font, fontSize: "11px", color: "#c9b48f" }));
-      const bx = x0 + 200, bw = 180, mid = bx + bw / 2;
+    const ps = this.playScene();
+    const detail = this.add.text(x0 + 20, y0 + h - 118, "", { ...font, fontSize: "12px", color: "#e8e2d0", wordWrap: { width: 790 }, lineSpacing: 1 });
+    ALL_GODS.forEach((god, i) => {
+      const y = y0 + 58 + i * 26, f = G.favor(god), w = WHEEL.find((x) => x.god === god), d = DIVINE[god];
+      const color = w ? Phaser.Display.Color.HexStringToColor(w.color).color : 0x6a6080;
+      root.add(this.add.rectangle(x0 + 20, y + 3, 10, 10, color).setOrigin(0, 0));
+      const nm = this.add.text(x0 + 38, y, god, { ...font, fontSize: "14px", color: w ? "#f2e6c9" : "#c0b8d8" });
+      root.add(nm);
+      root.add(this.add.text(x0 + 130, y + 1, d.aretai, { ...font, fontSize: "11px", color: "#c9b48f" }));
+      const bx = x0 + 195, bw = 150, mid = bx + bw / 2;
       g.fillStyle(0x3a2c22).fillRect(bx, y + 4, bw, 8);
       g.fillStyle(f >= 0 ? 0xc9a35a : 0xb02a3a).fillRect(f >= 0 ? mid : mid + (f / 12) * (bw / 2), y + 4, Math.abs(f / 12) * (bw / 2), 8);
       g.fillStyle(0xf2e6c9).fillRect(mid, y + 2, 1, 12);
-      root.add(this.add.text(bx + bw + 10, y, `${f >= 0 ? "+" : ""}${f}  ${favorLabel(f)}`, { ...font, fontSize: "13px", color: f > 0 ? "#fbe39a" : f < 0 ? "#e09080" : "#8d877b" }));
-      root.add(this.add.text(x0 + 560, y + 1, BOONS[god], { ...font, fontSize: "11px", color: f !== 0 ? "#e8e2d0" : "#8d877b", wordWrap: { width: 240 } }));
+      for (const t of [4, 8, 10]) for (const sgn of [1, -1]) g.fillStyle(0x8d877b).fillRect(mid + sgn * (t / 12) * (bw / 2), y + 11, 1, 3);
+      const t = tierOf(f);
+      root.add(this.add.text(bx + bw + 10, y, `${f >= 0 ? "+" : ""}${f}  ${TIER_WORDS[t]}`, { ...font, fontSize: "13px", color: f > 0 ? "#fbe39a" : f < 0 ? "#e09080" : "#8d877b" }));
+      // The power, when they approve of you enough.
+      const px = x0 + 545;
+      if (f >= 8) {
+        const why = ps ? ps.powerBlocked(god) : "Step outside first.";
+        const b = this.add.text(px, y, why ? `${d.power.name} (not now)` : `Call on ${god}: ${d.power.name}`, { ...font, fontSize: "12px", color: why ? "#8d877b" : "#f2c14e", backgroundColor: why ? undefined : "#3a2a18", padding: { x: 4, y: 1 } as Phaser.Types.GameObjects.Text.TextPadding });
+        root.add(b);
+        b.setInteractive({ useHandCursor: !why }).on("pointerover", () => detail.setText(`${d.power.name}: ${d.power.desc}${why ? `\n${why}` : ""}`)).on("pointerdown", () => { if (!why && ps) { this.closeSheet(); ps.invokePower(god); } });
+      } else {
+        root.add(this.add.text(px, y + 1, f <= -4 ? `troubles in ${d.domain.split(",")[0]}` : f >= 4 ? `gifts in ${d.domain.split(",")[0]}` : f !== 0 ? d.passive.split(";")[0] : "", { ...font, fontSize: "11px", color: f !== 0 ? "#c9c0a8" : "#8d877b", wordWrap: { width: 270 } }).setMaxLines(1));
+      }
+      nm.setInteractive({ useHandCursor: true }).on("pointerover", () => detail.setText(`${UIScene.standing(god)}\nDomain: ${d.domain}.`));
     });
-    const below = CHTHONIC.filter((c) => G.favor(c) !== 0);
-    const y = y0 + 64 + 12 * 34 + 4;
-    root.add(this.add.text(x0 + 20, y, below.length ? `Beneath the earth: ${below.map((c) => `${c} ${G.favor(c) >= 0 ? "+" : ""}${G.favor(c)}`).join(", ")}` : "Beneath the earth: silence.", { ...font, fontSize: "13px", color: "#a8a0c0" }));
-    root.add(this.add.text(x0 + 20, y + 22, CURRENCIES.map((c) => `${c} ${G.data.currencies[c]}`).join("   ·   "), { ...font, fontSize: "14px", color: "#fbe39a" }));
+    root.add(detail);
+    root.add(this.add.text(x0 + 20, y0 + h - 140, CURRENCIES.map((c) => `${c} ${G.data.currencies[c]}`).join("   ·   "), { ...font, fontSize: "13px", color: "#fbe39a" }));
     root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "F or Esc to close   ·   P for your Aretai", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }
 
@@ -4709,9 +5194,13 @@ class UIScene extends Phaser.Scene {
 
   /** Your hands' skill at a station: Techne, and Hephaestus' boon when he favors you. */
   static craftQuality(): { q: number; roll: number; skill: number } {
-    const skill = (G.data.aretai.Techne ?? 3) + Math.max(0, G.boon("Hephaestus"));
-    const roll = d12();
-    return { q: roll <= Math.ceil(skill / 2) ? 3 : roll <= skill + 3 ? 2 : 1, roll, skill };
+    const skill = Math.max(1, (G.data.aretai.Techne ?? 3) + G.boon("Hephaestus"));
+    const roll = d12(), ch = G.data.divine.charges;
+    let q = roll <= Math.ceil(skill / 2) ? 3 : roll <= skill + 3 ? 2 : 1;
+    if (ch.Hephaestus) { ch.Hephaestus--; q = 3; G.say(`The god's own hand guides yours.${ch.Hephaestus ? ` (${ch.Hephaestus} more)` : ""}`); }
+    else if (ch.botch) { ch.botch = 0; q = 1; G.say("Something is off in the work today. Hephaestus looks away."); }
+    if (G.warded("Hephaestus")) q = Math.max(2, q);
+    return { q, roll, skill };
   }
 
   /** Handwork you can do anywhere (C), or the work of a station you have built (E at the station). */
@@ -4727,7 +5216,7 @@ class UIScene extends Phaser.Scene {
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
     root.add(this.add.text(W / 2, y0 + 12, STATION_NAME[at], { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
     const sub = at === "hand" ? "Click a recipe to make it from what you carry. Larger work needs a workbench."
-      : `Click a recipe to make it. Fine work is a Techne check (skill ${(G.data.aretai.Techne ?? 3) + Math.max(0, G.boon("Hephaestus"))}).`;
+      : `Click a recipe to make it. Fine work is a Techne check (skill ${Math.max(1, (G.data.aretai.Techne ?? 3) + G.boon("Hephaestus"))}).`;
     root.add(this.add.text(W / 2, y0 + 40, sub, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     list.forEach((r, i) => {
       const y = y0 + 68 + i * row;
@@ -4752,7 +5241,7 @@ class UIScene extends Phaser.Scene {
       G.say(`${STATION_NAME[r.at ?? "hand"]}: you heat, hammer and quench. Your ${ITEMS[r.out].name.toLowerCase()} is now a ${toolName(r.out, r.upgrade, ITEMS[r.out].name).toLowerCase()}.`);
       this.buildCraft(); return;
     }
-    const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
+    const qty = Math.max(1, r.qty + (r.out === "Arrow" ? G.boon("Hephaestus") : 0));
     let q: number | undefined, note = "";
     if (r.quality) {
       const c = UIScene.craftQuality(); q = c.q;

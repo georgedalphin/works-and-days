@@ -261,6 +261,28 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 15, 13, 6, 5, "#8a5f35"); px(c, 16, 14, 4, 3, "#a47a52"); px(c, 14, 15, 2, 1, "#6b4a2b");
     px(c, 3, 17, 4, 3, "#5e5a54"); px(c, 2, 16, 6, 1, "#7f7a70");
   });
+  // A herm: a square pillar with a bearded head, at a crossroads; stones heaped at its foot.
+  canvasTex(scene, "herm", 12, 26, (c) => {
+    px(c, 1, 23, 10, 3, "rgba(0,0,0,0.25)");
+    px(c, 3, 8, 6, 16, "#d8d0bc"); px(c, 3, 8, 1, 16, "#ece6d6"); px(c, 8, 8, 1, 16, "#b8b0a0"); px(c, 2, 8, 8, 2, "#c4bcaa");
+    px(c, 3, 1, 6, 7, "#d8d0bc"); px(c, 4, 2, 4, 1, "#8a7a60"); px(c, 4, 4, 1, 1, "#5e5040"); px(c, 7, 4, 1, 1, "#5e5040"); px(c, 4, 5, 4, 3, "#a8987a");
+    px(c, 1, 21, 4, 3, "#9a948a"); px(c, 7, 22, 4, 2, "#8a8780"); px(c, 4, 22, 3, 2, "#a49e91");
+  });
+  // A country shrine: a little altar under a roof on two columns, and a god's banner.
+  canvasTex(scene, "wshrine", 34, 30, (c) => {
+    px(c, 1, 27, 32, 3, "rgba(0,0,0,0.22)");
+    px(c, 2, 24, 30, 4, "#bdb5a2"); px(c, 2, 24, 30, 1, "#d8d0bc");
+    px(c, 5, 9, 3, 15, "#e6dfcd"); px(c, 26, 9, 3, 15, "#e6dfcd"); px(c, 5, 9, 1, 15, "#f4efe2"); px(c, 26, 9, 1, 15, "#f4efe2");
+    px(c, 2, 6, 30, 3, "#d8d0bc"); px(c, 4, 3, 26, 3, "#c4703f"); px(c, 8, 1, 18, 2, "#a8653a"); px(c, 14, 0, 6, 1, "#a8653a");
+    px(c, 12, 16, 10, 8, "#a49e91"); px(c, 12, 16, 10, 1, "#c4bcaa"); px(c, 15, 13, 4, 3, "#f2c14e"); px(c, 16, 11, 2, 2, "#fff3c0");
+  });
+  // A graveyard: grave stelai, a mound, and a little low wall.
+  canvasTex(scene, "graves", 48, 30, (c) => {
+    px(c, 0, 26, 48, 4, "rgba(0,0,0,0.2)");
+    px(c, 26, 14, 20, 12, "#7a6a4e"); px(c, 28, 12, 16, 4, "#86765a"); px(c, 31, 10, 10, 3, "#8e7e62");
+    for (const [x, h] of [[3, 14], [11, 11], [19, 15]] as [number, number][]) { px(c, x, 26 - h, 5, h, "#c4bcaa"); px(c, x, 26 - h, 5, 1, "#e0d8c6"); px(c, x + 1, 26 - h - 2, 3, 2, "#c4bcaa"); px(c, x + 1, 26 - h + 4, 3, 1, "#8a8270"); }
+    px(c, 0, 26, 48, 2, "#8a8780"); for (let x = 0; x < 48; x += 6) px(c, x, 25, 4, 1, "#a49e91");
+  });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
     px(c, 1, 3, 14, 10, "#7a5a33"); px(c, 1, 2, 14, 3, "#9c7445"); px(c, 1, 2, 14, 1, "#b88d58");

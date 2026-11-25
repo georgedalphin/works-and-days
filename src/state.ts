@@ -1,5 +1,6 @@
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
+import { ALL_GODS, DIVINE, boonOf, giftChance, DRIFT_DAYS } from "./divine";
 import { START_CURRENCIES, type Currency, favorLabel } from "./gods";
 import { SIGNS, SIGN_DAYS, MAGIC_FINDS, type SignEffect, DREAMS, MOROS_DREAMS, OMEN_MEANING } from "./omens";
 import {
@@ -16,7 +17,9 @@ export interface CropRec { id: string; growth: number; dryNights: number; dryStr
 const START_LORE: Record<string, number> = { goat: 1, bees: 1, Millet: 1, Chickpeas: 1, Melon: 1, Mint: 1, vine: 1, olive: 1, t3: 1 };
 export interface ScreenRec { terrain: number; special: boolean; feature: string; cleared: string[]; picked?: Record<string, number>; barrow?: [number, number]; laid?: boolean; glint?: number;
   /** A lonely hut on this screen: who lives there, and what you have done there today. */
-  hut?: { tx: number; ty: number; kind: string; seed: number; god: string; hosted?: number; special?: number; sensed?: boolean; met?: boolean } | null }
+  hut?: { tx: number; ty: number; kind: string; seed: number; god: string; hosted?: number; special?: number; sensed?: boolean; met?: boolean } | null;
+  /** Roads through this screen (the sides whose gaps carry a track), a crossroads where three or more meet, a graveyard, a shrine. */
+  roads?: string[]; crossroads?: boolean; hecateNight?: number; met?: boolean; graveyard?: [number, number] | null; shrine?: { tx: number; ty: number; god: string; seed: number } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";
 
@@ -104,6 +107,17 @@ export interface SaveData {
   askedRumor: Record<string, number>;
   /** Year each olive tree on the homestead was last picked. */
   olives: Record<string, number>;
+  /** The gods at work: gifts and troubles waiting in their domains, powers used, Chosen marks, charges, and days. */
+  divine: {
+    gifts: { god: string; item: string; qty: number; q?: number }[];
+    troubles: string[];
+    powerUsed: Record<string, number>;
+    chosen: Record<string, number>; // +1 while Chosen (+10), -1 while Accursed (-10)
+    charges: Record<string, number>;
+    wrathDay: Record<string, number>;
+    day: Record<string, number>; // calm, fury, hecateLight, wellDry, goatSick...
+    quests: Record<string, { item: string; qty: number; posted: number } | undefined>;
+  };
   /** Today's weather, rolled at dawn, and tomorrow's (which a chance word may tell you). */
   weather: Weather;
   nextWeather?: Weather;
@@ -157,7 +171,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
     if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
     // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
     if (!d.spearHotbar) {
@@ -229,7 +243,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, weather: "clear", signs: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -268,12 +282,63 @@ export class GameState {
     this.data.favor[god] = after;
     if (after >= 4 && !this.data.knownByName[god]) { this.data.knownByName[god] = true; this.data.currencies.Ambrosia++; this.say(`${god} knows you by name now. (+1 Ambrosia)`); }
     if (favorLabel(after) !== favorLabel(before)) this.say(`${god}: ${favorLabel(after).toLowerCase()} (favor ${after >= 0 ? "+" : ""}${after}).`);
+    this.checkChosen(god);
     return after;
   }
+  /** At +10 a god's own Aretai rises by one while you stay Chosen; at -10 it falls by one while you stay Accursed. */
+  checkChosen(god: string) {
+    const def = DIVINE[god]; if (!def) return;
+    const f = this.favor(god), want = f >= 10 ? 1 : f <= -10 ? -1 : 0, had = this.data.divine.chosen[god] ?? 0;
+    if (want === had) return;
+    const a = def.aretai;
+    this.data.aretai[a] = Math.max(0, Math.min(12, (this.data.aretai[a] ?? 0) - had + want));
+    if (want) this.data.divine.chosen[god] = want; else delete this.data.divine.chosen[god];
+    this.essenceMax = essencePools(this.data.aretai);
+    if (want > 0) this.say(`${god} has chosen you. Your ${a} rises to ${this.data.aretai[a]} while you keep their favor.`);
+    else if (want < 0) this.say(`${god} has cursed you. Your ${a} falls to ${this.data.aretai[a]} until you make amends.`);
+    else this.say(`${god}'s ${had > 0 ? "choice" : "curse"} has passed. Your ${a} is ${this.data.aretai[a]} again.`);
+  }
+  /**
+   * The gods at dawn: favor drifts back toward nothing; gifts and troubles are laid in the gods' domains for you
+   * to find; and the protections and dangers of +12 and -12 that work at home do their work.
+   */
+  divineDawn(): string[] {
+    const notes: string[] = [], dv = this.data.divine, today = this.dayNumber;
+    for (const god of ALL_GODS) {
+      const f = this.favor(god);
+      // Drift: every DRIFT_DAYS days (on average) a step back toward 0, either way.
+      if (f !== 0 && Math.random() < 1 / DRIFT_DAYS) { this.data.favor[god] = f - Math.sign(f); this.checkChosen(god); }
+      const p = giftChance(f);
+      if (p && Math.random() < p) {
+        if (f > 0 && !dv.gifts.some((g) => g.god === god)) {
+          const def = DIVINE[god], treasure = f >= 10 && Math.random() < 0.25;
+          const [item, qty] = treasure ? def.treasure : def.gifts[Math.floor(Math.random() * def.gifts.length)];
+          dv.gifts.push({ god, item, qty, q: f >= 10 ? 3 : f >= 8 ? 2 : 1 });
+        }
+        if (f < 0 && !dv.troubles.includes(god)) dv.troubles.push(god);
+      }
+    }
+    if (this.doomed("Demeter")) {
+      const live = Object.entries(this.data.crops).filter(([, c]) => !c.withered);
+      if (live.length) { live[Math.floor(Math.random() * live.length)][1].withered = true; notes.push("Famine: Demeter takes another of your crops in the night."); }
+    }
+    if (this.doomed("Athena")) {
+      const known = Object.entries(this.data.lore.tier).filter(([, t]) => t > 0);
+      if (known.length) { const [id] = known[Math.floor(Math.random() * known.length)]; this.data.lore.tier[id]--; notes.push("You wake having forgotten something you knew. Athena's owl hoots once, far off."); }
+    }
+    if (this.doomed("Aphrodite")) { for (const id of Object.keys(VILLAGERS)) this.npcRec(id).rel -= 1; notes.push("The village thinks less of you again today (-1 with everyone)."); }
+    void today;
+    return notes;
+  }
+
+  /** +12: thorough protection in the god's domain. */
+  warded(god: string) { return this.favor(god) >= 12; }
+  /** -12: genuine danger there. */
+  doomed(god: string) { return this.favor(god) <= -12; }
   /** Favor tier, -4 to +4: what boons and penalties scale by. */
   boon(god: string) {
     const f = this.favor(god);
-    let b = Math.sign(f) * Math.ceil(Math.abs(f) / 3);
+    let b = boonOf(f);
     const o = this.data.omen;
     if (o && o.day === this.dayNumber && o.god === god) b += o.good ? 1 : -1; // today's omen, whether you read it or not
     for (const [id, g] of Object.entries(MAGIC_FINDS)) if (g === god && this.count(id) > 0) b += 1; // a thunderstone, a Heliad's tear
@@ -364,7 +429,9 @@ export class GameState {
   sleep(collapsed = false) {
     const hoursSlept = this.sleepHours;
     const credit = collapsed ? 0.5 : 1;
-    const recovered = Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * (this.signActive("rest") ? 1.25 : 1));
+    // Hera keeps the house: at +12 sleep there restores you wholly; at -12 it gives you half the rest.
+    const hera = !collapsed && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
+    const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1));
     this.data.fatigue -= recovered;
     this.data.clock = 0;
     this.data.day += 1;
@@ -378,8 +445,8 @@ export class GameState {
     // Requests not met in time lapse, and the asker is a little let down.
     for (const q of [...this.data.requests]) if (this.dayNumber > q.due) {
       this.data.requests.splice(this.data.requests.indexOf(q), 1);
-      this.npcRec(q.from).rel -= 1;
-      notes.push(`${VILLAGERS[q.from].name}'s request lapsed (-1 with ${VILLAGERS[q.from].name}).`);
+      if (!this.warded("Aphrodite")) this.npcRec(q.from).rel -= 1;
+      notes.push(`${VILLAGERS[q.from].name}'s request lapsed${this.warded("Aphrodite") ? "" : ` (-1 with ${VILLAGERS[q.from].name})`}.`);
       if (q.kind === "deliver") this.removeItem("Parcel", 1);
     }
     // Crops grow on nights their soil is watered, and wither after too many dry ones or out of season.
@@ -390,10 +457,11 @@ export class GameState {
       if (!def.seasons.includes(this.month.season)) { c.withered = true; withered++; continue; }
       const ripeAt = c.picks > 0 && def.regrow ? def.regrow : def.days;
       if (c.growth >= ripeAt) continue; // ripe: it waits for you
-      if (this.data.ground[k] === "wet") { c.growth++; c.dryStreak = 0; }
+      if (this.data.ground[k] === "wet" || this.warded("Demeter")) { c.growth++; c.dryStreak = 0; } // Demeter's protection waters them
       else { c.dryNights++; c.dryStreak++; if (c.dryStreak >= DRY_LIMIT) { c.withered = true; withered++; } }
     }
     if (withered) notes.push(`${withered} planting${withered > 1 ? "s" : ""} withered.`);
+    notes.push(...this.divineDawn());
     // The miller's cart calls at dawn: it takes what you left in the pithos and brings what you ordered.
     if (this.data.outbox.length) {
       let earned = 0;
@@ -436,6 +504,7 @@ export class GameState {
     // The goats eat and drink in the night; a goat that goes without gives no milk.
     for (const g of this.data.goats) {
       if (this.data.manger >= 1 && this.data.trough >= 1) { this.data.manger--; this.data.trough--; g.fed = true; }
+      else if (this.warded("Hera")) { g.fed = true; } // Hera keeps the household fed
       else { g.fed = false; g.affection = Math.max(0, g.affection - 1); notes.push(`${g.name} went hungry or thirsty in the night.`); }
     }
     return { hoursSlept, recovered, notes };
