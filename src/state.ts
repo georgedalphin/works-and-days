@@ -428,11 +428,11 @@ export class GameState {
   get sleepHours() { return Math.max(0, 24 - Math.max(this.data.clock, this.daylight - 2)); }
 
   /** Sleep until dawn. Returns hours slept and fatigue recovered. */
-  sleep(collapsed = false) {
+  sleep(collapsed = false, rough = false) {
     const hoursSlept = this.sleepHours;
-    const credit = collapsed ? 0.5 : 1;
+    const credit = collapsed || rough ? 0.5 : 1; // a collapse, or the hard ground by a campfire: half the rest
     // Hera keeps the house: at +12 sleep there restores you wholly; at -12 it gives you half the rest.
-    const hera = !collapsed && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
+    const hera = !collapsed && !rough && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
     const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1));
     this.data.fatigue -= recovered;
     this.data.clock = 0;

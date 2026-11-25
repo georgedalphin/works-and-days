@@ -143,6 +143,7 @@ export const ITEMS: Record<string, ItemDef> = {
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
   // Rare finds (omens.ts says where they turn up).
   // Made things (crafting.ts says how).
+  Campfire: { id: "Campfire", value: 4, name: "Campfire", greek: "pyra", kind: "place", desc: "A ring of stones and a bundle of kindling. Set it down anywhere and sleep beside it (half the rest of a bed, but you wake where you lay)." },
   Workbench: { id: "Workbench", value: 20, name: "Workbench", greek: "ergasterion", kind: "place", desc: "A stout bench for joinery. Place it on your homestead and use it to make larger things." },
   Kiln: { id: "Kiln", value: 30, name: "Kiln", greek: "kaminos", kind: "place", desc: "A beehive of clay and stone for firing pots. Place it on your homestead." },
   Loom: { id: "Loom", value: 25, name: "Loom", greek: "histos", kind: "place", desc: "An upright warp-weighted loom, Athena's gift. Place it on your homestead." },
@@ -344,6 +345,7 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Torch", qty: 2, needs: [["Wood", 1], ["Fiber", 1]], desc: "Wood wrapped in fiber and pitch, for the dark places." },
   { out: "Snare", qty: 1, needs: [["Fiber", 2], ["Wood", 1]], desc: "A noose on a bent stick. Set it, and check it after a night." },
   { out: "Garland", qty: 1, needs: [["Flowers", 3], ["Fiber", 1]], desc: "Wildflowers woven on a cord: a gift, or an offering." },
+  { out: "Campfire", qty: 1, needs: [["Fiber", 12], ["Stone", 4]], desc: "Kindling and a ring of stones: sleep out wherever you are (half the rest of a bed)." },
   { out: "Workbench", qty: 1, needs: [["Wood", 8], ["Stone", 2]], desc: "The first station: place it on your homestead to make larger things." },
   { out: "WineAmphora", qty: 1, needs: [["Amphora", 1], ["Wine", 3]], desc: "Seal three measures of wine in an amphora with pitch." },
   // At the workbench.

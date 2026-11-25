@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GameState, rng, CHEST_SIZE, type Placed, type Slot } from "./state";
+import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
@@ -437,9 +437,21 @@ abstract class PlayScene extends Phaser.Scene {
     const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom", Press: "press", Forge: "forge" };
     if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => ui(sc).openCraft(station[p.id]) };
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
+    else if (p.id === "Campfire") {
+      o.t = { ...o.t, label: "Sleep by the campfire", act: () => sc.campSleep() };
+      const glow = this.add.image(cx, by - 6, "focusGlow").setDepth(by - 1).setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({ targets: glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 380 + Math.random() * 200 });
+      this.tweens.add({ targets: img, scaleY: 1.06, yoyo: true, repeat: -1, duration: 260 });
+    }
     else if (p.id === "Snare") o.t = { x: o.t.x, y: o.t.y, get label() { return p.caught ? "Something is in the snare" : "Check the snare"; }, act: () => sc.checkSnare(o) };
     this.targets.push(o.t);
     this.placedObjs.push(o);
+  }
+  /** Sleep out by a campfire: half the rest of a bed, but you wake where you lay down. */
+  campSleep() {
+    const hours = G.sleepHours, rec = Math.min(G.data.fatigue, hours * 12 * 0.5);
+    const early = G.isDay && G.data.clock < G.daylight - 2 ? "\nIt is still day: the rest of today will pass, and only the night's sleep counts." : "";
+    ui(this).choose(`Sleep here by the fire until dawn?${early}\n\nThe ground is hard: about ${hours.toFixed(1)} hours of rough sleep, clearing ${Math.round(rec)} Fatigue (half what a bed gives). You will wake here.`, () => ui(this).sleep(this, false, undefined, true));
   }
   /** A snare set for at least a night has had its chance: d12 ≤ Oikos + 2, and Artemis' favor. */
   resolveSnare(p: Placed) {
@@ -477,7 +489,7 @@ abstract class PlayScene extends Phaser.Scene {
     const held = G.selectedItem!; const name = ITEMS[held.id].name.toLowerCase();
     const key = this.placeKey();
     if (!key) { G.say(`There's nowhere to set the ${name} down here.`); return; }
-    if (key !== "farm" && held.id !== "Snare") { G.say(`The ${name} belongs on your own homestead.`); return; }
+    if (key !== "farm" && held.id !== "Snare" && held.id !== "Campfire") { G.say(`The ${name} belongs on your own homestead.`); return; }
     const [tx, ty] = this.facingTile(); if (tx < 0) return;
     const why = this.placeBlocked(tx, ty) ?? (this.placedAt(tx, ty) ? "Something is already there." : null);
     if (why) { G.say(why); return; }
@@ -503,7 +515,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (!this.ghost || !this.ghost.active) this.ghost = this.add.image(0, 0, tex).setOrigin(0.5, 1).setAlpha(0.55).setDepth(99980);
     if (this.ghost.texture.key !== tex) this.ghost.setTexture(tex);
     if (held.id === "Fence") this.ghost.setFrame("Fence"); else if (held.id === "Snare") this.ghost.setFrame(0);
-    const ok = this.placeKey() && !this.placeBlocked(tx, ty) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare");
+    const ok = this.placeKey() && !this.placeBlocked(tx, ty) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare" || held.id === "Campfire");
     this.ghost.setPosition(tx * TILE + 8, ty * TILE + 15).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
   }
 
@@ -4352,10 +4364,11 @@ class UIScene extends Phaser.Scene {
       "Aim: point the mouse at anything within two paces. Mouse outside the window: you act on what you face.",
       "Left click or Space: work with what you hold. Right click or E: interact. Q: study.",
       "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap). C: crafting.",
-      "J: journal. K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help.",
+      "J: journal. K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help. Esc: pause, save and quit.",
       "",
       "PACING",
       "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, rites and running Air. Skill makes each act cheaper, and so does the hour of the matching god. An empty bar refills in about 12 seconds (slower when weary): a few blows, then a breath.",
+      "Sleep out by a campfire (12 Fiber, 4 Stone, by hand) for half a bed's rest, waking where you lay.",
       "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. Your life is saved each dawn.",
       "",
       "FIGHTING AND HUNTING",
@@ -4373,6 +4386,7 @@ class UIScene extends Phaser.Scene {
       "",
       "THE WILD",
       "East lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
+      "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "",
@@ -4401,7 +4415,7 @@ class UIScene extends Phaser.Scene {
       else if (this.craft && this.craftAt !== "hand") { this.closeCraft(); this.closedByE = performance.now(); }
     });
     for (const k of ["ESC", "ENTER", "SPACE"]) this.input.keyboard!.on(`keydown-${k}`, () => {
-      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.devPanel && k === "ESC") this.closeDev(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else closeHelp();
+      if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.devPanel && k === "ESC") this.closeDev(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else if (k === "ESC" && !this.help.visible && !this.dialog && !this.ritual && this.playScene()) this.openPause(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); else if (this.talkPanel) this.closeTalk(); });
     hbg.setInteractive().on("pointerdown", closeHelp);
@@ -4856,6 +4870,26 @@ class UIScene extends Phaser.Scene {
   }
   priestTalk2(god: string, who: string, text: string) {
     this.showTalk(who, DIVINE[god].domain, text, [{ label: "Back", fn: () => this.priestTalk(...this.priestCtx) }]);
+  }
+
+  // ---------------------------------------------------------------- pause: save, quit
+  openPause() {
+    const ps = this.playScene(); if (!ps) return;
+    this.showTalk("Paused", G.dateLabel(), "Your life is saved each dawn. You can also save now and leave, and pick up exactly here.", [
+      { label: "Save and quit to the title", fn: () => this.quitToTitle(true) },
+      { label: "Quit without saving (back to the last save)", fn: () => this.choose("Quit without saving? Anything since your last save will be lost.", () => this.quitToTitle(false)) },
+    ]);
+  }
+  quitToTitle(save: boolean) {
+    const ps = this.playScene();
+    this.closeTalk();
+    if (save && ps) {
+      G.data.scene = ps.scene.key as SaveData["scene"]; G.data.px = ps.player.x; G.data.py = ps.player.y; G.data.entry = "";
+      if (!G.save()) { G.say("This browser would not let the game save."); return; }
+    }
+    this.modal = false;
+    for (const s of this.scene.manager.getScenes(true)) if (s !== this) s.scene.stop();
+    this.scene.start("Title");
   }
 
   openJournal() {
@@ -5634,25 +5668,28 @@ class UIScene extends Phaser.Scene {
     this.time.delayedCall(1200, () => { this.input.keyboard!.once("keydown", () => window.location.reload()); this.input.once("pointerdown", () => window.location.reload()); });
   }
 
-  sleep(from: Phaser.Scene, collapsed: boolean, cause?: string) {
+  sleep(from: Phaser.Scene, collapsed: boolean, cause?: string, camp = false) {
     this.modal = true;
     if (this.inv) this.toggleInventory();
     this.modal = true;
-    const away = from.scene.key === "Wild";
-    const { hoursSlept, recovered, notes } = G.sleep(collapsed);
+    const away = from.scene.key === "Wild" && !camp;
+    const { hoursSlept, recovered, notes } = G.sleep(collapsed, camp);
     if (away && !cause) notes.unshift("A passing shepherd finds you and helps you home.");
-    const wakeX = 3 * TILE, wakeY = 5 * TILE + 8; // beside the bed
-    G.data.scene = "House"; G.data.px = wakeX; G.data.py = wakeY;
+    // By a campfire you wake where you lay down; otherwise beside your own bed.
+    const ps = from as PlayScene;
+    const wakeScene = camp ? from.scene.key : "House";
+    const wakeX = camp ? ps.player.x : 3 * TILE, wakeY = camp ? ps.player.y : 5 * TILE + 8;
+    G.data.scene = wakeScene as SaveData["scene"]; G.data.px = wakeX; G.data.py = wakeY; if (camp) G.data.entry = "";
     const saved = G.save();
     const cover = this.add.rectangle(0, 0, W, H, 0x0b1630, 0).setOrigin(0, 0).setDepth(30);
     this.tweens.add({ targets: cover, fillAlpha: 1, duration: 600 });
     const lines = [
-      cause ?? (collapsed ? "You collapse from exhaustion in the second watch of the night." : "You sleep."),
+      cause ?? (collapsed ? "You collapse from exhaustion in the second watch of the night." : camp ? "You sleep on the hard ground by the fire, waking now and then to feed it." : "You sleep."),
       "",
       `Dawn. ${G.dateLabel()}`,
       `${G.moon}`,
       "",
-      `${hoursSlept.toFixed(1)} hours of sleep${collapsed ? " (poor rest: half counted)" : ""}, ${Math.round(recovered)} Fatigue cleared.`,
+      `${hoursSlept.toFixed(1)} hours of sleep${collapsed || camp ? " (poor rest: half counted)" : ""}, ${Math.round(recovered)} Fatigue cleared.`,
       ...notes,
       saved ? "Your life is saved." : "(This browser would not let the game save.)",
       "",
@@ -5664,10 +5701,10 @@ class UIScene extends Phaser.Scene {
       const go = () => {
         this.input.keyboard!.off("keydown", go); this.input.off("pointerdown", go);
         cover.destroy(); t.destroy();
-        G.data.scene = "House"; G.data.px = wakeX; G.data.py = wakeY;
+        G.data.scene = wakeScene as SaveData["scene"]; G.data.px = wakeX; G.data.py = wakeY; if (camp) G.data.entry = "";
         (from as PlayScene).leaving = true; // keep the old scene from moving us before it closes
         this.modal = false;
-        from.scene.start("House");
+        if (camp) from.scene.restart(); else from.scene.start("House");
       };
       this.input.keyboard!.once("keydown", go);
       this.input.once("pointerdown", go);

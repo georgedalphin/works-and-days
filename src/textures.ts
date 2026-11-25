@@ -356,6 +356,12 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 6, 6, 6, 24, "#e6dfcd"); px(c, 7, 1, 4, 5, "#e6dfcd"); px(c, 4, 10, 2, 12, "#e6dfcd"); px(c, 12, 8, 2, 10, "#e6dfcd"); px(c, 13, 4, 1, 6, "#e6dfcd");
     px(c, 7, 22, 2, 8, "#c4bcaa"); px(c, 10, 22, 2, 8, "#c4bcaa"); px(c, 8, 2, 1, 1, "#8a8270"); px(c, 10, 2, 1, 1, "#8a8270");
   });
+  canvasTex(scene, "pl_Campfire", 18, 16, (c) => {
+    px(c, 1, 13, 16, 3, "rgba(0,0,0,0.25)");
+    for (const [x, y] of [[1, 11], [4, 13], [9, 14], [13, 12], [15, 9], [2, 8]] as [number, number][]) { px(c, x, y, 3, 2, "#8a8780"); px(c, x, y, 3, 1, "#a49e91"); }
+    px(c, 5, 10, 8, 2, "#6b4a2b"); px(c, 6, 9, 6, 1, "#5e4026");
+    px(c, 6, 4, 6, 6, "#e0702a"); px(c, 7, 2, 4, 5, "#f2a03a"); px(c, 8, 1, 2, 4, "#f2d06a"); px(c, 8, 6, 2, 3, "#fff3c0");
+  });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
     px(c, 1, 3, 14, 10, "#7a5a33"); px(c, 1, 2, 14, 3, "#9c7445"); px(c, 1, 2, 14, 1, "#b88d58");
@@ -747,7 +753,7 @@ export function makeTextures(scene: Phaser.Scene) {
 }
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -855,6 +861,7 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "Campfire": for (const [x, y] of [[1, 12], [5, 13], [10, 13], [13, 11], [2, 9], [13, 8]] as [number, number][]) px(c, o + x, y, 3, 2, "#8a8780"); px(c, o + 6, 4, 5, 7, "#e0702a"); px(c, o + 7, 2, 3, 5, "#f2a03a"); px(c, o + 8, 6, 1, 3, "#fff3c0"); break;
     case "Press": px(c, o + 1, 10, 14, 5, "#a49e91"); px(c, o + 3, 11, 10, 2, "#7f7a70"); px(c, o + 2, 2, 2, 9, "#6b4a2b"); px(c, o, 4, 16, 2, "#8a5f35"); px(c, o + 6, 6, 4, 4, "#5e4026"); break;
     case "Forge": px(c, o + 2, 7, 10, 8, "#a8653a"); px(c, o + 4, 9, 6, 3, "#d9732e"); px(c, o + 6, 9, 2, 2, "#f2c14e"); px(c, o + 5, 1, 3, 6, "#8a8780"); px(c, o + 11, 10, 4, 4, "#a47a52"); break;
     case "Olives": for (const [x, y] of [[4, 6], [8, 4], [10, 8], [6, 10], [11, 12]]) { px(c, o + x, y, 3, 3, "#3a3442"); px(c, o + x, y, 1, 1, "#7a7488"); } px(c, o + 6, 2, 5, 1, "#6f8a4a"); px(c, o + 3, 3, 4, 2, "#7a9a52"); break;
