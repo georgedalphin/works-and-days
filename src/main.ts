@@ -1272,12 +1272,12 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setCrop(new Phaser.Geom.Rectangle(0, 0, 16, 11));
     b.img?.setPosition(this.player.x, this.player.y + 12).setDepth(this.player.y + 1).setFlipX(this.facing === 1);
   }
-  boardBoat(o: { p: Placed; img?: Phaser.GameObjects.Image }) {
+  boardBoat(o: { p: Placed; img?: Phaser.GameObjects.Image }, quiet = false) {
     if (this.boat) return;
     this.boat = o;
     this.player.setPosition(o.img!.x, o.img!.y - 12); this.player.setVelocity(0, 0);
     this.player.body!.checkCollision.none = false;
-    G.say("You step down into the boat and take up the oars. (Move to row; E to step ashore.)");
+    if (!quiet) G.say("You step down into the boat and take up the oars. (Move to row; E to step ashore. Row off the edge of the map to go on by water.)");
   }
   /** Step out onto the nearest dry ground, leaving the boat where it floats. */
   disembark() {
@@ -1295,6 +1295,24 @@ abstract class PlayScene extends Phaser.Scene {
     this.boat = undefined; this.player.setCrop();
     this.player.setPosition(land[0] * TILE + 8, land[1] * TILE + 8); this.player.setVelocity(0, 0);
     G.say("You step ashore and pull the boat up into the shallows.");
+  }
+  /** Arriving by boat: put it on the nearest water to where you came in (or, with no water near, carry it). */
+  landBoat(): boolean {
+    G.data.boatCarry = false;
+    const o = this.objLayer()!; const ptx = Math.floor(this.player.x / TILE), pty = Math.floor(this.player.y / TILE);
+    let best: [number, number] | null = null, bd = 99;
+    for (let y = pty - 6; y <= pty + 6; y++) for (let x = ptx - 6; x <= ptx + 6; x++) {
+      if (!waterKind(o.getTileAt(x, y)?.index)) continue;
+      const d = Math.hypot(x - ptx, y - pty); if (d < bd) { bd = d; best = [x, y]; }
+    }
+    if (!best) {
+      if (G.addItem("Boat", 1) > 0) G.say("The water runs out here, and your pack is full: you leave the boat behind.");
+      else G.say("The water runs out here. You haul the boat out and carry it on your back.");
+      return false;
+    }
+    G.data.placed.push({ id: "Boat", where: this.placeKey(), x: best[0], y: best[1] });
+    this.player.setPosition(best[0] * TILE + 8, best[1] * TILE + 3);
+    return true;
   }
   /** Where a boat can be set down: in the water, with dry land beside it. */
   boatSpot(tx: number, ty: number): string | null {
@@ -2668,6 +2686,32 @@ function edgeRoads(kind: "H" | "V", x: number, y: number): number[] {
 function sideRoads(wx: number, wy: number, side: Side): number[] {
   return side === "N" ? edgeRoads("H", wx, wy - 1) : side === "S" ? edgeRoads("H", wx, wy) : side === "W" ? edgeRoads("V", wx - 1, wy) : edgeRoads("V", wx, wy);
 }
+/**
+ * Rivers run in long courses: down some columns of screens (north to south) and across some rows (west to east),
+ * each for a stretch of screens. Where a river crosses an edge is decided by the edge itself, so both screens agree.
+ * Never through the farm or the village.
+ */
+function riverSpan(kind: "col" | "row", n: number): [number, number] | null {
+  if (kind === "col" && n === 0) return null;
+  if (kind === "row" && (n === 0 || n === 1)) return null;
+  const r = rng((Math.imul(G.data.seed ^ (kind === "col" ? 0x2a1f : 0x7c33), 9176) ^ Math.imul(n, 2246822519)) >>> 0);
+  if (r() > (kind === "col" ? 0.2 : 0.16)) return null;
+  const from = -7 + Math.floor(r() * 9), len = 3 + Math.floor(r() * 9);
+  return [from, from + len];
+}
+function edgeRiver(kind: "H" | "V", x: number, y: number): { at: number; w: number } | null {
+  const span = kind === "H" ? riverSpan("col", x) : riverSpan("row", y);
+  if (!span) return null;
+  const [a, b] = span, n0 = kind === "H" ? y : x;
+  if (n0 < a || n0 + 1 > b) return null; // both screens must be on the river's course
+  if (kind === "V" && (x === 0 || x === -1) && (y === 0 || y === 1)) return null;
+  const r = rng((Math.imul(G.data.seed ^ 0x51ee, 31) ^ Math.imul(x + (kind === "H" ? 11 : 5), 668265263) ^ Math.imul(y, 374761393)) >>> 0);
+  const len = kind === "H" ? WW : WH;
+  return { at: 5 + Math.floor(r() * (len - 16)), w: 3 + Math.floor(r() * 6) };
+}
+function sideRiver(wx: number, wy: number, side: Side) {
+  return side === "N" ? edgeRiver("H", wx, wy - 1) : side === "S" ? edgeRiver("H", wx, wy) : side === "W" ? edgeRiver("V", wx - 1, wy) : edgeRiver("V", wx, wy);
+}
 /** The gaps on one side of a wild screen. */
 function sideGates(wx: number, wy: number, side: Side): number[] {
   return side === "N" ? edgeGates("H", wx, wy - 1) : side === "S" ? edgeGates("H", wx, wy) : side === "W" ? edgeGates("V", wx - 1, wy) : edgeGates("V", wx, wy);
@@ -2787,10 +2831,11 @@ class WildScene extends PlayScene {
       const fy = 4 + Math.floor(gen() * (WH - 8));
       this.stampFeature(objs, fx, fy, this.rec.feature, gen);
     }
-    for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE) objs[y][x] = -1; }
+    for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE && !waterKind(objs[y][x])) objs[y][x] = -1; }
     // Gaps in the border on each open side (matching the neighbour's), each with a winding clear way to the middle.
     this.gates = { N: [], S: [], E: [], W: [] };
-    const carve = (x: number, y: number) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = -1; };
+    // A way cleared through water leaves a ford rather than dry ground.
+    const carve = (x: number, y: number, road = false) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = waterKind(objs[yy][xx]) ? (road ? T.SHALLOW : objs[yy][xx]) : -1; };
     const ggen = rng(screenSeed(wx, wy) ^ 0x6a7e);
     const roadSides: Side[] = [];
     for (const sd of ["N", "S", "E", "W"] as Side[]) {
@@ -2805,7 +2850,7 @@ class WildScene extends PlayScene {
         let x = sx0, y = sy0;
         const tx = road ? cx : cx + Math.round((ggen() - 0.5) * 6), ty = road ? cy : cy + Math.round((ggen() - 0.5) * 4);
         for (let step = 0; step < 90 && (Math.abs(x - tx) > (road ? 0 : 1) || Math.abs(y - ty) > (road ? 0 : 1)); step++) {
-          carve(x - 1, y - 1);
+          carve(x - 1, y - 1, road);
           if (road) ground[y][x] = T.PATH;
           const px0 = x;
           if (ggen() < 0.7) { x += Math.sign(tx - x); y += Math.sign(ty - y); }
@@ -2816,6 +2861,7 @@ class WildScene extends PlayScene {
         if (road) ground[y][x] = T.PATH;
       }
     }
+    for (const sd of ["N", "S", "E", "W"] as Side[]) { const rv = sideRiver(wx, wy, sd); if (rv) this.gates[sd].push(rv.at + Math.floor(rv.w / 2)); }
     // Roads: where three or more meet in the middle there is a crossroads, and a herm stands at it.
     this.rec.roads = roadSides;
     const nRoads = roadSides.reduce((n, sd) => n + sideRoads(wx, wy, sd).filter((g) => this.gates[sd].includes(g)).length, 0);
@@ -2841,9 +2887,10 @@ class WildScene extends PlayScene {
     if (this.hasSpring) ring(SPRING.x, SPRING.y, 4, (x, y, d) => { objs[y][x] = d <= 1.5 ? T.WATER : d > 3.2 && gen() < 0.5 ? T.FLOWERS : -1; if (d <= 3) ground[y][x] = T.MEADOW; });
     if (this.hasRevel) ring(REVEL.x, REVEL.y, 5, (x, y, d) => { objs[y][x] = d > 4.3 && gen() < 0.6 ? T.FLOWERS : -1; });
 
+    this.carveRivers(objs, ground, wx, wy); // last, so nothing cuts the river (roads cross it at fords)
     // Where water meets land it is shallow: deep water only in the middle of things.
-    const wet = (x: number, y: number) => x < 0 || y < 0 || x >= WW || y >= WH || objs[y][x] === T.WATER || objs[y][x] === T.SHALLOW || objs[y][x] === T.EDGE;
-    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER && (!wet(x - 1, y) || !wet(x + 1, y) || !wet(x, y - 1) || !wet(x, y + 1) || !wet(x - 1, y - 1) || !wet(x + 1, y + 1) || !wet(x + 1, y - 1) || !wet(x - 1, y + 1))) objs[y][x] = -2;
+    const wet = (x: number, y: number) => x < 0 || y < 0 || x >= WW || y >= WH || objs[y][x] === T.WATER || objs[y][x] === T.SHALLOW || objs[y][x] === -2 || objs[y][x] === T.EDGE;
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER && (!wet(x - 1, y) || !wet(x + 1, y) || !wet(x, y - 1) || !wet(x, y + 1))) objs[y][x] = -2;
     for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === -2) objs[y][x] = T.SHALLOW;
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
@@ -2894,7 +2941,9 @@ class WildScene extends PlayScene {
     this.setupHut();
     this.setupSites();
     this.setupLandmark();
+    const arrivingByBoat = !!G.data.boatCarry && this.landBoat();
     this.drawPlaced();
+    if (arrivingByBoat) { const o = this.placedObjs.find((q) => q.p.id === "Boat" && q.p.x === Math.floor(this.player.x / TILE) && q.p.y === Math.floor((this.player.y + 12) / TILE)) ?? this.placedObjs.filter((q) => q.p.id === "Boat").pop(); if (o) { this.boat = undefined; this.boardBoat(o, true); } }
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
@@ -2905,6 +2954,50 @@ class WildScene extends PlayScene {
   // ---------------------------------------------------------------- landmarks (landmarks.ts)
   lm: { name: string; def: LandmarkDef; x: number; y: number } | null = null;
   lmInside = false; lmGuards: Animal[] = [];
+  /**
+   * Rivers: from each side the river crosses, it winds to a meeting point in the middle; a river that crosses only
+   * one side ends in a lake. Three tiles or wider it has a deep middle, and then (usually) a ford, all shallows.
+   */
+  carveRivers(objs: number[][], ground: number[][], wx: number, wy: number) {
+    const ends: { sd: Side; at: number; w: number }[] = [];
+    for (const sd of ["N", "S", "E", "W"] as Side[]) { const rv = sideRiver(wx, wy, sd); if (rv) ends.push({ sd, ...rv }); }
+    this.rec.river = ends.length > 0;
+    if (!ends.length) return;
+    const g = rng((screenSeed(wx, wy) ^ 0x61e4) >>> 0);
+    const hx = 14 + Math.floor(g() * 12), hy = 10 + Math.floor(g() * 10);
+    const stamp = (x: number, y: number, w: number) => {
+      const r = w / 2;
+      for (let yy = Math.floor(y - r - 1); yy <= y + r + 1; yy++) for (let xx = Math.floor(x - r - 1); xx <= x + r + 1; xx++) {
+        if (xx < 0 || yy < 0 || xx >= WW || yy >= WH) continue;
+        if (Math.hypot(xx + 0.5 - x, yy + 0.5 - y) <= r) { if (objs[yy][xx] !== T.SHALLOW) objs[yy][xx] = ground[yy][xx] === T.PATH ? T.SHALLOW : T.WATER; if (ground[yy][xx] !== T.PATH) ground[yy][xx] = T.SAND; } // a road crosses at a ford
+      }
+    };
+    let widest = 0, fordAt: [number, number, number] | null = null;
+    for (const e of ends) {
+      widest = Math.max(widest, e.w);
+      const mid = e.at + e.w / 2;
+      let [x, y] = e.sd === "N" ? [mid, -1] : e.sd === "S" ? [mid, WH + 1] : e.sd === "W" ? [-1, mid] : [WW + 1, mid];
+      const steps = 80;
+      for (let i = 0; i < steps; i++) {
+        const dx = hx + 0.5 - x, dy = hy + 0.5 - y, d = Math.hypot(dx, dy);
+        if (d < 0.8) break;
+        const wob = (g() - 0.5) * 1.4; // meander
+        x += (dx / d) * 0.6 + (e.sd === "N" || e.sd === "S" ? wob : 0); y += (dy / d) * 0.6 + (e.sd === "W" || e.sd === "E" ? wob : 0);
+        stamp(x, y, e.w);
+        if (!fordAt && e.w >= 3 && i === 14) fordAt = [x, y, e.w];
+      }
+    }
+    if (ends.length === 1) { const R = 2.5 + g() * 2; for (let yy = hy - 6; yy <= hy + 6; yy++) for (let xx = hx - 8; xx <= hx + 8; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1 && Math.hypot((xx - hx) * 0.8, yy - hy) <= R + 2) { objs[yy][xx] = T.WATER; ground[yy][xx] = T.SAND; } }
+    else stamp(hx + 0.5, hy + 0.5, widest + 1);
+    // A ford across the deep river: all shallows, wide enough to wade.
+    if (fordAt && g() < 0.85) {
+      const [fx, fy, w] = fordAt;
+      for (let yy = Math.floor(fy - w); yy <= fy + w; yy++) for (let xx = Math.floor(fx - w); xx <= fx + w; xx++)
+        if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1 && Math.hypot(xx + 0.5 - fx, yy + 0.5 - fy) <= w * 0.8 && objs[yy][xx] === T.WATER) objs[yy][xx] = T.SHALLOW;
+      this.rec.ford = [Math.floor(fx), Math.floor(fy)];
+    } else this.rec.ford = null;
+  }
+
   /** Lay out a landmark: clear its ground, then its own pattern of trees, stones, water or ruins. */
   stampLandmark(objs: number[][], ground: number[][], cx: number, cy: number, d: LandmarkDef, gen: () => number) {
     const r = d.r, propAt = new Set(d.props.map(([, dx, dy]) => `${cx + dx},${cy + dy}`));
@@ -3847,7 +3940,13 @@ class WildScene extends PlayScene {
 
   leaveFor(dx: number, dy: number, entry: Side) {
     if (this.leaving) return;
-    if (this.boat) { this.player.setVelocity(0, 0); this.player.x = Phaser.Math.Clamp(this.player.x, 24, WW * TILE - 24); this.player.y = Phaser.Math.Clamp(this.player.y, 24, WH * TILE - 24); G.say("Beach the boat before you go on (E by the shore)."); return; }
+    if (this.boat) {
+      // Row on to the next stretch of water: the boat comes with you.
+      G.data.placed = G.data.placed.filter((q) => q !== this.boat!.p);
+      G.data.boatCarry = true;
+      const nx0 = G.data.wx + dx, ny0 = G.data.wy + dy;
+      if (nx0 === 0 && (ny0 === 0 || ny0 === 1)) { G.data.boatCarry = false; G.addItem("Boat", 1); G.say("You haul the boat out and carry it home on your back."); }
+    }
     const nx = G.data.wx + dx, ny = G.data.wy + dy;
     G.data.lastTerrain = this.rec.terrain; G.data.entry = entry;
     G.data.entryAt = dx !== 0 ? Math.floor(this.player.y / TILE) : Math.floor(this.player.x / TILE);
@@ -4484,7 +4583,7 @@ class UIScene extends Phaser.Scene {
       "THE WILD",
       "East lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
-      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes.",
+      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "",

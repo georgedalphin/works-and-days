@@ -21,6 +21,7 @@ export interface ScreenRec { terrain: number; special: boolean; feature: string;
   /** Roads through this screen (the sides whose gaps carry a track), a crossroads where three or more meet, a graveyard, a shrine. */
   /** The landmark: what has been taken from it this season, and whether its cache has been searched. */
   lmTook?: Record<number, string>; lmCache?: string; lmSeen?: boolean; boatRolled?: boolean;
+  river?: boolean; ford?: [number, number] | null;
   roads?: string[]; crossroads?: boolean; hecateNight?: number; met?: boolean; graveyard?: [number, number] | null; shrine?: { tx: number; ty: number; god: string; seed: number } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";
@@ -100,6 +101,8 @@ export interface SaveData {
   spearAt: { k: string; x: number; y: number } | null;
   spearGiven?: boolean;
   spearHotbar?: boolean;
+  /** Rowing from one screen to the next: the boat comes too. */
+  boatCarry?: boolean;
   /** Villagers' requests you have taken on, and rumors of lands you've been told of. */
   requests: Request[];
   rumors: Rumor[];
