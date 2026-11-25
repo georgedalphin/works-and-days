@@ -20,7 +20,7 @@ export interface ScreenRec { terrain: number; special: boolean; feature: string;
   hut?: { tx: number; ty: number; kind: string; seed: number; god: string; hosted?: number; special?: number; sensed?: boolean; met?: boolean } | null;
   /** Roads through this screen (the sides whose gaps carry a track), a crossroads where three or more meet, a graveyard, a shrine. */
   /** The landmark: what has been taken from it this season, and whether its cache has been searched. */
-  lmTook?: Record<number, string>; lmCache?: string; lmSeen?: boolean;
+  lmTook?: Record<number, string>; lmCache?: string; lmSeen?: boolean; boatRolled?: boolean;
   roads?: string[]; crossroads?: boolean; hecateNight?: number; met?: boolean; graveyard?: [number, number] | null; shrine?: { tx: number; ty: number; god: string; seed: number } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";

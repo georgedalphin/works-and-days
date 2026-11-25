@@ -110,6 +110,12 @@ export const LORE: Record<string, LoreDef> = {
   mushrooms: L({ id: "mushrooms", name: "Mushrooms", vague: "a ring of pale growths", category: "Wild plant", rarity: "Common", found: "Wild Forests", patron: "Dionysus", season: "Autumn after rain",
     mundane: "Food", magical: "Some cause visions or death",
     habits: "They come up in the forests in autumn, after rain.", full: "2 a gathering; more come up after 3 days.", perk: "Mushroom rings give 1 more." }),
+  shallows: L({ id: "shallows", name: "Shallows", vague: "shallow water", category: "Terrain", rarity: "Common", found: "Shores of every pool, marsh and sea", patron: "Poseidon", season: "All year",
+    mundane: "Wading, filling a jar", magical: "Where nymphs come up to the light",
+    habits: "You can wade through it at half pace. Boats can be pushed off from where the shallows meet the shore.", full: "Half speed on foot; a boat moves freely.", perk: "—" }),
+  deepwater: L({ id: "deepwater", name: "Deep water", vague: "dark water", category: "Terrain", rarity: "Common", found: "The middle of lakes, marsh pools and the sea", patron: "Poseidon", season: "All year",
+    mundane: "Fish, and drowning", magical: "Poseidon's realm",
+    habits: "You can swim it only a little way, at a quarter pace: every stroke costs breath (Air). When your Air is gone, you begin to drown. A boat is safe.", full: "Swimming drains about 2.5 Air a second; with no Air left, the water does real harm.", perk: "—" }),
   // ---- mythborn ----
   naiad: L({ id: "naiad", name: "Naiad", vague: "a woman made of light on water", category: "Mythic creature", rarity: "Rare", found: "Springs, in any terrain", patron: "Artemis", season: "Always, by day",
     mundane: "—", magical: "Spring blessings; her water gladdens fields and heals the weary",

@@ -32,13 +32,15 @@ let inDark = false;
 const darkPen = () => (!inDark || G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber ? 0 : Math.max(0, Math.min(6, 3 - G.boon("Hecate"))));
 
 /** Things that fill a tile: arrows and dropped things are lost in them. */
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.SHALLOW, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
+/** Water: 1 for shallows (wade), 2 for deep (swim), 0 for none. */
+const waterKind = (t: number | undefined) => (t === T.SHALLOW ? 1 : t === T.WATER ? 2 : 0);
 /** Bushes slow you as you push through; they do not stop you. */
 const BUSHES: Record<number, number> = { [T.BRUSH]: 0.55, [T.REEDS]: 0.6, [T.THORN]: 0.45 };
 /** Trees block only at the trunk: a round trunk lets you slip between two trees that stand corner to corner. */
 const TRUNKS: Record<number, number> = { [T.TREE]: 5.75, [T.OLIVE]: 5.75, [T.PINE]: 5.75, [T.SAPLING]: 4 };
 /** What blocks a whole tile: stone, water, walls, fences. */
-const SOLID = BLOCKING.filter((t) => !(t in BUSHES) && !(t in TRUNKS));
+const SOLID = BLOCKING.filter((t) => !(t in BUSHES) && !(t in TRUNKS) && t !== T.WATER && t !== T.SHALLOW); // water is waded, swum or rowed
 const TREE_HITS = 3;
 
 type Dir = 0 | 1 | 2 | 3; // down, left, right, up
@@ -218,7 +220,7 @@ abstract class PlayScene extends Phaser.Scene {
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
     this.spots = []; inDark = false;
-    this.placedObjs = []; this.ghost = undefined;
+    this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false;
     this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
@@ -285,9 +287,13 @@ abstract class PlayScene extends Phaser.Scene {
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
-    speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     const len = Math.hypot(vx, vy) || 1;
+    if (this.boat) { this.row(dt, moving ? vx / len : 0, moving ? vy / len : 0); this.animatePlayer(dt, false, 0); this.player.setDepth(this.player.y); return; }
+    const w = this.underfoot();
+    if (w) speed = Math.min(speed, 70); // no running in water
+    speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
+    this.swim(dt, w);
     if (moving) {
       if (Math.abs(vx) > Math.abs(vy)) this.facing = vx < 0 ? 1 : 2; else this.facing = vy < 0 ? 3 : 0;
     }
@@ -429,7 +435,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (p.id === "Snare") this.resolveSnare(p);
     const img = this.add.image(cx, by, `pl_${p.id}`, p.id === "Snare" ? (p.caught ? 1 : 0) : undefined).setOrigin(0.5, 1).setDepth(by);
     const o: { p: Placed; img: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t: Target } = { p, img, t: { x: cx, y: p.y * TILE + 10, label: "", act: () => {} } };
-    if (p.id !== "Snare") {
+    if (p.id !== "Snare" && p.id !== "Boat") {
       const body = this.add.zone(cx, p.y * TILE + 11, 14, 8); this.physics.add.existing(body, true);
       this.physics.add.collider(this.player, body); o.body = body;
     }
@@ -437,6 +443,7 @@ abstract class PlayScene extends Phaser.Scene {
     const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom", Press: "press", Forge: "forge" };
     if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => ui(sc).openCraft(station[p.id]) };
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
+    else if (p.id === "Boat") o.t = { ...o.t, get label() { return sc.boat ? "" : "Get in the boat"; }, act: () => sc.boardBoat(o) };
     else if (p.id === "Campfire") {
       o.t = { ...o.t, label: "Sleep by the campfire", act: () => sc.campSleep() };
       const glow = this.add.image(cx, by - 6, "focusGlow").setDepth(by - 1).setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD);
@@ -489,9 +496,9 @@ abstract class PlayScene extends Phaser.Scene {
     const held = G.selectedItem!; const name = ITEMS[held.id].name.toLowerCase();
     const key = this.placeKey();
     if (!key) { G.say(`There's nowhere to set the ${name} down here.`); return; }
-    if (key !== "farm" && held.id !== "Snare" && held.id !== "Campfire") { G.say(`The ${name} belongs on your own homestead.`); return; }
+    if (key !== "farm" && held.id !== "Snare" && held.id !== "Campfire" && held.id !== "Boat") { G.say(`The ${name} belongs on your own homestead.`); return; }
     const [tx, ty] = this.facingTile(); if (tx < 0) return;
-    const why = this.placeBlocked(tx, ty) ?? (this.placedAt(tx, ty) ? "Something is already there." : null);
+    const why = (held.id === "Boat" ? this.boatSpot(tx, ty) : this.placeBlocked(tx, ty)) ?? (this.placedAt(tx, ty) ? "Something is already there." : null);
     if (why) { G.say(why); return; }
     const [px, py] = this.playerTile();
     if (px === tx && py === ty) { G.say("Step aside first."); return; }
@@ -502,7 +509,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (held.id === "Snare") p.set = G.dayNumber;
     G.data.placed.push(p); this.spawnPlaced(p);
     SOUND.sfx("pickup");
-    G.say(held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
+    G.say(held.id === "Boat" ? "You push the boat into the shallows. Get in with E." : held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
   }
   /** The ghost of what you're about to set down. */
   updateGhost() {
@@ -515,7 +522,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (!this.ghost || !this.ghost.active) this.ghost = this.add.image(0, 0, tex).setOrigin(0.5, 1).setAlpha(0.55).setDepth(99980);
     if (this.ghost.texture.key !== tex) this.ghost.setTexture(tex);
     if (held.id === "Fence") this.ghost.setFrame("Fence"); else if (held.id === "Snare") this.ghost.setFrame(0);
-    const ok = this.placeKey() && !this.placeBlocked(tx, ty) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare" || held.id === "Campfire");
+    const ok = this.placeKey() && !(held.id === "Boat" ? this.boatSpot(tx, ty) : this.placeBlocked(tx, ty)) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare" || held.id === "Campfire" || held.id === "Boat");
     this.ghost.setPosition(tx * TILE + 8, ty * TILE + 15).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
   }
 
@@ -738,6 +745,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** E or a right click: use whatever is under the cursor (or in front of you). */
   interactNow() {
     if (performance.now() - ui(this).closedByE < 150) return; // that E press closed a panel
+    if (this.boat) { this.disembark(); return; }
     if (this.current) { this.faceToward(this.current.x, this.current.y); this.current.act(); }
     else if (this.cursorMode && !this.cursorInReach()) this.tooFar();
   }
@@ -1226,6 +1234,76 @@ abstract class PlayScene extends Phaser.Scene {
   /** Something notable happened to a creature (a cave's keeper slain or appeased). */
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
   /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
+  /** What water is under your feet: 0 none, 1 shallows, 2 deep. */
+  underfoot(): number {
+    const o = this.objLayer(); if (!o) return 0;
+    return waterKind(o.getTileAtWorldXY(this.player.x, this.player.y + 5)?.index);
+  }
+  swimming = false; drownT = 0;
+  /** In deep water every stroke costs breath (Air); with none left, you start to drown. */
+  swim(dt: number, w: number) {
+    this.player.setCrop(w === 2 ? new Phaser.Geom.Rectangle(0, 0, 16, 9) : w === 1 ? new Phaser.Geom.Rectangle(0, 0, 16, 13) : undefined);
+    if (w !== 2) { this.swimming = false; this.drownT = 0; return; }
+    if (!this.swimming) { this.swimming = true; G.say("Out of your depth: you're swimming. Every stroke costs breath (Air). Get to the shallows before it runs out."); }
+    if (G.warded("Poseidon")) return;
+    const drain = 2.5 * dt * Math.max(0.4, 1 - 0.1 * G.boon("Poseidon"));
+    if (G.essence.Air > drain) { G.essence.Air -= drain; return; }
+    G.essence.Air = 0; G.spentFlash = { el: "Air", at: performance.now() };
+    this.drownT -= dt;
+    if (this.drownT <= 0) { this.drownT = 1; this.harm(10, "You're drowning! Water fills your mouth.", "the water"); }
+  }
+
+  // ---------------------------------------------------------------- boats
+  boat?: { p: Placed; img?: Phaser.GameObjects.Image };
+  strokeT = 0;
+  /** In a boat: rowing comes in strokes, a surge and a glide, about two-thirds of walking pace; only on water. */
+  row(dt: number, dx: number, dy: number) {
+    const b = this.boat!; const o = this.objLayer()!;
+    if (dx || dy) { this.strokeT = (this.strokeT + dt) % 0.8; if (this.strokeT < dt) SOUND.sfx("loose"); } else this.strokeT = 0;
+    const surge = this.strokeT < 0.3 ? 1.45 : 0.5; // average ≈ 0.85 of 70 × 2/3
+    const speed = 70 * (2 / 3) * surge * (G.exhausted ? 0.6 : 1);
+    let vx = dx * speed, vy = dy * speed;
+    const wetAt = (x: number, y: number) => waterKind(o.getTileAtWorldXY(x, y)?.index) > 0;
+    const look = 8;
+    if (vx && !wetAt(this.player.x + Math.sign(vx) * look, this.player.y + 4)) vx = 0;
+    if (vy && !wetAt(this.player.x, this.player.y + 4 + Math.sign(vy) * look)) vy = 0;
+    this.player.setVelocity(vx, vy);
+    if (dx || dy) { if (Math.abs(dx) > Math.abs(dy)) this.facing = dx < 0 ? 1 : 2; else this.facing = dy < 0 ? 3 : 0; }
+    this.player.setCrop(new Phaser.Geom.Rectangle(0, 0, 16, 11));
+    b.img?.setPosition(this.player.x, this.player.y + 12).setDepth(this.player.y + 1).setFlipX(this.facing === 1);
+  }
+  boardBoat(o: { p: Placed; img?: Phaser.GameObjects.Image }) {
+    if (this.boat) return;
+    this.boat = o;
+    this.player.setPosition(o.img!.x, o.img!.y - 12); this.player.setVelocity(0, 0);
+    this.player.body!.checkCollision.none = false;
+    G.say("You step down into the boat and take up the oars. (Move to row; E to step ashore.)");
+  }
+  /** Step out onto the nearest dry ground, leaving the boat where it floats. */
+  disembark() {
+    const b = this.boat!; const o = this.objLayer()!;
+    const ptx = Math.floor(this.player.x / TILE), pty = Math.floor((this.player.y + 4) / TILE);
+    let land: [number, number] | null = null;
+    for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const t = o.getTileAt(ptx + dx, pty + dy)?.index ?? -1;
+      if (t === -1 || t === T.FLOWERS) { land = [ptx + dx, pty + dy]; break; }
+    }
+    if (!land) { G.say("Row to the shore to step out."); return; }
+    b.p.x = ptx; b.p.y = pty;
+    b.img?.setPosition(ptx * TILE + 8, pty * TILE + 15).setDepth(pty * TILE + 15).setFlipX(false);
+    if (b.img) { const t = this.placedObjs.find((q) => q.p === b.p)?.t; if (t) { t.x = ptx * TILE + 8; t.y = pty * TILE + 10; } }
+    this.boat = undefined; this.player.setCrop();
+    this.player.setPosition(land[0] * TILE + 8, land[1] * TILE + 8); this.player.setVelocity(0, 0);
+    G.say("You step ashore and pull the boat up into the shallows.");
+  }
+  /** Where a boat can be set down: in the water, with dry land beside it. */
+  boatSpot(tx: number, ty: number): string | null {
+    const o = this.objLayer(); if (!o) return "There's no water here.";
+    if (!waterKind(o.getTileAt(tx, ty)?.index)) return "A boat goes in the water, where it meets the shore.";
+    for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1]]) { const t = o.getTileAt(tx + dx, ty + dy)?.index ?? -1; if (t === -1 || t === T.FLOWERS) return null; }
+    return "Put the boat in where the water meets the shore.";
+  }
+
   groundSpeed() { return 1; }
 
   // ---------------------------------------------------------------- signs and omens
@@ -2763,6 +2841,10 @@ class WildScene extends PlayScene {
     if (this.hasSpring) ring(SPRING.x, SPRING.y, 4, (x, y, d) => { objs[y][x] = d <= 1.5 ? T.WATER : d > 3.2 && gen() < 0.5 ? T.FLOWERS : -1; if (d <= 3) ground[y][x] = T.MEADOW; });
     if (this.hasRevel) ring(REVEL.x, REVEL.y, 5, (x, y, d) => { objs[y][x] = d > 4.3 && gen() < 0.6 ? T.FLOWERS : -1; });
 
+    // Where water meets land it is shallow: deep water only in the middle of things.
+    const wet = (x: number, y: number) => x < 0 || y < 0 || x >= WW || y >= WH || objs[y][x] === T.WATER || objs[y][x] === T.SHALLOW || objs[y][x] === T.EDGE;
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER && (!wet(x - 1, y) || !wet(x + 1, y) || !wet(x, y - 1) || !wet(x, y + 1) || !wet(x - 1, y - 1) || !wet(x + 1, y + 1) || !wet(x + 1, y - 1) || !wet(x - 1, y + 1))) objs[y][x] = -2;
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === -2) objs[y][x] = T.SHALLOW;
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
@@ -2775,7 +2857,7 @@ class WildScene extends PlayScene {
     this.objects.setCollision(SOLID).setDepth(1);
     varyLayers(G, this.groundLayer, this.objects);
     this.targets = [];
-    this.water = []; for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER) this.water.push([x, y]);
+    this.water = []; for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (waterKind(objs[y][x])) this.water.push([x, y]);
 
     this.physics.world.setBounds(0, 0, WW * TILE, WH * TILE);
     this.cameras.main.setBounds(0, 0, WW * TILE, WH * TILE);
@@ -2857,6 +2939,16 @@ class WildScene extends PlayScene {
   /** Draw the landmark's props, lay out what can be found there this season, and its cache and special action. */
   setupLandmark() {
     this.lmInside = false; this.lmGuards = [];
+    // Now and then someone has left a boat where the shallows meet the shore.
+    if (!this.rec.boatRolled) {
+      this.rec.boatRolled = true;
+      const shore = this.water.filter(([x, y]) => this.objects.getTileAt(x, y)?.index === T.SHALLOW && !this.boatSpot(x, y));
+      if (shore.length > 6 && Math.random() < 0.12) {
+        const [x, y] = shore[Math.floor(Math.random() * shore.length)];
+        G.data.placed.push({ id: "Boat", where: this.placeKey(), x, y });
+        this.time.delayedCall(800, () => G.say("Someone has left a little boat pulled up in the shallows here."));
+      }
+    }
     const lm = this.lm; if (!lm) return;
     const d = lm.def, sk = seasonKey(G.data.year, G.month.season), sc = this, rec = this.rec;
     rec.lmTook ??= {};
@@ -3151,7 +3243,7 @@ class WildScene extends PlayScene {
     for (let i = 0; i < 120; i++) {
       const tx = 4 + Math.floor(r() * (WW - w - 8)), ty = 4 + Math.floor(r() * (WH - h - 8));
       let ok = Math.abs(tx - 20) > 3 || Math.abs(ty - 15) > 3;
-      for (let y = ty; y < ty + h && ok; y++) for (let x = tx; x < tx + w && ok; x++) { const t = this.objects.getTileAt(x, y)?.index ?? -1; if (t === T.WATER || t === T.EDGE) ok = false; }
+      for (let y = ty; y < ty + h && ok; y++) for (let x = tx; x < tx + w && ok; x++) { const t = this.objects.getTileAt(x, y)?.index ?? -1; if (waterKind(t) || t === T.EDGE) ok = false; }
       if (this.rec.hut && Math.abs(tx - this.rec.hut.tx) < 8 && Math.abs(ty - this.rec.hut.ty) < 8) ok = false;
       if (ok) return [tx, ty];
     }
@@ -3160,7 +3252,7 @@ class WildScene extends PlayScene {
   clearSite(tx: number, ty: number, w: number, h: number) {
     for (let y = ty - 1; y <= ty + h; y++) for (let x = tx - 1; x <= tx + w; x++) {
       const t = this.objects.getTileAt(x, y)?.index ?? -1;
-      if (t !== -1 && t !== T.EDGE && t !== T.WATER) { this.objects.putTileAt(-1, x, y); this.removeTrunk(x, y); }
+      if (t !== -1 && t !== T.EDGE && !waterKind(t)) { this.objects.putTileAt(-1, x, y); this.removeTrunk(x, y); }
     }
   }
   solidAt(x: number, y: number, w: number, h: number) {
@@ -3426,6 +3518,9 @@ class WildScene extends PlayScene {
   /** Mud drags at your feet; sand slows you a little. */
   groundSpeed() {
     if (G.warded("Poseidon")) return 1;
+    const w = this.underfoot();
+    if (w === 1) return 0.5; // wading
+    if (w === 2) return 0.25; // swimming
     const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE);
     const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
     return t === T.MUD ? 0.7 : t === T.SAND ? 0.88 : 1;
@@ -3744,13 +3839,15 @@ class WildScene extends PlayScene {
     if (this.satyrs.some((s) => Math.hypot(s.x - fx, s.y - fy) < 30)) return "satyr";
     const [x, y] = this.facingTile();
     const obj = this.objects.getTileAt(x, y)?.index ?? -1;
-    if (obj === T.WATER) return "naiad";
+    if (obj === T.WATER) return "deepwater";
+    if (obj === T.SHALLOW) return "shallows";
     if (OBJ_SUBJECT[obj]) return OBJ_SUBJECT[obj];
     return obj === -1 ? `t${this.rec.terrain}` : null;
   }
 
   leaveFor(dx: number, dy: number, entry: Side) {
     if (this.leaving) return;
+    if (this.boat) { this.player.setVelocity(0, 0); this.player.x = Phaser.Math.Clamp(this.player.x, 24, WW * TILE - 24); this.player.y = Phaser.Math.Clamp(this.player.y, 24, WH * TILE - 24); G.say("Beach the boat before you go on (E by the shore)."); return; }
     const nx = G.data.wx + dx, ny = G.data.wy + dy;
     G.data.lastTerrain = this.rec.terrain; G.data.entry = entry;
     G.data.entryAt = dx !== 0 ? Math.floor(this.player.y / TILE) : Math.floor(this.player.x / TILE);
@@ -3784,7 +3881,7 @@ class WildScene extends PlayScene {
     if (tool !== "hoe" && tool !== "jar" && this.gather(x, y, tool)) return;
     if (tool === "hoe") { G.say("Save the hoe for your own fields."); return; }
     if (tool === "jar") {
-      if (this.objects.getTileAt(x, y)?.index !== T.WATER) { G.say("No water here."); return; }
+      if (!waterKind(this.objects.getTileAt(x, y)?.index)) { G.say("No water here."); return; }
       G.data.jarWater = jarCap();
       if (rungOf(mythRec("naiad").days) >= 1) { G.data.jarSpring = true; G.say(`You fill your jar from ${mythRec("naiad").name}'s spring, with her blessing. Her water makes crops finer.`); }
       else { G.data.jarSpring = false; G.addFavor("Artemis", -1); G.say("You fill your jar without asking. The pool goes still and cold beneath your hands. (Artemis -1)"); }
@@ -4387,6 +4484,7 @@ class UIScene extends Phaser.Scene {
       "THE WILD",
       "East lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
+      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "",

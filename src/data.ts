@@ -143,6 +143,7 @@ export const ITEMS: Record<string, ItemDef> = {
   Oats: { id: "Oats", value: 1, name: "Wild oats", kind: "material", desc: "Fodder: the goats will eat it from the manger." },
   // Rare finds (omens.ts says where they turn up).
   // Made things (crafting.ts says how).
+  Boat: { id: "Boat", value: 40, name: "Boat", greek: "akatos", kind: "place", desc: "A little boat of planks and hide. Set it down in the shallows by a shore, get in (E), and row (half again slower than walking, in strokes)." },
   Campfire: { id: "Campfire", value: 4, name: "Campfire", greek: "pyra", kind: "place", desc: "A ring of stones and a bundle of kindling. Set it down anywhere and sleep beside it (half the rest of a bed, but you wake where you lay)." },
   Workbench: { id: "Workbench", value: 20, name: "Workbench", greek: "ergasterion", kind: "place", desc: "A stout bench for joinery. Place it on your homestead and use it to make larger things." },
   Kiln: { id: "Kiln", value: 30, name: "Kiln", greek: "kaminos", kind: "place", desc: "A beehive of clay and stone for firing pots. Place it on your homestead." },
@@ -351,6 +352,7 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   // At the workbench.
   { out: "Chest", qty: 1, needs: [["Wood", 6], ["Copper", 1]], desc: "Somewhere to keep what your pack can't carry.", at: "workbench" },
   { out: "Fence", qty: 4, needs: [["Wood", 2]], desc: "Wattle fencing, for fields and pens.", at: "workbench" },
+  { out: "Boat", qty: 1, needs: [["Wood", 16], ["Fiber", 6], ["Hide", 2]], desc: "Planks, pitch and hide: for the shallows and the deep.", at: "workbench" },
   { out: "Kiln", qty: 1, needs: [["Clay", 12], ["Stone", 6]], desc: "For firing clay: amphorae, lamps, figurines.", at: "workbench" },
   { out: "Loom", qty: 1, needs: [["Wood", 10], ["Fiber", 4]], desc: "For weaving linen and wool.", at: "workbench" },
   { out: "Press", qty: 1, needs: [["Wood", 12], ["Stone", 8]], desc: "For olive oil, and must without treading.", at: "workbench" },

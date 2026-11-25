@@ -13,9 +13,11 @@ export const T = {
   SAND: 24, MUD: 25, DRYGRASS: 26, REDROCK: 27, ALPINE: 28, LIMESTONE: 29, PINE: 30, REEDS: 31, THORN: 32,
   // Ground details: no effect on play, only on the eye.
   PEBBLES: 33, LEAVES: 34, TUFT: 35, MUSHRING: 36, TWIGS: 37, SKULL: 38, SHELLS: 39, CRACKS: 40, BLOOMS: 41,
+  // Water you can wade (half speed); WATER itself is deep (swim, briefly, at a quarter).
+  SHALLOW: 42,
 };
 export const TILE = 16;
-const COUNT = 42;
+const COUNT = 43;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -73,6 +75,11 @@ function drawTile(c: Ctx, i: number) {
     case T.WATER:
       px(c, o, 0, 16, 16, "#3f7fa0"); px(c, o, 0, 16, 2, "#5a9ab8");
       for (const [x, y] of [[2, 4], [9, 7], [4, 11], [11, 13]]) { px(c, o + x, y, 4, 1, "#8fc4dc"); px(c, o + x + 1, y + 1, 2, 1, "#6aa8c8"); }
+      break;
+    case T.SHALLOW:
+      px(c, o, 0, 16, 16, "#6aa8b0"); px(c, o, 0, 16, 1, "#8cc4c4");
+      for (const [x, y] of [[3, 3], [10, 5], [6, 10], [12, 12], [1, 13]]) px(c, o + x, y, 2, 1, "#a89870");
+      for (const [x, y] of [[2, 6], [9, 9], [5, 14]]) px(c, o + x, y, 4, 1, "#b4dce0");
       break;
     case T.CAVEWALL: speckle(c, o, "#3a332c", ["#4a4238", "#2a241e", "#524a40"], 26, 61); px(c, o, 13, 16, 3, "#2a241e"); break;
     case T.CAVEFLOOR: speckle(c, o, "#5a5046", ["#4a4238", "#6a6054", "#544a40"], 16, 67); break;
@@ -361,6 +368,10 @@ export function makeTextures(scene: Phaser.Scene) {
     for (const [x, y] of [[1, 11], [4, 13], [9, 14], [13, 12], [15, 9], [2, 8]] as [number, number][]) { px(c, x, y, 3, 2, "#8a8780"); px(c, x, y, 3, 1, "#a49e91"); }
     px(c, 5, 10, 8, 2, "#6b4a2b"); px(c, 6, 9, 6, 1, "#5e4026");
     px(c, 6, 4, 6, 6, "#e0702a"); px(c, 7, 2, 4, 5, "#f2a03a"); px(c, 8, 1, 2, 4, "#f2d06a"); px(c, 8, 6, 2, 3, "#fff3c0");
+  });
+  canvasTex(scene, "pl_Boat", 30, 14, (c) => {
+    px(c, 3, 3, 24, 8, "#7a5a33"); px(c, 1, 2, 28, 2, "#9c7445"); px(c, 1, 2, 28, 1, "#b88d58"); px(c, 5, 4, 20, 5, "#4a3220");
+    px(c, 2, 10, 26, 2, "#5e4026"); px(c, 13, 4, 4, 5, "#7a5a33"); px(c, 0, 8, 6, 1, "#c4a070"); px(c, 24, 8, 6, 1, "#c4a070");
   });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
@@ -753,7 +764,7 @@ export function makeTextures(scene: Phaser.Scene) {
 }
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -861,6 +872,7 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "Boat": px(c, o + 1, 6, 14, 5, "#7a5a33"); px(c, o, 5, 16, 2, "#9c7445"); px(c, o + 2, 7, 12, 2, "#4a3220"); px(c, o + 3, 2, 1, 5, "#c4a070"); px(c, o + 1, 12, 14, 1, "#3f7fa0"); break;
     case "Campfire": for (const [x, y] of [[1, 12], [5, 13], [10, 13], [13, 11], [2, 9], [13, 8]] as [number, number][]) px(c, o + x, y, 3, 2, "#8a8780"); px(c, o + 6, 4, 5, 7, "#e0702a"); px(c, o + 7, 2, 3, 5, "#f2a03a"); px(c, o + 8, 6, 1, 3, "#fff3c0"); break;
     case "Press": px(c, o + 1, 10, 14, 5, "#a49e91"); px(c, o + 3, 11, 10, 2, "#7f7a70"); px(c, o + 2, 2, 2, 9, "#6b4a2b"); px(c, o, 4, 16, 2, "#8a5f35"); px(c, o + 6, 6, 4, 4, "#5e4026"); break;
     case "Forge": px(c, o + 2, 7, 10, 8, "#a8653a"); px(c, o + 4, 9, 6, 3, "#d9732e"); px(c, o + 6, 9, 2, 2, "#f2c14e"); px(c, o + 5, 1, 3, 6, "#8a8780"); px(c, o + 11, 10, 4, 4, "#a47a52"); break;
