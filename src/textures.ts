@@ -176,6 +176,7 @@ export function makeTextures(scene: Phaser.Scene) {
   makeGlowTexture(scene);
   makeAmbientTextures(scene);
   makeOmenTextures(scene);
+  makeTiresiasTextures(scene);
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -591,7 +592,7 @@ export function makeTextures(scene: Phaser.Scene) {
 
   // Villagers: one frame each, facing you; strangers by their look.
   const vids = Object.keys(VILLAGERS);
-  const looks = ["beggar", "traveler", "shepherd", "potter", "bard"];
+  const looks = ["beggar", "traveler", "shepherd", "potter", "bard", "tiresias"];
   const people = canvasTex(scene, "people", 16 * (vids.length + looks.length), 16, (c) => {
     vids.forEach((id, i) => drawPerson(c, i * 16, VILLAGERS[id].look));
     looks.forEach((l, i) => drawStranger(c, (vids.length + i) * 16, l));
@@ -937,6 +938,10 @@ function drawStranger(c: Ctx, o: number, look: string) {
       drawPerson(c, o, base); px(c, o + 3, 0, 10, 2, "#8a6a3a"); px(c, o + 6, -1, 4, 2, "#7a5a2a"); px(c, o + 4, 5, 8, 6, "#9a7a4a"); break;
     case "shepherd":
       drawPerson(c, o, { tunic: "#c9b48f", hair: "#3a2c22", skin: "#c98e62" }); px(c, o + 12, 2, 1, 13, "#6b4a2b"); px(c, o + 12, 1, 3, 1, "#6b4a2b"); px(c, o + 14, 2, 1, 2, "#6b4a2b"); break;
+    case "tiresias": // old, white-bearded, eyes closed, a cornel-wood staff
+      drawPerson(c, o, { tunic: "#d8d0bc", hair: "#ecebe4", skin: "#c99a72", beard: true });
+      px(c, o + 6, 5, 4, 3, "#ecebe4"); px(c, o + 7, 3, 2, 1, "#a8785a"); px(c, o + 4, 6, 1, 7, "#bfb6a0");
+      px(c, o + 12, 1, 1, 14, "#7a4a2a"); px(c, o + 11, 1, 2, 1, "#9a6a3a"); break;
     case "potter":
       drawPerson(c, o, { tunic: "#a07a62", hair: "#2a1d14", skin: "#a8744a", beard: true }); px(c, o + 1, 4, 4, 7, "#c4703f"); px(c, o + 2, 3, 2, 1, "#9c5532"); break;
     case "bard":
@@ -1008,6 +1013,27 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
     }
   });
   for (let i = 0; i < 4 * POSES; i++) player.add(i, 0, i * 16, 0, 16, 16);
+}
+
+/**
+ * Tiresias: walking (the 28 frames every person has), and sitting with his staff across his knees, nodding (2 frames).
+ */
+export function makeTiresiasTextures(scene: Phaser.Scene) {
+  if (scene.textures.exists("tiresiasSit")) return;
+  makeFigureTexture(scene, "tiresias", { tunic: "#d8d0bc", hair: "#ecebe4", skin: "#c99a72" }, { beard: true });
+  const sit = canvasTex(scene, "tiresiasSit", 32, 16, (c) => {
+    for (let f = 0; f < 2; f++) {
+      const o = f * 16, n = f; // n: the head dips on the second frame
+      px(c, o + 3, 13, 11, 2, "rgba(0,0,0,0.25)");
+      px(c, o + 4, 11, 8, 3, "#8a7a62"); px(c, o + 4, 11, 8, 1, "#a8987a"); // the stone he sits on
+      px(c, o + 5, 6 + n, 6, 6 - n, "#d8d0bc"); px(c, o + 4, 7 + n, 1, 4, "#bfb6a0"); // robe and mantle
+      px(c, o + 5, 11, 7, 2, "#c8c0aa"); px(c, o + 6, 13, 1, 1, "#6b4a2b"); px(c, o + 10, 13, 1, 1, "#6b4a2b"); // knees and feet
+      px(c, o + 6, 1 + n, 4, 5, "#c99a72"); px(c, o + 6, 1 + n, 4, 2, "#ecebe4"); px(c, o + 6, 5 + n, 4, 3, "#ecebe4"); // head, beard
+      px(c, o + 7, 3 + n, 2, 1, "#a8785a"); // closed eyes
+      px(c, o + 12, 2, 1, 12, "#7a4a2a"); px(c, o + 11, 2, 2, 1, "#9a6a3a"); px(c, o + 11, 9, 1, 1, "#c99a72"); // the staff, and his hand on it
+    }
+  });
+  sit.add(0, 0, 0, 0, 16, 16); sit.add(1, 0, 16, 0, 16, 16);
 }
 
 /** Little lives and weather: butterflies, swallows, leaves, smoke, mist and cloud shadows. */

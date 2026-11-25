@@ -88,7 +88,7 @@ export interface SaveData {
   arts: string[];
   blessing: { id: string; until: number } | null;
   hostedDay: number;
-  anchors: { spring?: string; satyrs?: string; cave?: string };
+  anchors: { spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
   caves: Record<string, { type: "common" | "sacred" | "chthonic"; boss: "alive" | "appeased" | "slain"; hoard: boolean; mined: Record<string, string[]> }>;
   cave: { key: string; level: number }; // where you are underground
   torchLit: boolean; // a torch burns for this visit underground
@@ -112,6 +112,8 @@ export interface SaveData {
   askedRumor: Record<string, number>;
   /** Year each olive tree on the homestead was last picked. */
   olives: Record<string, number>;
+  /** Tiresias: which of his tasks you are on, what has happened since it began, where he sits. */
+  tir: { step: number; ev: Record<string, number>; base: Record<string, number>; doneDay: number; spot: number; met: boolean; said: number };
   /** The gods at work: gifts and troubles waiting in their domains, powers used, Chosen marks, charges, and days. */
   divine: {
     gifts: { god: string; item: string; qty: number; q?: number }[];
@@ -162,6 +164,9 @@ export class GameState {
   }
 
   /** Bring saves from earlier builds up to date. */
+  /** Something happened that Tiresias may ask after: count it. */
+  note(ev: string, n = 1) { this.data.tir.ev[ev] = (this.data.tir.ev[ev] ?? 0) + n; }
+
   static migrate(d: SaveData & { inventory?: Record<string, number> }): SaveData {
     if (!d.slots) {
       d.slots = GameState.startingSlots();
@@ -176,7 +181,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
     if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
     // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
     if (!d.spearHotbar) {
@@ -248,7 +253,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };

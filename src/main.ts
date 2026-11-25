@@ -8,6 +8,7 @@ import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME,
 import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
+import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -111,7 +112,7 @@ function study(id: string): boolean {
   const target = gnosis + TIER_MOD[tier + 1] + RARITY_MOD[d.rarity] + hera + fails + G.boon("Hera") - darkPen();
   if (target <= 0) { G.say(`${d.name}: understanding this deeply is beyond your Gnosis for now.`); return false; }
   const b = labor(EFFORT.study, 1, "Gnosis"); if (b === null) return false;
-  G.data.lore.studied[id] = G.dayNumber;
+  G.data.lore.studied[id] = G.dayNumber; G.note("study");
   const ch = G.data.divine.charges;
   if (ch.dull) { ch.dull = 0; G.say(`You study ${loreName(id)}, but your thoughts slide away like water. Athena withholds her light today.`); return false; }
   let roll = 1 + Math.floor(Math.random() * 12);
@@ -507,7 +508,7 @@ abstract class PlayScene extends Phaser.Scene {
     const p: Placed = { id: held.id, where: key, x: tx, y: ty };
     if (held.id === "Chest") p.store = Array(CHEST_SIZE).fill(null);
     if (held.id === "Snare") p.set = G.dayNumber;
-    G.data.placed.push(p); this.spawnPlaced(p);
+    G.data.placed.push(p); this.spawnPlaced(p); G.note(`place:${held.id}`);
     SOUND.sfx("pickup");
     G.say(held.id === "Boat" ? "You push the boat into the shallows. Get in with E." : held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
   }
@@ -1298,7 +1299,7 @@ abstract class PlayScene extends Phaser.Scene {
   }
   /** Arriving by boat: put it on the nearest water to where you came in (or, with no water near, carry it). */
   landBoat(): boolean {
-    G.data.boatCarry = false;
+    G.data.boatCarry = false; G.note("boatmap");
     const o = this.objLayer()!; const ptx = Math.floor(this.player.x / TILE), pty = Math.floor(this.player.y / TILE);
     let best: [number, number] | null = null, bd = 99;
     for (let y = pty - 6; y <= pty + 6; y++) for (let x = ptx - 6; x <= ptx + 6; x++) {
@@ -1398,6 +1399,7 @@ abstract class PlayScene extends Phaser.Scene {
     const pneuma = (G.data.aretai.Pneuma ?? 3) + G.boon("Dionysus"), nRoll = 1 + Math.floor(Math.random() * 12);
     const noticed = nRoll <= pneuma;
     G.data.omen = { day: G.dayNumber, god: d.god, good, noticed };
+    if (noticed) G.note("omen");
     this.omenVisual(d, good);
     if (!noticed) { G.say(d.plain); return; }
     const gnosis = (G.data.aretai.Gnosis ?? 3) + 2 + G.lore("augury"), rRoll = 1 + Math.floor(Math.random() * 12);
@@ -1557,6 +1559,7 @@ abstract class PlayScene extends Phaser.Scene {
   kill(a: Animal) {
     if (this.overcome(a)) return;
     const known = G.lore(a.kind) >= 1;
+    G.note("kill"); G.note(`kill:${a.kind}`);
     a.state = "dead"; a.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
     const name = beast(a.kind);
     G.say(`You bring down the ${name}.${a.kind === "deer" ? " Artemis' animal: offer her a share (antler or meat) at an altar before you sleep." : ""}`);
@@ -1588,7 +1591,7 @@ abstract class PlayScene extends Phaser.Scene {
       if (p.id === "spear") { G.data.spearAt = null; G.say("You pull your spear out of the ground."); }
       else if (p.lm !== undefined) {
         const w = this as unknown as { rec: ScreenRec; lmDangers?: (on: "gather") => void };
-        (w.rec.lmTook ??= {})[p.lm] = seasonKey(G.data.year, G.month.season);
+        (w.rec.lmTook ??= {})[p.lm] = seasonKey(G.data.year, G.month.season); G.note("landmark");
         G.say(`+${p.qty - left} ${ITEMS[p.id].name}`); w.lmDangers?.("gather");
       }
       else if (p.from) { G.say(`A gift of ${p.from}: +${p.qty - left} ${p.q && p.q > 1 ? QUALITY[p.q] + " " : ""}${ITEMS[p.id].name}.`); SOUND.sfx("find"); }
@@ -1960,6 +1963,11 @@ const WELL = { tx: 30, ty: 9 };
 const PEN = { x0: 14, y0: 15, x1: 20, y1: 20, gateY: 17 }; // fence on the border, gate gap on the east side
 const HIVE = { tx: 36, ty: 10 };
 const inPen = (x: number, y: number) => x >= PEN.x0 && x <= PEN.x1 && y >= PEN.y0 && y <= PEN.y1;
+/** Where Tiresias likes to sit (tiles): the olive's shade, the doorstep (at night and in the rain), the well, the hive, the pen fence, beside the vat. */
+const TIR_SPOTS: [number, number, string][] = [[17, 10, "under the olive tree"], [22, 11, "on the doorstep"], [31, 11, "by the well"], [37, 12, "by the beehive"], [21, 19, "against the goat pen"], [22, 13, "beside the treading vat"]];
+const TIR_DOOR = 1;
+/** He goes everywhere by the path in front of the hut: he knows it, and it keeps him off the fences. */
+const TIR_HUB: [number, number] = [24, 12];
 const d12 = () => 1 + Math.floor(Math.random() * 12);
 
 class FarmScene extends PlayScene {
@@ -2038,6 +2046,7 @@ class FarmScene extends PlayScene {
       const border = x === PEN.x0 || x === PEN.x1 || y === PEN.y0 || y === PEN.y1;
       objs[y][x] = border && !(x === PEN.x1 && y === PEN.gateY) ? T.FENCE : -1;
     }
+    for (const [x, y] of TIR_SPOTS) objs[y][x] = -1; // Tiresias' seats are kept clear
     this.baseGround = ground.map((row) => [...row]);
     for (const [k, v] of Object.entries(G.data.ground)) { const [x, y] = k.split(",").map(Number); if (ground[y]) ground[y][x] = v === "wet" ? T.WET : T.TILLED; }
 
@@ -2058,7 +2067,7 @@ class FarmScene extends PlayScene {
     // The hut, the well, the storage jar and the signposts.
     const hut = this.add.image(HUT.tx * TILE, HUT.ty * TILE, "hut").setOrigin(0, 0).setDepth((HUT.ty + 3.4) * TILE);
     const solids = this.physics.add.staticGroup();
-    this.reserved = new Set([`${Math.floor(DOOR_X / TILE)},${DOOR.ty + 1}`]);
+    this.reserved = new Set([`${Math.floor(DOOR_X / TILE)},${DOOR.ty + 1}`, ...TIR_SPOTS.map(([x, y]) => `${x},${y}`)]);
     const solid = (x: number, y: number, w: number, h: number) => {
       for (let ty = Math.floor((y - h / 2) / TILE); ty <= Math.floor((y + h / 2) / TILE); ty++)
         for (let tx = Math.floor((x - w / 2) / TILE); tx <= Math.floor((x + w / 2) / TILE); tx++) this.reserved.add(`${tx},${ty}`);
@@ -2136,7 +2145,74 @@ class FarmScene extends PlayScene {
       x < MW - 2 && y < MH - 2 && Math.hypot((x - 24) / 1.3, y - 14) > 9 && objs[y][x] === -1 && this.baseGround[y][x] !== T.PATH && !inPen(x, y));
     this.spawnAnimals(r, objs);
     this.drawPlaced();
+    this.setupTiresias(solids);
     this.cameras.main.fadeIn(250);
+  }
+
+  // ---------------------------------------------------------------- Tiresias
+  tir!: { s: Phaser.Physics.Arcade.Sprite; goal: number | null; via: boolean; walkT: number; nodT: number; moveIn: number; callAt: number; facing: number };
+  setupTiresias(_solids: Phaser.Physics.Arcade.StaticGroup) {
+    const t = G.data.tir;
+    if (!G.isDay || G.data.weather === "rain") t.spot = TIR_DOOR;
+    const [tx, ty] = TIR_SPOTS[t.spot] ?? TIR_SPOTS[0];
+    const s = this.physics.add.sprite(tx * TILE + 8, ty * TILE + 8, "tiresiasSit", 0);
+    s.setSize(10, 6).setOffset(3, 9).setImmovable(true).setDepth(ty * TILE + 8);
+    this.physics.add.collider(this.player, s);
+    this.tir = { s, goal: null, via: false, walkT: 0, nodT: 0, moveIn: 60 + Math.random() * 90, callAt: 0, facing: 0 };
+    const farm = this;
+    this.targets.push({ get x() { return farm.tir.s.x; }, get y() { return farm.tir.s.y + 4; }, get label() { return G.data.tir.met ? "Talk to Tiresias" : "Speak to the old man"; }, act: () => ui(this).talkTiresias() });
+  }
+  /** What he would call out to you now. */
+  tirCall(): string {
+    const t = G.data.tir, step = TIRESIAS[t.step], pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
+    if (!t.met) return pick(TIR_CALLS.first);
+    if (step && t.said === t.step && ui(this).tirReady()) return pick(TIR_CALLS.ready);
+    if (step && t.said !== t.step) return ui(this).tirCanAsk() ? pick(TIR_CALLS.ask) : pick(TIR_CALLS.waiting);
+    if (!G.isDay) return pick(TIR_CALLS.night);
+    if (G.data.weather === "rain" && Math.random() < 0.5) return pick(TIR_CALLS.rain);
+    return pick(step ? TIR_CALLS.idle : TIR_CALLS.done);
+  }
+  tiresiasTick(dt: number) {
+    const T0 = this.tir, s = T0.s, t = G.data.tir;
+    // Night and rain send him to the doorstep; by day, now and then, he gets up and shuffles to another seat.
+    const shelter = !G.isDay || G.data.weather === "rain";
+    const near = Math.hypot(this.player.x - s.x, this.player.y - s.y);
+    if (T0.goal === null) {
+      T0.moveIn -= dt;
+      if (shelter && t.spot !== TIR_DOOR) T0.goal = TIR_DOOR;
+      else if (!shelter && T0.moveIn <= 0 && near > 40) {
+        let g = t.spot; while (g === t.spot || g === TIR_DOOR) g = Math.floor(Math.random() * TIR_SPOTS.length);
+        T0.goal = g;
+      }
+      if (T0.goal !== null) { T0.via = true; s.setTexture("tiresias", 0); if (near < 90) this.tirBubble(T0.goal === TIR_DOOR ? "Time I was indoors... near enough." : "My old bones want another seat."); }
+    }
+    if (T0.goal !== null) {
+      const [gx, gy] = T0.via ? TIR_HUB : TIR_SPOTS[T0.goal], x = gx * TILE + 8, y = gy * TILE + 8, dx = x - s.x, dy = y - s.y, d = Math.hypot(dx, dy);
+      if (d < 1.5 && T0.via) T0.via = false;
+      else if (d < 1.5) {
+        s.setPosition(x, y).setVelocity(0, 0).setTexture("tiresiasSit", 0);
+        t.spot = T0.goal; T0.goal = null; T0.moveIn = 90 + Math.random() * 120;
+      } else {
+        const sp = 9; // an old man with a staff
+        s.setVelocity((dx / d) * sp, (dy / d) * sp);
+        T0.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+        T0.walkT += dt;
+        s.setFrame(T0.facing * POSES + [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(T0.walkT / 0.3) % 4]);
+      }
+    } else {
+      s.setVelocity(0, 0);
+      T0.nodT += dt; s.setFrame(Math.floor(T0.nodT / 2.6) % 3 === 2 ? 1 : 0); // dozing, the head dips now and then
+    }
+    s.setDepth(s.y);
+    // When you come near, he calls out: what he needs, or just whatever is on his mind.
+    if (near < 64 && this.time.now > T0.callAt && !ui(this).talkPanel) { T0.callAt = this.time.now + 22000 + Math.random() * 14000; this.tirBubble(this.tirCall()); }
+  }
+  tirBubble(text: string) {
+    const s = this.tir.s;
+    const b = this.add.text(s.x, s.y - 11, text, { fontFamily: FONT, fontSize: "6px", color: "#2a1d14", backgroundColor: "#f2e6c9", padding: { x: 2, y: 1 }, wordWrap: { width: 96 } })
+      .setOrigin(0.5, 1).setResolution(5).setDepth(99990);
+    this.tweens.add({ targets: b, alpha: 0, delay: 3200, duration: 500, onComplete: () => b.destroy() });
+    const follow = this.time.addEvent({ delay: 30, loop: true, callback: () => { if (!b.active) { follow.remove(); return; } b.setPosition(s.x, s.y - 11); } });
   }
 
   /** The old olive trees bear once a year, in autumn. */
@@ -2280,6 +2356,7 @@ class FarmScene extends PlayScene {
     this.trough.setFrame(G.data.trough > 0 ? 1 : 0);
     this.drawBees(dt);
     if (!this.common(dt)) return;
+    this.tiresiasTick(dt);
     this.maybeFox();
     // Walking off the east or south edge leads into the wild.
     if (this.knock > 0) return;
@@ -2354,6 +2431,7 @@ class FarmScene extends PlayScene {
     G.removeItem(seed, 1);
     const hour = d.aretai === "Night" ? !G.isDay : G.patron?.aretai === d.aretai;
     const signed = G.signActive("sow");
+    G.note("sow");
     G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0, sign: signed };
     this.drawCrop(k);
     if (signed) G.say("Sown in the season the signs proclaim, it will grow finer.");
@@ -2486,6 +2564,7 @@ class FarmScene extends PlayScene {
     if (state) this.details?.removeTileAt(x, y);
     const k = `${x},${y}`;
     if (state) G.data.ground[k] = state; else delete G.data.ground[k];
+    if (state) G.note(state === "wet" ? "water" : "till");
     this.groundLayer.putTileAt(state === "wet" ? T.WET : state === "tilled" ? T.TILLED : this.baseGround[y][x], x, y).tint = seasonGroundTint(G);
     this.soft?.removeTileAt(x, y); // worked soil shows through any soft grass edge
   }
@@ -2766,8 +2845,10 @@ class WildScene extends PlayScene {
       // A land someone told you of is what they said it was.
       const rumor = G.data.rumors.find((x) => x.key === this.key && !x.found);
       const roll = rumor ? { terrain: rumor.terrain, special: false } : rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
+      if (rumor && VILLAGERS[rumor.from]) G.note("rumor");
       if (rumor) { rumor.found = true; if (VILLAGERS[rumor.from]) this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
       const p = profile(roll.terrain);
+      G.note("explore"); if (roll.terrain !== HOME_TERRAIN) G.note("foreign");
       G.data.screens[this.key] = { terrain: roll.terrain, special: roll.special, feature: p.features[Math.floor(r() * p.features.length)], cleared: [] };
     }
     this.rec = G.data.screens[this.key];
@@ -3118,7 +3199,7 @@ class WildScene extends PlayScene {
     const lm = this.lm!, d = lm.def, sk = seasonKey(G.data.year, G.month.season);
     if (this.rec.lmCache === sk) { G.say("You've already been through it this season. Come back when the season turns."); return; }
     const b = labor(EFFORT.pull, 2, "Oikos"); if (b === null) return;
-    this.rec.lmCache = sk; this.gesture("look");
+    this.rec.lmCache = sk; this.gesture("look"); G.note("landmark");
     const got = d.cache!.items.filter(() => Math.random() < 0.75).map(([id, n]) => give(id, n));
     if (!got.length) got.push(give(d.cache!.items[0][0], d.cache!.items[0][1]));
     G.say(`${d.cache!.text} ${got.join(", ")}.${b}`);
@@ -3126,6 +3207,7 @@ class WildScene extends PlayScene {
   }
   /** From the heights you can see what lies around: the lands you will meet are fixed by what you saw. */
   lookout() {
+    G.note("landmark");
     const lm = this.lm!, far = lm.name === "Ruined watchtower" || lm.name === "Acropolis ruins" ? 2 : 1;
     this.gesture("look");
     const seen: string[] = [];
@@ -3248,6 +3330,7 @@ class WildScene extends PlayScene {
     else if (G.count("Lamp") > 0) G.say("You light your clay lamp and duck inside. Its steady flame throws the light wide.");
     else if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
     else G.say("You have no torch. You feel your way into the dark: every action is at -3. (Make torches with C.)");
+    G.note("cave");
     G.data.cave = { key: this.key, level: 1 }; G.data.entry = "N"; G.data.scene = "Cave";
     this.goTo("Cave");
   }
@@ -3404,7 +3487,7 @@ class WildScene extends PlayScene {
     // A country shrine to the god of this land, with someone to tend it.
     if (rec.shrine === undefined) {
       rec.shrine = null;
-      if (this.depth >= 2 && Math.random() < 0.07) {
+      if (this.key === G.data.anchors.tirShrine || (this.depth >= 2 && this.key !== G.data.anchors.tirGrave && Math.random() < 0.07)) {
         const seed = Math.floor(Math.random() * 1e9), at = this.siteSpot(4, 3, seed);
         if (at) rec.shrine = { tx: at[0], ty: at[1], god: WHEEL[rec.terrain - 1].god, seed };
       }
@@ -3422,7 +3505,7 @@ class WildScene extends PlayScene {
     // A graveyard: Hades' shrine. The dead are buried far from the living.
     if (rec.graveyard === undefined) {
       rec.graveyard = null;
-      if (this.depth >= 2 && !rec.shrine && Math.random() < 0.045) {
+      if (this.key === G.data.anchors.tirGrave || (this.depth >= 2 && !rec.shrine && Math.random() < 0.045)) {
         const at = this.siteSpot(4, 3, Math.floor(Math.random() * 1e9));
         if (at) rec.graveyard = at;
       }
@@ -3444,7 +3527,7 @@ class WildScene extends PlayScene {
     const today = G.dayNumber, held = G.selectedItem?.id;
     if (G.isDay) {
       if (G.data.offered.herm === today) { G.say("You've added your stone today. Hermes keeps count."); return; }
-      G.data.offered.herm = today;
+      G.data.offered.herm = today; G.note("herm");
       G.addFavor("Hermes", 1, 4);
       G.say("You pick up a stone from the road and add it to the heap at the herm's foot. Travelers do; Hermes notices. (Hermes, up to +4)");
       return;
@@ -3452,7 +3535,7 @@ class WildScene extends PlayScene {
     const food = ["Honey", "Mushrooms", "Mint", "Meat", "Milk", "Wine", "Plum", "Millet"];
     if (!held || !food.includes(held)) { G.say("At night the crossroads is Hecate's. Suppers are left for her here: hold some food (honey, meat, milk, mint, mushrooms) and offer it."); return; }
     if (G.data.offered.hecateSupper === today) { G.say("Your supper for Hecate is already left here tonight."); return; }
-    G.data.offered.hecateSupper = today;
+    G.data.offered.hecateSupper = today; G.note("hecate");
     G.removeItem(held, 1);
     const after = G.addFavor("Hecate", G.moon === "New moon" ? 2 : 1, 6);
     G.say(`You set the ${ITEMS[held].name.toLowerCase()} at the herm's foot and walk away without looking back, as is proper.${G.moon === "New moon" ? " At the dark of the moon, she is especially near." : ""} (Hecate ${after >= 0 ? "+" : ""}${after})`);
@@ -4572,6 +4655,9 @@ class UIScene extends Phaser.Scene {
       "Sword (forged by Lykos): short reach, hardest blow. Axe, mattock and sickle serve at a pinch.",
       "Bow: hold Space to aim, click where the arrow lands. Lead moving quarry.",
       "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows cost Fatigue; fall when spent and your Life Thread frays.",
+      "",
+      "YOUR GUEST",
+      "An old blind man, Tiresias, sits about the farm. Talk to him: his small requests lead you through the whole world, one a day.",
     ];
     const right = [
       "THE HOMESTEAD",
@@ -4786,7 +4872,7 @@ class UIScene extends Phaser.Scene {
     const welcome = G.blessed("hospitality") ? 1 : 0;
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
-      rec.talked = today; const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
+      rec.talked = today; G.note(`chat:${v.id}`); const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
       // A kledon: now and then a chance word turns out to be about tomorrow. Pneuma tells you it was meant for you.
       let kledon = "";
       if (G.data.nextWeather && Math.random() < 0.25) {
@@ -4806,6 +4892,11 @@ class UIScene extends Phaser.Scene {
       if (d > 0) d += phoenix;
       this.changeRel(v.id, d);
       this.talkTo(v, `${say}\n\n(${d >= 0 ? `+${d}` : d} with ${v.name}.)`);
+    } });
+    const ts = G.data.tir;
+    if (v.id === "myrrhine" && TIRESIAS[ts.step]?.title === "A greeting to the village" && ts.said === ts.step && this.tirGot("greet:myrrhine") < 1) opts.push({ label: "Give her Tiresias' greeting", fn: () => {
+      G.note("greet:myrrhine"); this.changeRel(v.id, 1);
+      this.talkTo(v, `"Tiresias? The Tiresias, the seer of Thebes? Under your olive tree?" She laughs, delighted. "He should be dead six times over. Tell him the priestess of the village greets him, and that the gods must be very fond of your farm."\n\n(+1 with ${v.name}. Go back and tell Tiresias.)`);
     } });
     this.requestOptions(v, opts);
     this.rumorOptions(v, opts);
@@ -4838,6 +4929,90 @@ class UIScene extends Phaser.Scene {
     this.showTalk(v.name, sub, line, opts, v.id);
   }
 
+  // ---------------------------------------------------------------- Tiresias
+  /** How often a thing has happened since he asked for it. */
+  tirGot(ev: string) { const t = G.data.tir; return (t.ev[ev] ?? 0) - (t.base[ev] ?? 0); }
+  tirCtx() { return { got: (ev: string) => this.tirGot(ev), G }; }
+  /** Is what he asked for done? */
+  tirReady() { const t = G.data.tir, st = TIRESIAS[t.step]; return !!st && t.said === t.step && st.check(this.tirCtx())[0]; }
+  /** Will he ask for the next thing yet? The first few come at once; after that, one a day. */
+  tirCanAsk() { const t = G.data.tir; return !!TIRESIAS[t.step] && t.said !== t.step && (t.step < 3 || t.doneDay < G.dayNumber); }
+  /** Fix the place he sends you to, and say where it is from your farm. */
+  tirWhere(kind: "tirShrine" | "tirGrave" | "cave"): string {
+    const a = G.data.anchors;
+    if (kind === "cave") {
+      if (a.cave) { const [x, y] = a.cave.split(",").map(Number); return directions(x, y); }
+      return "three stretches of country out from your farm, or two if you go into the copper hills";
+    }
+    if (!a[kind]) {
+      const [lo, hi] = kind === "tirShrine" ? [2, 3] : [3, 4], r = rng((G.data.seed ^ (kind === "tirShrine" ? 0x5417e : 0x6a7e)) >>> 0), cands: string[] = [];
+      for (let y = -hi; y <= hi; y++) for (let x = -hi; x <= hi; x++) {
+        const d = Math.abs(x) + Math.abs(y), k = `${x},${y}`;
+        if (d < lo || d > hi || x === 0 || G.data.screens[k] || k === a.cave || k === a.spring || k === a.satyrs || k === a.tirShrine || k === a.tirGrave) continue;
+        cands.push(k);
+      }
+      a[kind] = cands.length ? cands[Math.floor(r() * cands.length)] : kind === "tirShrine" ? "3,0" : "4,0";
+    }
+    const [x, y] = a[kind]!.split(",").map(Number);
+    return directions(x, y);
+  }
+  talkTiresias(said?: string) {
+    const t = G.data.tir, today = G.dayNumber, step = TIRESIAS[t.step];
+    const opts: { label: string; fn: () => void }[] = [];
+    if (!t.met) {
+      opts.push({ label: "Welcome him as your guest", fn: () => {
+        t.met = true; G.addFavor("Zeus", 1);
+        this.tirAsk(`"Zeus sees it, and so do I, in my way. Thank you." He settles his staff across his knees with a sigh. "You'll find me about the place. I don't go far, and I don't go fast."\n\n(Zeus, who keeps the law of guests: favor +1.)`);
+      } });
+      this.showTalk("An old man", "a stranger, blind, with a staff of cornel wood", said ?? `An old man sits on your land as if he has always been there. His eyes are milk-white, and he turns his face toward you before you make a sound.\n\n"Don't be alarmed. I am Tiresias, of Thebes, and I am older than anyone you will ever meet. I have walked a long way looking for somewhere quiet to sit. Zeus protects strangers. Will you let an old man stay a while?"`, opts, "tiresias");
+      return;
+    }
+    const N = TIRESIAS.length;
+    const sub = `Tiresias of Thebes · seer · ${step ? `${t.step} of ${N} tasks done` : "the round of the world is walked"}`;
+    if (step && t.said === t.step) {
+      const [done, prog] = step.check(this.tirCtx());
+      if (done) opts.push({ label: step.give ?? `Tell him: ${step.title.toLowerCase()}, done`, fn: () => {
+        step.take?.(G);
+        const got = step.reward(G);
+        t.step++; t.doneDay = today; t.base = {};
+        SOUND.sfx("find");
+        const next = TIRESIAS[t.step] ? (this.tirCanAsk() ? "" : "\n\nHe settles back against the warm stone. \"Enough for one day. Come and see me tomorrow.\"") : "";
+        this.talkTiresias(`${step.thanks}\n\n(${got}.)${next}`);
+      } });
+      else opts.push({ label: `About what you asked: ${step.title.toLowerCase()}`, fn: () => this.talkTiresias(`${step.ask.replace("{where}", step.anchor ? this.tirWhere(step.anchor) : "")}\n\n(${step.how} So far: ${prog}.)`) });
+    } else if (step && this.tirCanAsk()) opts.push({ label: "Ask if there's anything he needs", fn: () => this.tirAsk() });
+    if (t.ev.satDay !== today) opts.push({ label: "Sit with him a while", fn: () => {
+      t.ev.satDay = today; G.addFatigue(-6);
+      const says = [
+        "\"The gods hide a man's living from him, Hesiod says. Otherwise you'd do a year's work in a day and sit idle the rest.\"",
+        "\"I was a woman for seven years. Hera asked me once who has the better of love, men or women. I told her the truth, and she blinded me for it. That's one story. Athena tells another.\"",
+        "\"Seven lifetimes. You'd think a man would get wiser. Mostly he gets slower.\"",
+        "\"The crane's cry from the clouds means it's time to plough. When the snail climbs the stalk, stop digging the vines and sharpen your sickles.\"",
+        "\"Don't cross a river without washing your hands and praying first. Rivers are gods too.\"",
+        "\"Never piss facing the sun. I'm serious. Hesiod is very clear on this.\"",
+        "\"Thebes had seven gates. I outlived the men who built every one.\"",
+        "\"The best treasure a man has is a sparing tongue.\"",
+        "\"When the Pleiades rise, reap. When they set, plough.\"",
+      ];
+      this.talkTiresias(`You sit with him a while in the sun. Neither of you says much. Then:\n\n${says[(today + t.step) % says.length]}\n\n(You rest: Fatigue −6.)`);
+    } });
+    if (!step && t.ev.counsel !== today) opts.push({ label: "Ask what tomorrow brings", fn: () => {
+      t.ev.counsel = today;
+      this.talkTiresias(`He tilts his head as if listening to birds you can't hear. "${TIR_WEATHER[G.data.nextWeather ?? "clear"]}"`);
+    } });
+    const line = said ?? (!step ? `"${TIR_CALLS.done[today % TIR_CALLS.done.length]}" He turns his blind face to the sun.`
+      : t.said === t.step ? `"Well? Have you done what I asked?"` : this.tirCanAsk() ? `"Ah, you. Sit, sit. I've been thinking of something you could do for an old man."` : `He's dozing in the sun. "Mm? Tomorrow, child. Come tomorrow."`);
+    this.showTalk("Tiresias", sub, line, opts, "tiresias");
+  }
+  /** He asks for the next thing on his list. */
+  tirAsk(pre = "") {
+    const t = G.data.tir, step = TIRESIAS[t.step];
+    if (!step) { this.talkTiresias(pre); return; }
+    t.said = t.step; t.base = { ...t.ev };
+    const ask = step.ask.replace("{where}", step.anchor ? this.tirWhere(step.anchor) : "");
+    this.talkTiresias(`${pre ? pre + "\n\n" : ""}${step.title.toUpperCase()}\n${ask}\n\n(${step.how})`);
+  }
+
   // ---------------------------------------------------------------- requests and rumors
   /** How many of a thing you carry at or above a quality. */
   static countQ(id: string, minQ = 1) { return G.data.slots.reduce((n, s) => n + (s && s.id === id && (s.q ?? 1) >= minQ ? s.qty : 0), 0); }
@@ -4857,14 +5032,14 @@ class UIScene extends Phaser.Scene {
   requestOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
     const today = G.dayNumber;
     for (const q of G.data.requests.filter((r) => r.kind === "deliver" && r.to === v.id)) if (G.count("Parcel") > 0) opts.push({ label: `Hand over the parcel from ${VILLAGERS[q.from].name}`, fn: () => {
-      G.removeItem("Parcel", 1); G.data.requests.splice(G.data.requests.indexOf(q), 1);
+      G.removeItem("Parcel", 1); G.data.requests.splice(G.data.requests.indexOf(q), 1); G.note("request");
       G.data.silver += q.silver; this.changeRel(v.id, 1); this.changeRel(q.from, 2);
       this.talkTo(v, `"For me? From ${VILLAGERS[q.from].name}? Thank you. ${VILLAGERS[q.from].name} left this for your trouble."\n\n(+${money(q.silver)}; +2 with ${VILLAGERS[q.from].name}, +1 with ${v.name}.)`);
     } });
     const mine = G.data.requests.find((r) => r.from === v.id);
     if (mine && mine.kind === "bring" && UIScene.countQ(mine.item, mine.minQ ?? 1) >= mine.qty) opts.push({ label: `Give ${v.name} the ${mine.qty} ${ITEMS[mine.item].name.toLowerCase()} asked for`, fn: () => {
       UIScene.takeQ(mine.item, mine.qty, mine.minQ ?? 1);
-      G.data.requests.splice(G.data.requests.indexOf(mine), 1);
+      G.data.requests.splice(G.data.requests.indexOf(mine), 1); G.note("request");
       G.data.silver += mine.silver; const early = mine.due - today >= 2 ? 1 : 0; this.changeRel(v.id, 2 + early);
       SOUND.sfx("find");
       this.talkTo(v, `"You came through. Here, as promised."\n\n(+${money(mine.silver)}; +${2 + early} with ${v.name}${early ? ", for being quick about it" : ""}.)`);
@@ -5030,6 +5205,7 @@ class UIScene extends Phaser.Scene {
   priestCtx: [string, string, string, boolean, number] = ["", "", "", false, 9];
   priestTalk(god: string, name: string, role: string, atAltar = false, cap = 9) {
     this.priestCtx = [god, name, role, atAltar, cap];
+    if (name && /^(priest|priestess) of/.test(role)) G.note("shrineKeeper");
     const d = DIVINE[god], dv = G.data.divine, held = G.selectedItem?.id;
     const who = name ? `${name}, ${role}` : role[0].toUpperCase() + role.slice(1);
     const chthonic = CHTHONIC.includes(god);
@@ -5057,7 +5233,7 @@ class UIScene extends Phaser.Scene {
       if (G.favor(god) >= cap) { this.priestTalk2(god, who, `${name ? `"${god} knows you well.` : `${god} knows you well here.`} Greater favor comes from deeds, and from what ${god} asks of you${name ? '."' : "."}`); return; }
       const slot = G.data.slots.find((s) => s && s.id === held && s.q === 3) ?? G.data.slots.find((s) => s && s.id === held);
       const fine = slot?.q === 3, liked = (OFFER_PATRON[held] ?? "") === god || d.wants.some(([i]) => i === held);
-      G.removeItem(held, 1); G.data.offered[god] = G.dayNumber;
+      G.removeItem(held, 1); G.data.offered[god] = G.dayNumber; G.note("offer"); if (role.includes("grave")) G.note("graveOffer");
       const after = G.addFavor(god, (fine ? 2 : 1) + (liked ? 1 : 0), cap);
       this.priestTalk2(god, who, `The ${ITEMS[held].name.toLowerCase()} is given to ${god}${liked ? ", and it is the kind of thing the god loves" : ""}. (favor ${after >= 0 ? "+" : ""}${after}; offerings here raise favor as far as +${cap})`);
     } });
@@ -5097,6 +5273,8 @@ class UIScene extends Phaser.Scene {
     });
     const gq = Object.entries(G.data.divine.quests).filter(([, q]) => q).map(([g, q]) => `• ${g}: ${q!.qty} ${ITEMS[q!.item].name.toLowerCase()}, to any shrine of ${g}. You have ${UIScene.countQ(q!.item)}.`);
     reqs.push(...gq);
+    const ts = G.data.tir, st = TIRESIAS[ts.step];
+    if (st && ts.said === ts.step) reqs.unshift(`• Tiresias: ${st.title.toLowerCase()}. ${st.check(this.tirCtx())[0] ? "Done: go and tell him." : `${st.check(this.tirCtx())[1]}.`} ${st.how}`);
     const text = `REQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
@@ -5164,7 +5342,7 @@ class UIScene extends Phaser.Scene {
   }
 
   hostStranger(food: string) {
-    const st = G.data.stranger!; st.hosted = true;
+    const st = G.data.stranger!; st.hosted = true; G.note("host");
     G.removeItem(food, 1); G.data.hostedDay = G.dayNumber;
     const twice = G.blessed("hospitality") ? 2 : 1;
     const favor = (god: string, d: number) => { G.addFavor(god, d * twice); };
@@ -5270,7 +5448,7 @@ class UIScene extends Phaser.Scene {
 
   appeaseMyth(id: string, how: string) {
     const d = MYTH[id], m = mythRec(id), before = rungOf(m.days);
-    m.last = G.dayNumber; m.days++;
+    m.last = G.dayNumber; m.days++; G.note(`myth:${id}`);
     const after = rungOf(m.days);
     let note = "";
     if (m.stolen && id === "satyrs") { G.addItem(m.stolen, 1); note += ` A satyr sheepishly hands back your ${ITEMS[m.stolen].name.toLowerCase()}.`; m.stolen = undefined; }
@@ -5317,7 +5495,7 @@ class UIScene extends Phaser.Scene {
     const opts = TWELVE.map((god) => ({
       label: `${god} (${G.favor(god) >= 0 ? "+" : ""}${G.favor(god)}, devotion ${G.data.devotion[god] ?? 0})`,
       fn: () => {
-        G.data.prayedDay = G.dayNumber;
+        G.data.prayedDay = G.dayNumber; G.note("pray");
         // A sneeze as you finish: the god has heard (an extra day of devotion).
         const sneeze = Math.random() < 1 / 8;
         const n = (G.data.devotion[god] = (G.data.devotion[god] ?? 0) + (sneeze ? 2 : 1));
@@ -5340,7 +5518,7 @@ class UIScene extends Phaser.Scene {
     if (CHTHONIC.includes(god)) {
       if (G.isDay) { this.openAltar(where, `You hold out the ${name}, but it belongs to the one below, and he takes nothing by daylight.`); return; }
       if (G.data.offered[god] === today) { this.openAltar(where, "The earth has already drunk your offering tonight."); return; }
-      G.removeItem(item, 1); G.data.offered[god] = today;
+      G.removeItem(item, 1); G.data.offered[god] = today; G.note("offer");
       G.addFavor(god, 1, 3);
       this.openAltar(where, `In the dark you crush the ${name} and let it fall. The earth drinks it. Something below has noticed you. (A hidden favor stirs: ${god} +1.)`);
       return;
@@ -5357,7 +5535,7 @@ class UIScene extends Phaser.Scene {
     }
     const slot = G.data.slots.find((s) => s && s.id === item && s.q === 3) ?? G.data.slots.find((s) => s && s.id === item);
     const fine = slot?.q === 3;
-    G.removeItem(item, 1); G.data.offered[god] = today;
+    G.removeItem(item, 1); G.data.offered[god] = today; G.note("offer");
     const after = G.addFavor(god, fine ? 2 : 1, cap);
     this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after})`);
   }
@@ -5630,6 +5808,7 @@ class UIScene extends Phaser.Scene {
     const heavy = r.at && r.at !== "hand";
     if (labor(heavy ? EFFORT.station : EFFORT.hand, heavy ? 2 : 1, "Techne") === null) return;
     for (const [id, n] of r.needs) G.removeItem(id, n);
+    G.note("craft"); G.note(`craft:${r.out}`);
     if (r.upgrade) {
       G.data.tools[r.out] = r.upgrade; SOUND.sfx("chop");
       G.say(`${STATION_NAME[r.at ?? "hand"]}: you heat, hammer and quench. Your ${ITEMS[r.out].name.toLowerCase()} is now a ${toolName(r.out, r.upgrade, ITEMS[r.out].name).toLowerCase()}.`);
