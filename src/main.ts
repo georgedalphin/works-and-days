@@ -9,6 +9,7 @@ import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
+import { HARMONIAI, INSTRUMENTS, MELODIES, melody, stepFreq, VILLAGE_SONGS, HUT_SONGS, type Melody } from "./music";
 import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
@@ -85,6 +86,14 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
   G.addFatigue(fatigue * disc * zeus);
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
+
+// ------------------------------------------------------------------ music
+/** Singing: whether V is held, the harmonia, the notes just sung, and a song heard in the world waiting to be sung back. */
+const SING = { on: false, mode: 0, buf: [] as { n: number; t: number; mode: number }[], pending: null as null | { id: string; until: number }, hintAt: -1e9, lit: {} as Record<number, number>, heard: {} as Record<string, number> };
+/** What you are making music with: the instrument in your hand, or your voice. */
+/** A melody's name in a sentence: "the Paean", "the nightingale's song", "Tiresias' bird-call". */
+const songName = (m: { name: string }) => m.name.startsWith("The ") ? `the ${m.name.slice(4)}` : m.name.startsWith("Tiresias") ? m.name : `the ${m.name}`;
+const curInstrument = () => INSTRUMENTS[G.selectedItem?.id ?? ""] ?? INSTRUMENTS.voice;
 
 /** How much a blow is softened: a woolen cloak, if you carry one. (Health gives you more Vitality instead.) */
 const armor = () => (G.count("Cloak") > 0 ? 1 : 0);
@@ -344,7 +353,7 @@ abstract class PlayScene extends Phaser.Scene {
     let speed = 70;
     const moving = vx !== 0 || vy !== 0;
     if (moving && k.SHIFT.isDown) {
-      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes"));
+      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1);
       if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
     }
     if (G.exhausted) speed *= 0.6;
@@ -824,6 +833,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.gesture("act");
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "place") { this.tryPlace(); return; }
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "meal") { eatHeld(); return; }
+    if (G.selectedItem && INSTRUMENTS[G.selectedItem.id]) { G.say(`To play ${INSTRUMENTS[G.selectedItem.id].name}, hold V and press 1–8. The mouse wheel changes harmonia.`); return; }
     if (G.selectedItem?.id === "axe" || G.selectedItem?.id === "mattock") {
       const [tx, ty] = this.facingTile(), o = this.placedAt(tx, ty);
       if (o) { SOUND.sfx("chop"); this.pickUp(o); return; }
@@ -867,6 +877,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.ambience?.update(dt, this.paused);
     if ((this.mealT -= dt) <= 0) {
       this.mealT = 1; for (const m of G.mealTick()) G.say(m);
+      if (!this.paused) this.maybeHearSong();
       // Slow healing while awake (a longer jump in time is sleep, which heals by itself).
       const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo"))); this.lastHealAt = h;
     }
@@ -922,6 +933,7 @@ abstract class PlayScene extends Phaser.Scene {
     // Beasts answer to Artemis and the hunter's hour; a monster to the god whose domain it is.
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
     const [calm, by] = aretaiCalm(a.kind);
+    if ((a.kind === "eidolon" || a.kind === "lampad") && G.songOn("paean")) bonus -= 4; // Apollo's hymn keeps the dead at a distance
     const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus - calm;
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > agg) {
@@ -964,6 +976,94 @@ abstract class PlayScene extends Phaser.Scene {
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
     if (G.data.vitality <= 0) this.struckDown(a);
+  }
+
+  // ---------------------------------------------------------------- music in the world
+  /** A little note rising from you as you sing or play. */
+  noteFx(n: number, x = this.player.x, y = this.player.y - 12, color?: string) {
+    const cols = ["#f2e6c9", "#f2c14e", "#e8a05a", "#e07a6a", "#c97ab8", "#8a9ae0", "#6ac0c0", "#9ad07a"];
+    const t = this.add.text(x + (Math.random() * 10 - 5), y, "♪", { fontFamily: FONT, fontSize: "9px", color: color ?? cols[(n - 1) % 8], stroke: "#1f1712", strokeThickness: 2 }).setOrigin(0.5).setResolution(4).setDepth(99998);
+    this.tweens.add({ targets: t, y: y - 18 - n * 1.5, x: t.x + (Math.random() * 12 - 6), alpha: 0, duration: 1300, onComplete: () => t.destroy() });
+  }
+  /** Creatures within reach that a calming song can reach. */
+  near(r: number, which: (a: Animal) => boolean) { return this.animals.filter((a) => a.state !== "dead" && a.state !== "gone" && which(a) && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < r); }
+  quiet(a: Animal) { a.appeased = true; a.state = "idle"; a.sprite.setVelocity(0, 0); a.rolled = true; a.rerollT = 999; }
+  /** What a melody does, performed well (strong: performed beautifully). Returns null if there is nothing here for it to do. */
+  songEffect(id: string, strong: boolean): string | null {
+    const until = (h: number) => G.absHour + h, buff = G.data.songBuff;
+    const ghost = (a: Animal) => a.kind === "eidolon" || a.kind === "lampad";
+    switch (id) {
+      case "work": { const f = strong ? 18 : 10; G.addFatigue(-f); G.essence.Earth = G.essenceMax.Earth; return `The work goes easier. (Fatigue −${f}, Earth restored.)`; }
+      case "shepherd": {
+        const calmed = this.near(strong ? 220 : 150, (a) => !isMonster(a.kind) && !ghost(a) && SPECIES[a.kind].aggression > 0 && !a.appeased);
+        for (const a of calmed) this.quiet(a);
+        let goats = 0;
+        if (this.scene.key === "Farm") for (const g of G.data.goats) if (g.songDay !== G.dayNumber) { g.songDay = G.dayNumber; g.affection = Math.min(10, g.affection + 1); goats++; }
+        if (!calmed.length && !goats) return null;
+        return [calmed.length && `The beasts nearby settle and turn away (${calmed.length}).`, goats && `The goats come to the fence to listen, and love you a little more (affection +1).`].filter(Boolean).join(" ");
+      }
+      case "lullaby": {
+        const angry = this.near(strong ? 260 : 170, (a) => (a.state === "charge" || a.state === "recoil") && (!isMonster(a.kind) || strong) && !ghost(a));
+        if (!angry.length) return null;
+        for (const a of angry) this.quiet(a);
+        return `The ${angry.length > 1 ? "creatures" : beast(angry[0].kind)} slow${angry.length > 1 ? "" : "s"}, and stop${angry.length > 1 ? "" : "s"}, and lie${angry.length > 1 ? "" : "s"} down in the grass to listen. Orpheus would be proud.`;
+      }
+      case "rowers": buff.row = until(strong ? 6 : 3); return `The chant settles into your arms: rowing is swifter for ${strong ? 6 : 3} hours.`;
+      case "paean": {
+        const v = G.data.vitality; G.heal(strong ? 12 : 6); buff.paean = until(3);
+        for (const a of this.near(240, ghost)) { this.quiet(a); a.bolt(this.player); }
+        return `Apollo's hymn: you feel whole again (Vitality +${Math.round(G.data.vitality - v)}), and for 3 hours the dead keep their distance.`;
+      }
+      case "lament": {
+        const shades = this.near(240, ghost); for (const a of shades) this.quiet(a);
+        if (G.isDay && !shades.length) return null;
+        let favor = "";
+        if (!G.isDay) { const w = this.wildRec; const graves = w?.graveyard && Math.hypot(w.graveyard[0] * TILE + 24 - this.player.x, w.graveyard[1] * TILE + 30 - this.player.y) < 140; const after = G.addFavor("Hades", graves || strong ? 2 : 1, 6); favor = ` Below, the lord of the dead hears it${graves ? ", here among his own" : ""}. (Hades ${after >= 0 ? "+" : ""}${after})`; }
+        return `${shades.length ? "The restless dead fall quiet and drift away. " : "The night listens. "}${favor}`.trim();
+      }
+      case "augury": buff.augury = until(24); return "Birds gather on the branches and fall silent, as if listening. The next omen will come to you clearly, and you will read it aright.";
+      case "naiad": {
+        if (this.scene.key === "Farm") {
+          const r = strong ? 9 : 5, ptx = this.player.x / TILE, pty = this.player.y / TILE, f = this as unknown as FarmScene; let n = 0;
+          for (const [k, v] of Object.entries(G.data.ground)) { const [x, y] = k.split(",").map(Number); if (v === "tilled" && Math.hypot(x - ptx, y - pty) <= r) { f.setGround(x, y, "wet"); n++; } }
+          if (!n) return null;
+          return `Dew beads on the furrows all around you, then soaks in: ${n} square${n > 1 ? "s" : ""} of tilled soil watered.`;
+        }
+        if (G.count("jar")) G.data.jarWater = jarCap(); G.essence.Water = G.essenceMax.Water;
+        return "Water answers the song: your jar is full, and your Water restored.";
+      }
+      case "revel": { G.essence.Fire = G.essenceMax.Fire; G.essence.Air = G.essenceMax.Air; G.addFatigue(-15); buff["favor:Dionysus"] = until(strong ? 8 : 4); return `Joy runs through you like wine: Fire and Air full, weariness gone (Fatigue −15), and Dionysus near you for ${strong ? 8 : 4} hours.`; }
+      case "nightingale": buff.charm = until(12); return "Something sweet lingers about you: for half a day, people will warm to you more (+1 when you chat or give).";
+      case "lark": buff.lark = until(strong ? 6 : 3); return `Your feet feel light: running costs half the breath for ${strong ? 6 : 3} hours.`;
+      case "cicadas": buff.muse = until(strong ? 6 : 3); return `The Muses lean close: for ${strong ? 6 : 3} hours every song comes easier (+2).`;
+    }
+    return null;
+  }
+  /**
+   * Songs in the world: a nightingale at dusk, a lark at dawn, the cicadas at summer noon; the Naiad in her spring and
+   * the satyrs at their revel, once they know you. Hear one, and you may sing it back before it fades, and have it.
+   */
+  maybeHearSong() {
+    if (SING.pending && performance.now() < SING.pending.until) return;
+    const key = this.scene.key; if (key !== "Farm" && key !== "Wild" && key !== "Village") return;
+    const terr = this.wildRec?.terrain ?? 3, h = G.data.clock, dl = G.daylight, R = Math.random();
+    const fresh = (id: string) => !G.data.songs.includes(id) && SING.heard[id] !== G.dayNumber;
+    const w = this as unknown as { naiad?: Phaser.GameObjects.Image; satyrs?: Phaser.GameObjects.Image[] };
+    const dist = (o?: Phaser.GameObjects.Image) => (o && o.visible ? Math.hypot(o.x - this.player.x, o.y - this.player.y) : 1e9);
+    if (fresh("naiad") && rungOf(mythRec("naiad").days) >= 1 && dist(w.naiad) < 170 && R < 0.05) return this.hearSong(melody("naiad"), "nymph", `${mythRec("naiad").name} is singing softly to herself in the spring`, w.naiad!.x, w.naiad!.y - 10);
+    if (fresh("revel") && rungOf(mythRec("satyrs").days) >= 1 && dist(w.satyrs?.[0]) < 190 && R < 0.05) return this.hearSong(melody("revel"), "syrinx", "The satyrs strike up a tune on their pipes", w.satyrs![0].x, w.satyrs![0].y - 10);
+    if (fresh("nightingale") && h > dl - 1.5 && h < dl + 1.5 && [1, 2, 3, 9].includes(terr) && R < 0.006) return this.hearSong(melody("nightingale"), "bird", "In the dusk, a nightingale begins to sing");
+    if (fresh("lark") && h < 1.5 && [1, 3, 10].includes(terr) && R < 0.006) return this.hearSong(melody("lark"), "bird", "A crested lark goes up singing into the dawn");
+    if (fresh("cicadas") && G.month.season === "Summer" && h > dl * 0.35 && h < dl * 0.65 && terr !== 7 && R < 0.004) return this.hearSong(melody("cicadas"), "bird", "In the noon heat the cicadas' song rises and falls, and for a moment it is almost a tune");
+  }
+  hearSong(m: Melody, sound: "bird" | "nymph" | "syrinx", intro: string, x = this.player.x + 40, y = this.player.y - 30) {
+    SING.heard[m.id] = G.dayNumber;
+    // Hearing a nymph's song clearly takes a spirit open to the divine (Pneuma); birds sing for anyone who listens.
+    if (sound !== "bird") { const roll = d12(), need = (G.data.aretai.Pneuma ?? 3) + 3; if (roll > need) { G.say(`${intro}, but the tune slips past you before you can catch it (Pneuma d12 ${roll}, needed 1–${need}).`); return; } }
+    const root = 69;
+    m.notes.forEach((n, i) => this.time.delayedCall(300 + i * 480, () => { SOUND.note(stepFreq(m.mode, n, root), sound, sound === "bird" ? 0.35 : 0.5, 0.9); this.noteFx(n, x, y, "#fff6c8"); }));
+    SING.pending = { id: m.id, until: performance.now() + 90000 };
+    G.say(`${intro}. The tune: ${HARMONIAI[m.mode].name}, ${m.notes.join(" ")}. Sing it back before it fades from your mind (hold V; the wheel changes harmonia).`);
   }
 
   /** A warning when Vitality runs low. */
@@ -1343,7 +1443,7 @@ abstract class PlayScene extends Phaser.Scene {
     const b = this.boat!; const o = this.objLayer()!;
     if (dx || dy) { this.strokeT = (this.strokeT + dt) % 0.8; if (this.strokeT < dt) SOUND.sfx("loose"); } else this.strokeT = 0;
     const surge = this.strokeT < 0.3 ? 1.45 : 0.5; // average ≈ 0.85 of 70 × 2/3
-    const speed = 70 * (2 / 3) * surge * (G.exhausted ? 0.6 : 1);
+    const speed = 70 * (2 / 3) * surge * (G.exhausted ? 0.6 : 1) * (G.songOn("row") ? 1.35 : 1); // the rowers' chant
     let vx = dx * speed, vy = dy * speed;
     const wetAt = (x: number, y: number) => waterKind(o.getTileAtWorldXY(x, y)?.index) > 0;
     const look = 8;
@@ -1478,13 +1578,14 @@ abstract class PlayScene extends Phaser.Scene {
   fireOmen(d: OmenDef) {
     const good = Math.random() < Phaser.Math.Clamp(0.55 + 0.07 * G.boon(d.god), 0.15, 0.85);
     const pneuma = (G.data.aretai.Pneuma ?? 3) + G.boon("Dionysus"), nRoll = 1 + Math.floor(Math.random() * 12);
-    const noticed = nRoll <= pneuma;
+    const sung = G.songOn("augury"); if (sung) G.data.songBuff.augury = -1; // Tiresias' bird-call
+    const noticed = sung || nRoll <= pneuma;
     G.data.omen = { day: G.dayNumber, god: d.god, good, noticed };
     if (noticed) G.note("omen");
     this.omenVisual(d, good);
     if (!noticed) { G.say(d.plain); return; }
     const gnosis = (G.data.aretai.Gnosis ?? 3) + 2 + G.lore("augury"), rRoll = 1 + Math.floor(Math.random() * 12);
-    const right = rRoll <= gnosis || G.warded("Athena"), belief = right ? good : !good;
+    const right = sung || rRoll <= gnosis || G.warded("Athena"), belief = right ? good : !good;
     G.data.omen.read = right;
     SOUND.sfx("omen");
     this.skySubject = { id: "augury", until: this.time.now + 12000 };
@@ -3767,6 +3868,8 @@ class WildScene extends PlayScene {
         u.showTalk(kind.title, names, `As you set it down, the eldest of them straightens, and is suddenly taller than the doorway, and bright. It was ${god} all along, testing the guest as gods test hosts. "You came as a guest and gave as a guest. Go well." (${god} +2, Zeus +1)`, []);
       } else u.showTalk(kind.title, names, "They protest, then accept it gladly. A guest who gives is a good guest; Zeus Xenios sees it. (Zeus +1)", [{ label: "Back", fn: again }]);
     } });
+    const hs = HUT_SONGS[kind.id];
+    if (hs && !G.data.songs.includes(hs)) opts.push({ label: "Ask them for a song", fn: () => u.showTalk(kind.title, names, `They look at each other, then the eldest begins, and the others join in. It's an old song of their trade, and they sing it until you can sing it with them.\n\n${u.learnSong(melody(hs))}`, [{ label: "Back", fn: again }]) });
     if (hut.special !== today) opts.push({ label: kind.special, fn: () => { hut.special = today; this.hutSpecial(kind, names, again); } });
     for (const [id, price] of kind.goods) if (G.data.silver >= price) opts.push({ label: `Buy ${ITEMS[id].name.toLowerCase()} (${price} silver)`, fn: () => { G.data.silver -= price; give(id, 1); again(); } });
     if (!hut.sensed) opts.push({ label: "Look closely at them (Pneuma)", fn: () => {
@@ -4749,6 +4852,10 @@ class UIScene extends Phaser.Scene {
     kb.addCapture("TAB");
     kb.on("keydown", (e: KeyboardEvent) => {
       if (this.dialog) return;
+      // Music: hold V to sing (or play what you hold); 1–8 are the steps of the harmonia.
+      if (e.key === "v" || e.key === "V") { if (!e.repeat && !this.modal) this.singStart(); return; }
+      if (SING.on && e.key >= "1" && e.key <= "8") { if (!e.repeat) this.singNote(Number(e.key)); return; }
+      if (SING.on && (e.key === "9" || e.key === "0")) return;
       if (this.talkPanel && e.key >= "1" && e.key <= "9") { const o = this.talkOpts[Number(e.key) - 1]; if (o) o.fn(); return; }
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
@@ -4761,7 +4868,9 @@ class UIScene extends Phaser.Scene {
       if ((e.key === "f" || e.key === "F") && !this.talkPanel) { if (this.sheet === "gods") this.closeSheet(); else this.openSheet("gods"); }
       if ((e.key === "p" || e.key === "P") && !this.talkPanel) { if (this.sheet === "self") this.closeSheet(); else this.openSheet("self"); }
     });
+    kb.on("keyup", (e: KeyboardEvent) => { if (e.key === "v" || e.key === "V") this.singStop(); });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
+      if (SING.on) { SING.mode = (SING.mode + (dy > 0 ? 1 : HARMONIAI.length - 1)) % HARMONIAI.length; SING.buf = []; return; }
       if (this.modal) return;
       G.data.selected = (G.data.selected + (dy > 0 ? 1 : 9)) % 10;
     });
@@ -4780,9 +4889,8 @@ class UIScene extends Phaser.Scene {
       "J: journal. K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help. Esc: pause, save and quit.",
       "",
       "PACING",
-      "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, rites and running Air. Skill makes each act cheaper, and so does the hour of the matching god. An empty bar refills in about 12 seconds (slower when weary): a few blows, then a breath.",
-      "Sleep out by a campfire (12 Fiber, 4 Stone, by hand) for half a bed's rest, waking where you lay.",
-      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. Your life is saved each dawn.",
+      "Every action draws Essence from its Aretai's element (fighting Fire, field work Earth, study Water; aim, song and running Air). Skill and the matching god's hour make it cheaper. An empty bar refills in about 12 seconds.",
+      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. A campfire (12 Fiber, 4 Stone) lets you sleep out. Your life is saved each dawn.",
       "",
       "FIGHTING AND HUNTING",
       "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
@@ -4791,10 +4899,13 @@ class UIScene extends Phaser.Scene {
       "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows take Vitality (the red bar: 6 per point of Health). At 0 you fall, and your Life Thread frays. Food, sleep and time heal it.",
       "",
       "YOUR GUEST",
-      "An old blind man, Tiresias, sits about the farm. Talk to him: his small requests lead you through the whole world, one a day.",
+      "Tiresias, an old blind seer, sits about the farm. His small requests lead you through the whole world, one a day.",
+      "",
+      "MUSIC",
+      "Hold V to hum: 1–8 sing the scale of the harmonia; the wheel changes harmonia; hold an instrument to play it. Some melodies are minor magic: people teach them, nymphs and birds sing them (sing them back to learn).",
       "",
       "COOKING",
-      "At a campfire or your hearth (E): up to three foods in the pot. A dish strengthens the Aretai of its rarest food for a while; some old combinations are a god's own dish, and bring that god's favor near. Eat with Space.",
+      "Campfire or hearth: up to three foods make a dish that strengthens an Aretai a while; some are a god's own dish. Eat: Space.",
     ];
     const right = [
       "THE HOMESTEAD",
@@ -4819,7 +4930,7 @@ class UIScene extends Phaser.Scene {
     ];
     const hbg = this.add.rectangle(W / 2, H / 2, 920, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const title = this.add.text(W / 2, 18, "Works & Days", { ...font, fontSize: "20px" }).setOrigin(0.5, 0);
-    const col = (lines: string[], x: number) => this.add.text(x, 52, lines.join("\n"), { ...font, fontSize: "12.5px", lineSpacing: 2, wordWrap: { width: 420 } });
+    const col = (lines: string[], x: number) => this.add.text(x, 50, lines.join("\n"), { ...font, fontSize: "12px", lineSpacing: 1, wordWrap: { width: 428 } });
     const lt = col(left, W / 2 - 444), rt = col(right, W / 2 + 14);
     const foot = this.add.text(W / 2, H - 26, "Click or press H to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);
     const ht = this.add.container(0, 0, [title, lt, rt, foot]);
@@ -4845,6 +4956,8 @@ class UIScene extends Phaser.Scene {
 
   update(_t: number, dms: number) {
     const dt = dms / 1000;
+    if (SING.on && this.modal) this.singStop();
+    this.drawSing();
     this.date.setText(`${G.dateLabel()} · ${G.moon} · ${WEATHER_WORD[G.data.weather]}`);
     const play = this.scene.get(G.data.scene) as PlayScene | undefined;
     const terrain = G.data.scene === "Wild" ? (G.data.screens[`${G.data.wx},${G.data.wy}`]?.terrain ?? 3) : G.data.scene === "Cave" ? 99 : 3;
@@ -4885,7 +4998,7 @@ class UIScene extends Phaser.Scene {
     G.messages.forEach((m) => (m.t += dt));
     G.messages = G.messages.filter((m) => m.t < 6).slice(-4);
     // Stack the messages upward from just above the prompt, so long ones wrap instead of running off screen.
-    let y = HOTBAR_Y - 64;
+    let y = HOTBAR_Y - 64 - (SING.on ? 150 : 0); // above the singing panel while you sing
     for (let i = this.log.length - 1; i >= 0; i--) {
       const t = this.log[i], m = G.messages[i];
       const txt = m ? m.text : "";
@@ -5014,7 +5127,7 @@ class UIScene extends Phaser.Scene {
     const sub = `${v.household[0].toUpperCase() + v.household.slice(1)} · ${v.patron}'s household · ${relLabel(rec.rel)} (${rec.rel >= 0 ? "+" : ""}${rec.rel})`;
     const aph = G.boon("Aphrodite");
     const phoenix = (G.patron?.aretai === "Phoenix" ? 1 : 0) + (aph >= 2 ? 1 : aph <= -2 ? -1 : 0); // Aphrodite's hour and favor
-    const welcome = G.blessed("hospitality") ? 1 : 0;
+    const welcome = (G.blessed("hospitality") ? 1 : 0) + (G.songOn("charm") ? 1 : 0); // and the nightingale's song
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
       rec.talked = today; G.note(`chat:${v.id}`); const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
@@ -5034,7 +5147,7 @@ class UIScene extends Phaser.Scene {
       if (v.loves.includes(id)) { d = 3; say = `"${n[0].toUpperCase() + n.slice(1)}! How did you know? Thank you, truly."`; }
       else if (v.likes.includes(id)) { d = 2; say = `"Oh, ${n}. I'll put this to good use."`; }
       else if (v.dislikes.includes(id)) { d = -2; say = `"...${n}. Well. Thank you, I suppose."`; }
-      if (d > 0) d += phoenix;
+      if (d > 0) d += phoenix + (G.songOn("charm") ? 1 : 0);
       this.changeRel(v.id, d);
       this.talkTo(v, `${say}\n\n(${d >= 0 ? `+${d}` : d} with ${v.name}.)`);
     } });
@@ -5042,6 +5155,11 @@ class UIScene extends Phaser.Scene {
     if (v.id === "myrrhine" && TIRESIAS[ts.step]?.title === "A greeting to the village" && ts.said === ts.step && this.tirGot("greet:myrrhine") < 1) opts.push({ label: "Give her Tiresias' greeting", fn: () => {
       G.note("greet:myrrhine"); this.changeRel(v.id, 1);
       this.talkTo(v, `"Tiresias? The Tiresias, the seer of Thebes? Under your olive tree?" She laughs, delighted. "He should be dead six times over. Tell him the priestess of the village greets him, and that the gods must be very fond of your farm."\n\n(+1 with ${v.name}. Go back and tell Tiresias.)`);
+    } });
+    const vs = VILLAGE_SONGS[v.id];
+    if (vs && !G.data.songs.includes(vs.song)) opts.push({ label: "Ask if they know any songs", fn: () => {
+      if (rec.rel < vs.rel) { this.talkTo(v, `"Songs? Maybe, once I know you better." (Friendship +${vs.rel} needed)`); return; }
+      this.talkTo(v, `${vs.line}\n\n${this.learnSong(melody(vs.song))}`);
     } });
     this.requestOptions(v, opts);
     this.rumorOptions(v, opts);
@@ -5068,10 +5186,100 @@ class UIScene extends Phaser.Scene {
         const spring = `"A herdsman told me there's a spring ${Math.abs(ax) + Math.abs(ay)} days' walk… well, ${Math.abs(ax) + Math.abs(ay)} stretches of country ${dir} of your place, with a nymph in it. Mind your manners there, and don't go charging up."`;
         this.talkTo(v, Math.random() < 0.4 ? spring : `"${pick(v.lines[rec.rel >= 4 ? "friend" : "new"])}"`);
       } });
+      if (G.data.silver >= 30 && !G.count("Aulos")) opts.push({ label: "Buy the aulos a troupe of players left behind (1 gold, 10 silver)", fn: () => { G.data.silver -= 30; give("Aulos", 1); this.talkTo(v, `"Take it, and welcome. They never came back for it, and nobody here can play the thing without sounding like a goose."`); } });
       const st = G.data.stranger;
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
     this.showTalk(v.name, sub, line, opts, v.id);
+  }
+
+  // ---------------------------------------------------------------- music
+  singPanel?: Phaser.GameObjects.Container; singGfx?: Phaser.GameObjects.Graphics; singText?: Phaser.GameObjects.Text; singCols?: Phaser.GameObjects.Text[]; singPend?: Phaser.GameObjects.Text; singKey = "";
+  /** The scene you are playing in, for a song's effects. */
+  play() { return this.scene.manager.getScenes(true).find((sc) => sc instanceof PlayScene) as PlayScene | undefined; }
+  singStart() { if (SING.on) return; SING.on = true; SING.buf = []; SOUND.duck(true); }
+  singStop() { if (!SING.on) return; SING.on = false; SOUND.duck(false); }
+  singNote(n: number) {
+    const inst = curInstrument(), now = performance.now();
+    SOUND.note(stepFreq(SING.mode, n, inst.root), inst.sound, inst.sound === "lyre" ? 1.4 : 0.62);
+    SING.lit[n] = now; this.play()?.noteFx(n);
+    if (SING.buf.length && now - SING.buf[SING.buf.length - 1].t > 2500) SING.buf = []; // a pause ends the phrase
+    SING.buf.push({ n, t: now, mode: SING.mode }); if (SING.buf.length > 12) SING.buf.shift();
+    this.checkMelodies();
+  }
+  /** Did those notes make a melody? One you know works its magic; one you heard is learned; one you stumble on is yours. */
+  checkMelodies() {
+    const seq = SING.buf.map((b) => b.n), now = performance.now();
+    const ends = (m: Melody) => m.mode === SING.mode && seq.length >= m.notes.length && m.notes.every((x, i) => seq[seq.length - m.notes.length + i] === x);
+    const p = SING.pending;
+    if (p && now < p.until) { const m = melody(p.id); if (ends(m)) { SING.pending = null; SING.buf = []; G.say(`You sing it back, note for note, and it is yours. ${this.learnSong(m)}`); return; } }
+    for (const m of MELODIES) if (G.data.songs.includes(m.id) && ends(m)) { SING.buf = []; this.performSong(m); return; }
+    for (const m of MELODIES) if (m.source === "taught" && !G.data.songs.includes(m.id) && ends(m)) { SING.buf = []; G.say(`You stumble onto an old tune by ear! ${this.learnSong(m)}`); return; }
+    if (now - SING.hintAt > 20000) for (const m of MELODIES) {
+      if (m.source !== "taught" || G.data.songs.includes(m.id) || m.mode !== SING.mode) continue;
+      for (let k = Math.min(seq.length, m.notes.length - 1); k >= 3; k--) if (m.notes.slice(0, k).every((x, i) => seq[seq.length - k + i] === x)) { SING.hintAt = now; G.say("Something in the tune stirs, as if it wants to go somewhere you almost remember..."); return; }
+    }
+  }
+  /** Learn a melody: say what it is, how it goes, and what it does. */
+  learnSong(m: Melody): string {
+    if (!G.data.songs.includes(m.id)) G.data.songs.push(m.id);
+    SOUND.sfx("find"); G.note("learnSong");
+    return `(You know ${songName(m)}: ${HARMONIAI[m.mode].name}, ${m.notes.join("-")}. ${m.desc} Hold V and play it.)`;
+  }
+  /** Perform a melody you know: an Art. A d12 against Ourania, helped by the instrument, the god's hour, the Muses and Apollo. */
+  performSong(m: Melody) {
+    const inst = curInstrument(), today = G.dayNumber;
+    const verb = inst.id === "voice" ? "sing" : `play ${inst.name}:`;
+    if (G.data.songUsed[m.id] === today) { G.say(`You ${verb} ${songName(m)}. Today it is only a tune: its power is spent until tomorrow.`); return; }
+    const b = labor(EFFORT.hand, 1, "Ourania"); if (b === null) return;
+    const skill = UIScene.songSkill(m, inst);
+    const roll = d12();
+    if (roll > skill) { G.say(`You ${verb} ${songName(m)}, but it doesn't quite come together (Ourania d12 ${roll}, needed 1–${skill}). Try again.${b}`); return; }
+    const strong = roll <= Math.ceil(skill / 2);
+    const out = this.play()?.songEffect(m.id, strong) ?? null;
+    if (out === null) { G.say(`You ${verb} ${songName(m)}, sweetly, but there is nothing here for it to work on.${b}`); return; }
+    G.data.songUsed[m.id] = today; G.note("song"); G.note(`song:${m.id}`);
+    G.say(`You ${verb} ${songName(m)}${strong ? ", and it rings true" : ""} (d12 ${roll}, needed 1–${skill}). ${out}${b}`);
+  }
+  static songSkill(m: Melody, inst = curInstrument()) {
+    return Math.max(1, (G.data.aretai.Ourania ?? 3) + inst.power + (inst.gods.includes(m.god) ? 1 : 0) + (G.patron?.god === m.god ? 2 : 0) + (G.songOn("muse") ? 2 : 0) + Math.max(0, G.boon("Apollo")) - m.hard);
+  }
+  /** While V is held: the harmonia, the eight steps, and the melodies you know. */
+  drawSing() {
+    if (!SING.on) { if (this.singPanel?.visible) this.singPanel.setVisible(false); return; }
+    const font = { fontFamily: FONT, color: "#f2e6c9" };
+    const x0 = W / 2 - 340, y0 = HOTBAR_Y - 196, w = 680, h = 186;
+    if (!this.singPanel) {
+      const bg = this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.98).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
+      this.singGfx = this.add.graphics();
+      this.singText = this.add.text(x0 + 14, y0 + 8, "", { ...font, fontSize: "13px", wordWrap: { width: w - 28 } });
+      this.singCols = [0, 1].map((c) => this.add.text(x0 + 14 + c * 336, y0 + 82, "", { ...font, fontSize: "11.5px", lineSpacing: 3, wordWrap: { width: 328 } }));
+      this.singPend = this.add.text(x0 + 360, y0 + 36, "", { ...font, fontSize: "12px", color: "#fbe39a", wordWrap: { width: w - 374 } });
+      const nums = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => this.add.text(x0 + 14 + (n - 1) * 40 + 15, y0 + 46, String(n), { ...font, fontSize: "14px" }).setOrigin(0.5));
+      this.singPanel = this.add.container(0, 0, [bg, this.singGfx, this.singText, ...this.singCols, this.singPend, ...nums]).setDepth(24);
+    }
+    this.singPanel.setVisible(true);
+    const g = this.singGfx!; g.clear();
+    const now = performance.now();
+    for (let n = 1; n <= 8; n++) {
+      const lit = Math.max(0, 1 - (now - (SING.lit[n] ?? 0)) / 600), bx = x0 + 14 + (n - 1) * 40, by = y0 + 32;
+      g.fillStyle(0x3a2c22).fillRect(bx, by, 30, 28);
+      if (lit > 0) g.fillStyle(0xf2c14e, lit).fillRect(bx, by, 30, 28);
+      g.lineStyle(1, 0x8a6a4a).strokeRect(bx, by, 30, 28);
+    }
+    const inst = curInstrument(), hm = HARMONIAI[SING.mode], p = SING.pending && now < SING.pending.until ? SING.pending : null;
+    const mine = MELODIES.filter((m) => G.data.songs.includes(m.id));
+    const key = `${SING.mode}|${inst.id}|${mine.length}|${p ? p.id + Math.ceil((p.until - now) / 5000) : ""}|${G.dayNumber}`;
+    if (key === this.singKey) return;
+    this.singKey = key;
+    const head = `♪ ${inst.id === "voice" ? "Humming" : `Playing ${inst.name}`} in the ${hm.name} harmonia (${hm.ethos}). Wheel: change harmonia.`;
+    const songLine = (m: Melody) => `${m.mode === SING.mode ? "▸ " : "    "}${m.name} · ${HARMONIAI[m.mode].name} ${m.notes.join("-")}${G.data.songUsed[m.id] === G.dayNumber ? " · spent today" : ` · d12 ≤ ${UIScene.songSkill(m, inst)}`}`;
+    this.singText!.setText(head);
+    this.singPend!.setText(p ? `Sing it back before it fades (${Math.ceil((p.until - now) / 1000)}s):\n${melody(p.id).name}, ${HARMONIAI[melody(p.id).mode].name} ${melody(p.id).notes.join("-")}` : "▸ marks melodies in this harmonia.\nd12 ≤ n: your chance to work its magic.");
+    const lines = mine.length ? mine.map(songLine) : ["You know no melodies yet. People teach them;", "nymphs and birds sing them, if you listen."];
+    const half = Math.ceil(lines.length / 2);
+    this.singCols![0].setText(lines.slice(0, Math.max(half, mine.length ? 6 : 2)).join("\n"));
+    this.singCols![1].setText(lines.slice(Math.max(half, mine.length ? 6 : 2)).join("\n"));
   }
 
   // ---------------------------------------------------------------- Tiresias
@@ -5126,6 +5334,9 @@ class UIScene extends Phaser.Scene {
       } });
       else opts.push({ label: `About what you asked: ${step.title.toLowerCase()}`, fn: () => this.talkTiresias(`${step.ask.replace("{where}", step.anchor ? this.tirWhere(step.anchor) : "")}\n\n(${step.how} So far: ${prog}.)`) });
     } else if (step && this.tirCanAsk()) opts.push({ label: "Ask if there's anything he needs", fn: () => this.tirAsk() });
+    if (!G.data.songs.includes("augury")) opts.push({ label: "Ask him to teach you a song", fn: () => {
+      this.talkTiresias(`"A song? I have only one worth the name. When Athena took my eyes she cleaned my ears, and I have understood the birds ever since. This is how they call each other to speak. Hum it after me." He whistles, thin and old and surprisingly true.\n\n${this.learnSong(melody("augury"))}`);
+    } });
     if (t.ev.satDay !== today) opts.push({ label: "Sit with him a while", fn: () => {
       t.ev.satDay = today; G.addFatigue(-6);
       const says = [
@@ -5372,6 +5583,7 @@ class UIScene extends Phaser.Scene {
         this.priestTalk2(god, who, `"Bring ${qty} ${ITEMS[item].name.toLowerCase()} for ${god}, to this shrine or any of the god's. It would be well received."\n\n(Your journal, J, keeps it. Reward: favor +2, up to +10, and Kleos.)`);
       } });
     }
+    if (name && god === "Hades" && !G.data.songs.includes("lament")) opts.push({ label: "Ask for the song of mourning", fn: () => this.priestTalk2(god, who, `"The lament. We sing it for the ones no one else sings for." The keeper sings it low, falling, note by note, to the ground.\n\n${this.learnSong(melody("lament"))}`) });
     if (held && ITEMS[held]?.kind !== "tool") opts.push({ label: `Offer the ${ITEMS[held].name.toLowerCase()} to ${god}`, fn: () => {
       if (chthonic && G.isDay) { this.priestTalk2(god, who, `"Not by daylight. The ones below take their offerings in the dark."`); return; }
       if (G.data.offered[god] === G.dayNumber) { this.priestTalk2(god, who, `${god} has had your offering today.`); return; }
@@ -5478,6 +5690,15 @@ class UIScene extends Phaser.Scene {
       const odds = `(Pneuma: d12 ${roll}, needed 1–${target})`;
       this.talkToStranger(st.god && roll <= target ? `Something shines behind their eyes, old as the hills and bright as noon. This is no ordinary traveler. ${odds}` : `A traveler, tired and dusty, as far as you can tell. ${odds}`);
     } });
+    if (kind.look === "bard") {
+      const can = MELODIES.filter((m) => m.source === "taught" && m.id !== "augury" && !G.data.songs.includes(m.id));
+      const sx = st as { taught?: boolean };
+      if (can.length && !sx.taught) opts.push({ label: "Ask the singer to teach you a song", fn: () => {
+        sx.taught = true; const m = can[Math.floor(Math.random() * can.length)];
+        this.talkToStranger(`"Gladly. Every road has a song, and here is one I learned on mine." The singer plays it through twice on the lyre, then hums it with you until you have it.\n\n${this.learnSong(m)}`);
+      } });
+      if (G.data.silver >= 60 && !G.count("Lyre")) opts.push({ label: "Buy the singer's spare lyre (3 gold)", fn: () => { G.data.silver -= 60; give("Lyre", 1); this.talkToStranger(`"Treat her kindly. She's older than you are." (A lyre: hold it, then hold V to play.)`); } });
+    }
     const held = G.selectedItem;
     if (!st.hosted) {
       if (held && GUEST_FOOD.includes(held.id)) opts.push({ label: `Welcome them, and offer your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => this.hostStranger(held.id) });

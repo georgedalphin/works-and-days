@@ -201,7 +201,7 @@ export const ITEMS: Record<string, ItemDef> = {
 export const MANGER_MAX = 6; // fodder, one per goat per night
 export const TROUGH_MAX = 6; // water, one per goat per night
 export const HIVE_DAYS = 4; // days for the bees to fill new comb
-export interface Goat { name: string; tint: number; affection: number; fed: boolean; pettedDay: number; milkedDay: number }
+export interface Goat { name: string; tint: number; affection: number; fed: boolean; pettedDay: number; milkedDay: number; songDay?: number }
 export const START_GOATS: Goat[] = [
   { name: "Kissa", tint: 0xffffff, affection: 2, fed: true, pettedDay: -1, milkedDay: -1 },
   { name: "Melaina", tint: 0x9a7a5c, affection: 1, fed: true, pettedDay: -1, milkedDay: -1 },

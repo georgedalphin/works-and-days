@@ -78,13 +78,13 @@ export function villageHouseholds(seed: number): Household[] {
 // ------------------------------------------------------------------ the folk of the wild huts
 export interface HutKind { id: string; title: string; patron: string; terrains: number[]; greeting: string; special: string; goods: [string, number][] }
 export const HUT_KINDS: HutKind[] = [
-  { id: "shepherd", title: "A shepherd family", patron: "Hermes", terrains: [1, 9, 10, 12], greeting: "\"A traveler! Sit, sit. There's milk, and the fire's lit.\"", special: "Share their milk", goods: [["Milk", 4], ["Hide", 6]] },
+  { id: "shepherd", title: "A shepherd family", patron: "Hermes", terrains: [1, 9, 10, 12], greeting: "\"A traveler! Sit, sit. There's milk, and the fire's lit.\"", special: "Share their milk", goods: [["Milk", 4], ["Hide", 6], ["Syrinx", 12]] },
   { id: "charcoal", title: "A charcoal-burner", patron: "Hephaestus", terrains: [2, 4], greeting: "\"Mind the clamp, it's smoldering. You're a long way from anywhere.\"", special: "Take a few torches", goods: [["Torch", 3], ["Wood", 2]] },
   { id: "rootcutter", title: "A root-cutter woman", patron: "Hecate", terrains: [1, 5, 9], greeting: "\"I cut roots by moonlight. Don't stare. Do you want to learn something or not?\"", special: "Learn a plant from her", goods: [["Thyme", 3], ["Mint", 4]] },
   { id: "hunter", title: "A hunter and his sons", patron: "Artemis", terrains: [2, 9, 4], greeting: "\"You walk loud. Every deer for a mile knows you're here.\"", special: "Ask for a lesson with the bow", goods: [["Arrow", 2], ["Meat", 5]] },
   { id: "hermit", title: "A hermit", patron: "Apollo", terrains: [8, 11, 12, 9], greeting: "\"Few come this far. Fewer come by chance. Sit.\"", special: "Ask what he sees in you", goods: [] },
   { id: "fisher", title: "A fisher family", patron: "Poseidon", terrains: [7, 5], greeting: "\"The sea gave little today, but there's enough for a guest.\"", special: "Share their catch", goods: [["SeaFennel", 3], ["Meat", 5]] },
-  { id: "goatherd", title: "A goatherd", patron: "Dionysus", terrains: [11, 4, 10], greeting: "\"The goats saw you before I did. They're cleverer than me.\"", special: "Share their milk", goods: [["Milk", 4], ["Hide", 6]] },
+  { id: "goatherd", title: "A goatherd", patron: "Dionysus", terrains: [11, 4, 10], greeting: "\"The goats saw you before I did. They're cleverer than me.\"", special: "Share their milk", goods: [["Milk", 4], ["Hide", 6], ["Syrinx", 12]] },
 ];
 
 // ------------------------------------------------------------------ people walking about

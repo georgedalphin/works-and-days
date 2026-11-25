@@ -106,6 +106,54 @@ export class SoundScape {
     o.connect(bp); o2.connect(bp); bp.connect(g); g.connect(this.danger!);
     for (const x of [o, o2, vib]) { x.start(when); x.stop(when + dur + 0.05); }
   }
+  /**
+   * One note of music the player makes, or hears: a hummed voice (two vowel resonances and a little vibrato),
+   * the lyre, the reed pipes, the aulos; a bird's whistle or a nymph's high singing.
+   */
+  note(freq: number, sound: "voice" | "lyre" | "syrinx" | "aulos" | "bird" | "nymph", dur = 0.62, vol = 1) {
+    this.start(); const ctx = this.ctx; if (!ctx || !this.fx) return;
+    const t = ctx.currentTime + 0.01, dest = this.fx;
+    if (sound === "lyre") { this.pluck(freq, t, 0.22 * vol, dest, 2.4); return; }
+    const g = ctx.createGain(); g.connect(dest);
+    const env = (a: number, peak: number, rel: number) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.setValueAtTime(peak, t + Math.max(a, dur - rel)); g.gain.linearRampToValueAtTime(0.0001, t + dur); };
+    const osc = (type: OscillatorType, f: number, to: AudioNode, lvl = 1) => { const o = ctx.createOscillator(), og = ctx.createGain(); o.type = type; o.frequency.value = f; og.gain.value = lvl; o.connect(og); og.connect(to); o.start(t); o.stop(t + dur + 0.05); return o; };
+    const vibrato = (os: OscillatorNode[], rate: number, depth: number) => { const v = ctx.createOscillator(), vg = ctx.createGain(); v.frequency.value = rate; vg.gain.value = depth; v.connect(vg); for (const o of os) vg.connect(o.frequency); v.start(t + 0.12); v.stop(t + dur + 0.05); };
+    if (sound === "voice" || sound === "nymph") {
+      // A closed-mouth hum: a soft buzz shaped by two formants ("mm", "oo"); a nymph sings higher, brighter, airier.
+      const nymph = sound === "nymph", mix = ctx.createGain(); mix.gain.value = 1;
+      const f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter();
+      f1.type = "bandpass"; f1.frequency.value = nymph ? 650 : 420; f1.Q.value = 3; f2.type = "bandpass"; f2.frequency.value = nymph ? 1500 : 950; f2.Q.value = 5;
+      lp.type = "lowpass"; lp.frequency.value = nymph ? 3500 : 1600;
+      mix.connect(f1); mix.connect(f2); const fo = ctx.createGain(); fo.gain.value = 2.2; f1.connect(fo); f2.connect(fo); fo.connect(lp); lp.connect(g);
+      const direct = ctx.createGain(); direct.gain.value = 0.35; mix.connect(direct); direct.connect(lp);
+      const os = [osc("triangle", freq, mix), osc("sawtooth", freq, mix, 0.18), osc("sine", freq * 2, mix, 0.12)];
+      vibrato(os, nymph ? 6 : 5, freq * (nymph ? 0.012 : 0.008));
+      env(nymph ? 0.12 : 0.07, (nymph ? 0.11 : 0.13) * vol, 0.22);
+      if (nymph) this.noiseHit(t, freq * 3, dur, 0.012 * vol, dest, "bandpass", 2);
+      return;
+    }
+    if (sound === "syrinx") {
+      // Reed pipes: a nearly pure tone with breath around it.
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = freq * 3; lp.connect(g);
+      const os = [osc("sine", freq, lp), osc("triangle", freq * 2, lp, 0.08)];
+      vibrato(os, 4.5, freq * 0.004);
+      env(0.05, 0.16 * vol, 0.18);
+      this.noiseHit(t, freq * 2, dur * 0.9, 0.035 * vol, dest, "bandpass", 3);
+      return;
+    }
+    if (sound === "aulos") {
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq * 2.4; bp.Q.value = 1.4; bp.connect(g);
+      const os = [osc("sawtooth", freq, bp), osc("square", freq * 1.003, bp, 0.8)];
+      vibrato(os, 5.2, freq * 0.01);
+      env(0.06, 0.1 * vol, 0.12);
+      return;
+    }
+    // A bird: a quick whistled glide around the note, an octave or two up.
+    const o = osc("sine", freq * 2, g); o.frequency.setValueAtTime(freq * 1.9, t); o.frequency.exponentialRampToValueAtTime(freq * 2.15, t + dur * 0.4); o.frequency.exponentialRampToValueAtTime(freq * 2, t + dur);
+    env(0.02, 0.08 * vol, dur * 0.5);
+  }
+  /** Quiet the background music while you sing or play. */
+  duck(on: boolean) { if (this.music && this.ctx) this.music.gain.setTargetAtTime(this.musicOn ? (on ? 0.25 : 0.9) : 0, this.ctx.currentTime, 0.2); }
   /** A frame drum (tympanon): a low thump that drops in pitch, with a slap of skin. */
   drum(when: number, vol = 0.32, low = true) {
     const ctx = this.ctx!, o = ctx.createOscillator(), g = ctx.createGain();

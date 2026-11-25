@@ -767,7 +767,7 @@ export function makeTextures(scene: Phaser.Scene) {
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
-  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS];
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos"];
 
 const CROP_COL: Record<string, [string, string]> = {
   Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
@@ -837,6 +837,15 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
 const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel" };
 
 function drawIcon(c: Ctx, o: number, id: string) {
+  if (id === "Lyre") { // a tortoise-shell sounding box, two antler horns, a crossbar and strings
+    px(c, o + 4, 9, 8, 5, "#8a6a3a"); px(c, o + 5, 10, 6, 3, "#a8844a"); px(c, o + 6, 11, 1, 1, "#5a4020"); px(c, o + 9, 11, 1, 1, "#5a4020");
+    px(c, o + 4, 3, 1, 7, "#e8dcc0"); px(c, o + 11, 3, 1, 7, "#e8dcc0"); px(c, o + 3, 2, 2, 1, "#e8dcc0"); px(c, o + 11, 2, 2, 1, "#e8dcc0");
+    px(c, o + 4, 3, 8, 1, "#6b4a2b"); for (const x of [6, 8, 10]) px(c, o + x, 4, 1, 6, "#f2ecd8"); return;
+  }
+  if (id === "Aulos") { // two pipes, splayed
+    for (let i = 0; i < 10; i++) { px(c, o + 7 - Math.floor(i / 3), 3 + i, 1, 1, "#b08a52"); px(c, o + 8 + Math.floor(i / 3), 3 + i, 1, 1, "#b08a52"); }
+    px(c, o + 7, 2, 2, 2, "#5a4020"); for (const y of [6, 9]) { px(c, o + 6, y, 1, 1, "#3a2810"); px(c, o + 9, y, 1, 1, "#3a2810"); } return;
+  }
   if (id.startsWith("meal_") || id.startsWith("dish_")) {
     // A clay bowl, its food colored by the Aretai (plain dishes) or the god (a god's dish), steam rising.
     const GOD_COL: Record<string, string> = { Hades: "#5a4a6a", Hecate: "#6a4a8a" };
