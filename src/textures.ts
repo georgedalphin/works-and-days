@@ -122,9 +122,47 @@ function canvasTex(scene: Phaser.Scene, key: string, w: number, h: number, draw:
   return tex;
 }
 
+/**
+ * Soft edges for ground patches. For every tile, 64 frames in a row of the "tilesSoft" sheet:
+ *  0–31: the tile eroded along the sides in a 4-bit mask (N 1, E 2, S 4, W 8), two variants of 16;
+ * 32–63: a ragged fringe of the tile that spills a little way over the sides in the mask, two variants.
+ * Laid over the ground, a patch's square edges become wobbly and blend into what surrounds it.
+ */
+export const SOFT_COLS = 64;
+function makeSoftTiles(scene: Phaser.Scene, src: HTMLCanvasElement) {
+  const sx = src.getContext("2d")!.getImageData(0, 0, src.width, src.height);
+  // A smooth ragged depth for each side, position and variant: 1–4 px in, 0–3 px out.
+  const wob = (v: number, side: number, i: number, lo: number, amp: number) =>
+    lo + Math.round(amp * (0.5 + 0.32 * Math.sin(i * 0.85 + side * 2.1 + v * 4.3) + 0.18 * Math.sin(i * 2.3 + side * 5.7 + v)));
+  canvasTex(scene, "tilesSoft", SOFT_COLS * TILE, COUNT * TILE, (c) => {
+    const out = c.createImageData(SOFT_COLS * TILE, COUNT * TILE);
+    for (let t = 0; t < COUNT; t++) for (let f = 0; f < SOFT_COLS; f++) {
+      const fringe = f >= 32, v = (f >> 4) & 1, m = f & 15;
+      for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {
+        let keep: boolean;
+        if (!fringe) {
+          keep = !((m & 1 && y < wob(v, 0, x, 1, 3)) || (m & 4 && y > 15 - wob(v, 2, x, 1, 3)) || (m & 8 && x < wob(v, 3, y, 1, 3)) || (m & 2 && x > 15 - wob(v, 1, y, 1, 3)));
+          // Round the corners where two eroded sides meet.
+          if (keep && m & 1 && m & 8 && x + y < 6) keep = false;
+          if (keep && m & 1 && m & 2 && 15 - x + y < 6) keep = false;
+          if (keep && m & 4 && m & 8 && x + 15 - y < 6) keep = false;
+          if (keep && m & 4 && m & 2 && 30 - x - y < 6) keep = false;
+        } else {
+          keep = !!((m & 1 && y < wob(v, 0, x, 0, 5)) || (m & 4 && y > 15 - wob(v, 2, x, 0, 5)) || (m & 8 && x < wob(v, 3, y, 0, 5)) || (m & 2 && x > 15 - wob(v, 1, y, 0, 5)));
+        }
+        if (!keep) continue;
+        const si = (y * src.width + t * TILE + x) * 4, di = ((t * TILE + y) * SOFT_COLS * TILE + f * TILE + x) * 4;
+        out.data[di] = sx.data[si]; out.data[di + 1] = sx.data[si + 1]; out.data[di + 2] = sx.data[si + 2]; out.data[di + 3] = sx.data[si + 3];
+      }
+    }
+    c.putImageData(out, 0, 0);
+  });
+}
+
 export function makeTextures(scene: Phaser.Scene) {
   const tiles = canvasTex(scene, "tiles", TILE * COUNT, TILE, (c) => { for (let i = 0; i < COUNT; i++) drawTile(c, i); });
   for (let i = 0; i < COUNT; i++) tiles.add(`t${i}`, 0, i * TILE, 0, TILE, TILE); // single tiles, for break effects
+  makeSoftTiles(scene, tiles.getSourceImage() as HTMLCanvasElement);
 
   // Player: four facings in one strip (down, left, right, up), 16x16 each.
   makePlayerTexture(scene, { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" });
@@ -209,6 +247,19 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 4, 3, 12, 7, "#d8c8a4"); for (let y = 4; y < 10; y += 2) px(c, 4, y, 12, 1, "#c4703f");
     px(c, 3, 12, 14, 1, "#8a5f35");
     for (let x = 5; x <= 15; x += 2) px(c, x - 1, 18, 2, 3, "#a8653a");
+  });
+  canvasTex(scene, "pl_Press", 28, 22, (c) => {
+    px(c, 1, 20, 26, 2, "rgba(0,0,0,0.22)");
+    px(c, 3, 13, 22, 7, "#a49e91"); px(c, 3, 13, 22, 1, "#c4bdae"); px(c, 6, 15, 16, 3, "#7f7a70"); px(c, 24, 17, 3, 2, "#7f7a70");
+    px(c, 4, 2, 3, 12, "#6b4a2b"); px(c, 1, 5, 26, 3, "#8a5f35"); px(c, 1, 5, 26, 1, "#a87a48"); px(c, 22, 7, 2, 8, "#5e4026");
+    px(c, 10, 9, 8, 5, "#5e4026"); px(c, 11, 10, 6, 3, "#2a1d14"); px(c, 25, 8, 2, 6, "#a49e91");
+  });
+  canvasTex(scene, "pl_Forge", 22, 22, (c) => {
+    px(c, 1, 20, 20, 2, "rgba(0,0,0,0.25)");
+    px(c, 2, 9, 14, 11, "#a8653a"); px(c, 2, 9, 14, 2, "#c4703f"); px(c, 4, 11, 10, 4, "#2a1d14"); px(c, 5, 12, 8, 3, "#d9732e"); px(c, 7, 12, 4, 2, "#f2c14e");
+    px(c, 7, 1, 4, 8, "#8a8780"); px(c, 6, 0, 6, 2, "#6b6a64");
+    px(c, 15, 13, 6, 5, "#8a5f35"); px(c, 16, 14, 4, 3, "#a47a52"); px(c, 14, 15, 2, 1, "#6b4a2b");
+    px(c, 3, 17, 4, 3, "#5e5a54"); px(c, 2, 16, 6, 1, "#7f7a70");
   });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
@@ -601,7 +652,7 @@ export function makeTextures(scene: Phaser.Scene) {
 }
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId)];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -709,6 +760,11 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;
     case "HeliadTear": px(c, o + 6, 3, 4, 2, "#f0b040"); px(c, o + 5, 5, 6, 6, "#f0a830"); px(c, o + 6, 11, 4, 1, "#d88820"); px(c, o + 7, 6, 2, 3, "#fff0a0"); px(c, o + 7, 2, 2, 1, "#f8d070"); break;
+    case "Press": px(c, o + 1, 10, 14, 5, "#a49e91"); px(c, o + 3, 11, 10, 2, "#7f7a70"); px(c, o + 2, 2, 2, 9, "#6b4a2b"); px(c, o, 4, 16, 2, "#8a5f35"); px(c, o + 6, 6, 4, 4, "#5e4026"); break;
+    case "Forge": px(c, o + 2, 7, 10, 8, "#a8653a"); px(c, o + 4, 9, 6, 3, "#d9732e"); px(c, o + 6, 9, 2, 2, "#f2c14e"); px(c, o + 5, 1, 3, 6, "#8a8780"); px(c, o + 11, 10, 4, 4, "#a47a52"); break;
+    case "Olives": for (const [x, y] of [[4, 6], [8, 4], [10, 8], [6, 10], [11, 12]]) { px(c, o + x, y, 3, 3, "#3a3442"); px(c, o + x, y, 1, 1, "#7a7488"); } px(c, o + 6, 2, 5, 1, "#6f8a4a"); px(c, o + 3, 3, 4, 2, "#7a9a52"); break;
+    case "OliveOil": px(c, o + 6, 1, 4, 2, "#8a5f35"); px(c, o + 5, 3, 6, 2, "#c4703f"); px(c, o + 4, 5, 8, 8, "#c4703f"); px(c, o + 5, 7, 6, 4, "#b8b04a"); px(c, o + 6, 13, 4, 2, "#a8653a"); px(c, o + 6, 8, 1, 1, "#e8e08a"); break;
+    case "Parcel": px(c, o + 2, 5, 12, 9, "#c9b48f"); px(c, o + 2, 5, 12, 2, "#e0d0a8"); px(c, o + 7, 5, 2, 9, "#8a5a2c"); px(c, o + 2, 9, 12, 1, "#8a5a2c"); px(c, o + 6, 3, 4, 2, "#8a5a2c"); break;
     case "spear": for (let i = 0; i < 11; i++) px(c, o + 2 + i, 13 - i, 1, 1, "#9c7445"); px(c, o + 12, 1, 3, 3, "#c98a55"); px(c, o + 14, 0, 2, 2, "#e8c48a"); px(c, o + 1, 13, 2, 2, "#c98a55"); break;
     case "sword": for (let i = 0; i < 8; i++) px(c, o + 6 + i, 9 - i, 2, 2, "#d8c890"); px(c, o + 7, 6, 1, 1, "#f4ecc8"); px(c, o + 3, 9, 5, 2, "#8a5a2c"); px(c, o + 5, 7, 2, 6, "#8a5a2c"); px(c, o + 2, 12, 3, 3, "#5e4026"); px(c, o + 1, 14, 2, 2, "#c98a55"); break;
     case "Workbench": px(c, o + 1, 5, 14, 3, "#9c7445"); px(c, o + 1, 5, 14, 1, "#b88d58"); px(c, o + 2, 8, 2, 6, "#5e4026"); px(c, o + 12, 8, 2, 6, "#5e4026"); px(c, o + 4, 3, 4, 2, "#8a8780"); break;

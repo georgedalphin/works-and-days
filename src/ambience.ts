@@ -227,6 +227,28 @@ export function varyLayers(G: GameState, ground: Phaser.Tilemaps.TilemapLayer | 
   jitterLayer(objects);
 }
 
+export const SOFT_GID = 4000;
+/**
+ * Soften the square edges of a map's ground patches (patch over base): patch tiles that border the base are
+ * eroded raggedly and laid over base ground, and base tiles beside a patch get a ragged fringe of it.
+ * Returns the overlay layer (create it right after the ground layer so it draws above it, below details).
+ */
+export function softenPatches(map: Phaser.Tilemaps.Tilemap, _groundLayer: Phaser.Tilemaps.TilemapLayer, ground: number[][], patch: number, base: number, tint: number): Phaser.Tilemaps.TilemapLayer | null {
+  const ts = map.getTileset("tilesSoft") ?? map.addTilesetImage("tilesSoft", "tilesSoft", 16, 16, 0, 0, SOFT_GID);
+  if (!ts) return null;
+  const soft = map.createBlankLayer("soft", ts)!;
+  const H = ground.length, W = ground[0].length;
+  const at = (x: number, y: number) => (x < 0 || y < 0 || x >= W || y >= H ? -1 : ground[y][x]);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    // Base ground beside a patch gets a ragged spill of the patch along the touching sides.
+    if (ground[y][x] !== base) continue;
+    const m = (at(x, y - 1) === patch ? 1 : 0) | (at(x + 1, y) === patch ? 2 : 0) | (at(x, y + 1) === patch ? 4 : 0) | (at(x - 1, y) === patch ? 8 : 0);
+    if (!m) continue;
+    soft.putTileAt(SOFT_GID + patch * 64 + 32 + (hash(x, y) & 1) * 16 + m, x, y).tint = tint;
+  }
+  return soft;
+}
+
 /** Scatter ground details over the open tiles of a map, the same every visit. */
 export function scatterDetails(terrain: number, seed: number, objs: number[][], blocked: (x: number, y: number) => boolean, density = 0.07): number[][] {
   const list = DETAILS[terrain] ?? DETAILS[3];

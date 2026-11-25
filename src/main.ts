@@ -1,11 +1,12 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot } from "./state";
 import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
-import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf } from "./ambience";
+import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
 import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
 import { MOROS_DREAMS } from "./omens";
+import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
@@ -426,7 +427,7 @@ abstract class PlayScene extends Phaser.Scene {
       this.physics.add.collider(this.player, body); o.body = body;
     }
     const sc = this;
-    const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom" };
+    const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom", Press: "press", Forge: "forge" };
     if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => ui(sc).openCraft(station[p.id]) };
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
     else if (p.id === "Snare") o.t = { x: o.t.x, y: o.t.y, get label() { return p.caught ? "Something is in the snare" : "Check the snare"; }, act: () => sc.checkSnare(o) };
@@ -1626,6 +1627,7 @@ class FarmScene extends PlayScene {
   vat!: Phaser.GameObjects.Image;
   youngVines = new Map<string, Phaser.GameObjects.Image>();
 
+  soft: Phaser.Tilemaps.TilemapLayer | null = null;
   constructor() { super("Farm"); }
   /** Tiles under the homestead's fixed structures, where nothing can be set down. */
   reserved = new Set<string>();
@@ -1691,9 +1693,10 @@ class FarmScene extends PlayScene {
     this.map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: MW, height: MH });
     const ts = this.map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = this.map.createBlankLayer("ground", ts)!;
+    this.groundLayer.putTilesAt(ground, 0, 0);
+    this.soft = softenPatches(this.map, this.groundLayer, ground, T.GRASS2, T.GRASS, seasonGroundTint(G));
     this.details = this.map.createBlankLayer("details", ts)!;
     this.objects = this.map.createBlankLayer("objects", ts)!;
-    this.groundLayer.putTilesAt(ground, 0, 0);
     this.details.putTilesAt(scatterDetails(3, 0xfa53, objs, (x, y) => ground[y][x] !== this.baseGround[y][x] || ground[y][x] === T.PATH || inPen(x, y), 0.06), 0, 0);
     jitterLayer(this.details, true);
     this.objects.putTilesAt(objs, 0, 0);
@@ -1755,8 +1758,8 @@ class FarmScene extends PlayScene {
       { x: pithos.x, y: pithos.y + 6, label: "Trade with the miller's cart", act: () => ui(this).openMarket() },
       { x: this.vat.x, y: this.vat.y - 2, get label() { return farm.vatLabel(); }, act: () => this.useVat() },
       { x: this.vine.x, y: this.vine.y + 4, get label() { return G.data.month === 1 && G.data.vineYear !== G.data.year ? "Pick grapes" : "Look at the vine"; }, act: () => this.tendVine() },
-      { ...at(18, 9), label: "Look at the olive tree", act: () => G.say("An old olive tree, Athena's gift. Its fruit ripens in late autumn.") },
-      { ...at(19, 12), label: "Look at the olive tree", act: () => G.say("An old olive tree, gnarled and patient.") },
+      { ...at(18, 9), get label() { return farm.olivesReady("18,9") ? "Pick olives" : "Look at the olive tree"; }, act: () => this.pickOlives("18,9", "An old olive tree, Athena's gift. Its fruit ripens in autumn.") },
+      { ...at(19, 12), get label() { return farm.olivesReady("19,12") ? "Pick olives" : "Look at the olive tree"; }, act: () => this.pickOlives("19,12", "An old olive tree, gnarled and patient. Its fruit ripens in autumn.") },
       ...signs.map((s) => ({ ...at(s.tx, s.ty), label: "Read the sign", act: () => G.say(s.text) })),
       { x: this.manger.x, y: this.manger.y + 4, get label() { return `Fill the manger with fodder (${G.data.manger}/${MANGER_MAX})`; }, act: () => this.fillManger() },
       { x: this.trough.x, y: this.trough.y + 4, get label() { return `Fill the trough from your jar (${G.data.trough}/${TROUGH_MAX})`; }, act: () => this.fillTrough() },
@@ -1783,6 +1786,15 @@ class FarmScene extends PlayScene {
     this.spawnAnimals(r, objs);
     this.drawPlaced();
     this.cameras.main.fadeIn(250);
+  }
+
+  /** The old olive trees bear once a year, in autumn. */
+  olivesReady(k: string) { return G.month.season === "Autumn" && G.data.olives[k] !== G.data.year; }
+  pickOlives(k: string, look: string) {
+    if (!this.olivesReady(k)) { G.say(G.data.olives[k] === G.data.year ? "You've stripped this tree for the year." : look); return; }
+    const b = labor(EFFORT.gather * 2, 1, "Oikos"); if (b === null) return;
+    G.data.olives[k] = G.data.year;
+    G.say(`You beat the branches with a stick and gather the fallen olives: ${give("Olives", 6 + mastery("olive", 2))}.${b} A press would turn them to oil.`);
   }
 
   /** Can a creature stand on this spot? */
@@ -2104,7 +2116,7 @@ class FarmScene extends PlayScene {
 
   leaveFor(wx: number, wy: number, entry: "N" | "W") {
     if (this.leaving) return;
-    G.data.wx = wx; G.data.wy = wy; G.data.entry = entry; G.data.lastTerrain = HOME_TERRAIN; G.data.scene = "Wild";
+    G.data.wx = wx; G.data.wy = wy; G.data.entry = entry; G.data.entryAt = null; G.data.lastTerrain = HOME_TERRAIN; G.data.scene = "Wild";
     this.goTo("Wild");
   }
 
@@ -2122,6 +2134,7 @@ class FarmScene extends PlayScene {
     const k = `${x},${y}`;
     if (state) G.data.ground[k] = state; else delete G.data.ground[k];
     this.groundLayer.putTileAt(state === "wet" ? T.WET : state === "tilled" ? T.TILLED : this.baseGround[y][x], x, y).tint = seasonGroundTint(G);
+    this.soft?.removeTileAt(x, y); // worked soil shows through any soft grass edge
   }
 
   clearObject(x: number, y: number) {
@@ -2285,6 +2298,29 @@ const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
 const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 }, CAVE_AT = { x: 9, y: 7 };
 
 /** A stable seed for each screen of this save's world. */
+/**
+ * The gaps in the border between two neighbouring screens. Both screens ask the same question of the same
+ * edge, so their gaps always line up. "H" is the edge below screen (x, y); "V" the edge to its right.
+ * Returns tile positions along the edge (x for H, y for V): one to three gaps, anywhere along it.
+ */
+function edgeGates(kind: "H" | "V", x: number, y: number): number[] {
+  if (kind === "V" && x === 0 && y === 0) return [15]; // the farm's east gate
+  if (kind === "H" && x === 0 && y === 1) return [20]; // the village's south road
+  const len = kind === "H" ? WW : WH;
+  const r = rng((Math.imul(G.data.seed ^ (kind === "H" ? 0x48a1 : 0x56c3), 31) ^ Math.imul(x, 73856093) ^ Math.imul(y, 19349663)) >>> 0);
+  const roll = r(), n = roll < 0.5 ? 1 : roll < 0.88 ? 2 : 3;
+  const gates: number[] = kind === "H" && x === 0 && y >= 1 ? [20] : []; // the road south keeps its line
+  for (let tries = 0; tries < 40 && gates.length < n; tries++) {
+    const g = 3 + Math.floor(r() * (len - 6));
+    if (gates.every((o) => Math.abs(o - g) >= 7)) gates.push(g);
+  }
+  return gates.sort((a, b) => a - b);
+}
+/** The gaps on one side of a wild screen. */
+function sideGates(wx: number, wy: number, side: Side): number[] {
+  return side === "N" ? edgeGates("H", wx, wy - 1) : side === "S" ? edgeGates("H", wx, wy) : side === "W" ? edgeGates("V", wx - 1, wy) : edgeGates("V", wx, wy);
+}
+
 function screenSeed(wx: number, wy: number) {
   let h = (G.data.seed ^ Math.imul(wx, 73856093) ^ Math.imul(wy, 19349663)) >>> 0;
   h = Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 0;
@@ -2303,6 +2339,7 @@ class WildScene extends PlayScene {
   rec!: ScreenRec;
   objects!: Phaser.Tilemaps.TilemapLayer;
   open: Record<Side, boolean> = { N: true, S: true, E: true, W: true };
+  gates: Record<Side, number[]> = { N: [], S: [], E: [], W: [] };
 
   constructor() { super("Wild"); }
   placeKey() { return `w:${this.key}`; }
@@ -2330,7 +2367,10 @@ class WildScene extends PlayScene {
     let firstVisit = false;
     if (!G.data.screens[this.key]) {
       firstVisit = true;
-      const roll = rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
+      // A land someone told you of is what they said it was.
+      const rumor = G.data.rumors.find((x) => x.key === this.key && !x.found);
+      const roll = rumor ? { terrain: rumor.terrain, special: false } : rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
+      if (rumor) { rumor.found = true; this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
       const p = profile(roll.terrain);
       G.data.screens[this.key] = { terrain: roll.terrain, special: roll.special, feature: p.features[Math.floor(r() * p.features.length)], cleared: [] };
     }
@@ -2378,22 +2418,7 @@ class WildScene extends PlayScene {
         }
       }
     }
-    // Gateways on each open side, with a winding clear way from each to the middle.
     const cx = 20, cy = 15;
-    const carve = (x: number, y: number) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = -1; };
-    const starts: Record<Side, [number, number]> = { N: [cx, 0], S: [cx, WH - 1], W: [0, cy], E: [WW - 1, cy] };
-    for (const sd of ["N", "S", "E", "W"] as Side[]) {
-      if (!this.open[sd]) continue;
-      const [sx0, sy0] = starts[sd];
-      for (let i = -1; i <= 1; i++) { if (sd === "N" || sd === "S") objs[sy0][sx0 + i] = -1; else objs[sy0 + i][sx0] = -1; }
-      let x = sx0, y = sy0;
-      for (let step = 0; step < 60 && (Math.abs(x - cx) > 1 || Math.abs(y - cy) > 1); step++) {
-        carve(x - 1, y - 1);
-        if (gen() < 0.7) { x += Math.sign(cx - x); y += Math.sign(cy - y); }
-        else if (sd === "N" || sd === "S") x += gen() < 0.5 ? -1 : 1; else y += gen() < 0.5 ? -1 : 1;
-        x = Math.max(1, Math.min(WW - 2, x)); y = Math.max(1, Math.min(WH - 2, y));
-      }
-    }
     // The village road runs south from the farm.
     if (wx === 0 && wy >= 2) for (let y = 0; y < WH; y++) { ground[y][cx] = T.PATH; for (let x = cx - 1; x <= cx + 1; x++) if (y > 0 && y < WH - 1 || x === cx || objs[y][x] !== T.EDGE) objs[y][x] = -1; objs[y][cx] = -1; }
     // The screen's feature, somewhere away from the middle.
@@ -2401,6 +2426,26 @@ class WildScene extends PlayScene {
     const fy = 4 + Math.floor(gen() * (WH - 8));
     this.stampFeature(objs, fx, fy, this.rec.feature, gen);
     for (const k of this.rec.cleared) { const [x, y] = k.split(",").map(Number); if (objs[y] && objs[y][x] !== T.EDGE) objs[y][x] = -1; }
+    // Gaps in the border on each open side (matching the neighbour's), each with a winding clear way to the middle.
+    this.gates = { N: [], S: [], E: [], W: [] };
+    const carve = (x: number, y: number) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = -1; };
+    const ggen = rng(screenSeed(wx, wy) ^ 0x6a7e);
+    for (const sd of ["N", "S", "E", "W"] as Side[]) {
+      if (!this.open[sd]) continue;
+      for (const g of (this.gates[sd] = sideGates(wx, wy, sd))) {
+        const [sx0, sy0] = sd === "N" ? [g, 0] : sd === "S" ? [g, WH - 1] : sd === "W" ? [0, g] : [WW - 1, g];
+        for (let i = -1; i <= 1; i++) { if (sd === "N" || sd === "S") objs[sy0][sx0 + i] = -1; else objs[sy0 + i][sx0] = -1; }
+        // Off-centre gaps wander in toward the middle; a path meets the others there.
+        let x = sx0, y = sy0;
+        const tx = cx + Math.round((ggen() - 0.5) * 6), ty = cy + Math.round((ggen() - 0.5) * 4);
+        for (let step = 0; step < 90 && (Math.abs(x - tx) > 1 || Math.abs(y - ty) > 1); step++) {
+          carve(x - 1, y - 1);
+          if (ggen() < 0.7) { x += Math.sign(tx - x); y += Math.sign(ty - y); }
+          else if (sd === "N" || sd === "S") x += ggen() < 0.5 ? -1 : 1; else y += ggen() < 0.5 ? -1 : 1;
+          x = Math.max(1, Math.min(WW - 2, x)); y = Math.max(1, Math.min(WH - 2, y));
+        }
+      }
+    }
     const ring0 = (cx0: number, cy0: number, rad: number, fn: (x: number, y: number) => void) => {
       for (let y = cy0 - rad; y <= cy0 + rad; y++) for (let x = cx0 - rad; x <= cx0 + rad; x++) if (x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && Math.hypot(x - cx0, y - cy0) <= rad + 0.3) fn(x, y);
     };
@@ -2423,6 +2468,8 @@ class WildScene extends PlayScene {
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: WW, height: WH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     this.groundLayer = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    this.groundData = ground;
+    if (p.ground2 !== p.ground) softenPatches(map, this.groundLayer, ground, p.ground2, p.ground, seasonGroundTint(G));
     jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
@@ -2436,10 +2483,16 @@ class WildScene extends PlayScene {
     this.setupInput();
     let sx = G.data.px, sy = G.data.py;
     const e = G.data.entry;
-    if (e === "W") { sx = 1.5 * TILE; sy = cy * TILE + 8; }
-    if (e === "E") { sx = (WW - 1.5) * TILE; sy = cy * TILE + 8; }
-    if (e === "N") { sx = cx * TILE + 8; sy = 1.5 * TILE; }
-    if (e === "S") { sx = cx * TILE + 8; sy = (WH - 1.5) * TILE; }
+    // Walk in at the gap you came through (or the gap nearest the middle).
+    const at = (sd: Side, mid: number) => {
+      const gs = this.gates[sd]; const want = G.data.entryAt ?? mid;
+      return gs.length ? gs.reduce((b, g) => (Math.abs(g - want) < Math.abs(b - want) ? g : b), gs[0]) : mid;
+    };
+    if (e === "W") { sx = 1.5 * TILE; sy = at("W", cy) * TILE + 8; }
+    if (e === "E") { sx = (WW - 1.5) * TILE; sy = at("E", cy) * TILE + 8; }
+    if (e === "N") { sx = at("N", cx) * TILE + 8; sy = 1.5 * TILE; }
+    if (e === "S") { sx = at("S", cx) * TILE + 8; sy = (WH - 1.5) * TILE; }
+    G.data.entryAt = null;
     if (e === "C") { sx = CAVE_AT.x * TILE + 8; sy = (CAVE_AT.y + 1.6) * TILE; }
     G.data.entry = ""; G.data.scene = "Wild";
     this.makePlayer(sx, sy);
@@ -2788,11 +2841,14 @@ class WildScene extends PlayScene {
 
   // ---------------------------------------------------------------- the lands themselves
   groundLayer?: Phaser.Tilemaps.TilemapLayer;
+  /** What each square of ground really is (soft edges change only how it looks). */
+  groundData?: number[][];
   water: [number, number][] = [];
   heatSaid = false;
   /** Mud drags at your feet; sand slows you a little. */
   groundSpeed() {
-    const t = this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
+    const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE);
+    const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
     return t === T.MUD ? 0.7 : t === T.SAND ? 0.88 : 1;
   }
   /** The desert sun wears you down by day, except in the shade by water. */
@@ -3116,6 +3172,7 @@ class WildScene extends PlayScene {
     if (this.leaving) return;
     const nx = G.data.wx + dx, ny = G.data.wy + dy;
     G.data.lastTerrain = this.rec.terrain; G.data.entry = entry;
+    G.data.entryAt = dx !== 0 ? Math.floor(this.player.y / TILE) : Math.floor(this.player.x / TILE);
     if (nx === 0 && ny === 0) { G.data.scene = "Farm"; this.goTo("Farm"); return; }
     if (nx === 0 && ny === 1) { G.data.scene = "Village"; this.goTo("Village"); return; }
     G.data.wx = nx; G.data.wy = ny; G.data.scene = "Wild";
@@ -3409,6 +3466,7 @@ class VillageScene extends PlayScene {
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: VW, height: VH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     const vGround = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    softenPatches(map, vGround, ground, T.GRASS2, T.GRASS, seasonGroundTint(G));
     jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(3, 0x7111, objs, (x, y) => ground[y][x] === T.PATH, 0.05), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
@@ -3584,7 +3642,7 @@ class VillageScene extends PlayScene {
   leaveVillage(to: "Farm" | "Wild") {
     if (this.leaving) return;
     if (to === "Farm") { G.data.entry = "S"; G.data.scene = "Farm"; this.goTo("Farm"); return; }
-    G.data.wx = 0; G.data.wy = 2; G.data.entry = "N"; G.data.lastTerrain = HOME_TERRAIN; G.data.scene = "Wild";
+    G.data.wx = 0; G.data.wy = 2; G.data.entry = "N"; G.data.entryAt = null; G.data.lastTerrain = HOME_TERRAIN; G.data.scene = "Wild";
     this.goTo("Wild");
   }
 
@@ -3700,6 +3758,7 @@ class UIScene extends Phaser.Scene {
       if (this.talkPanel && e.key >= "1" && e.key <= "9") { const o = this.talkOpts[Number(e.key) - 1]; if (o) o.fn(); return; }
       if (e.key >= "0" && e.key <= "9" && !this.modal) G.data.selected = (Number(e.key) + 9) % 10;
       if ((e.key === "i" || e.key === "I" || e.key === "Tab") && !this.market && !this.loreBook) this.toggleInventory();
+      if ((e.key === "j" || e.key === "J") && !this.market && !this.inv && !this.craft && !this.chestPanel && !this.loreBook) { if (this.talkPanel) this.closeTalk(); else this.openJournal(); }
       if ((e.key === "k" || e.key === "K") && !this.market && !this.inv && !this.craft) { if (this.loreBook) this.closeLore(); else this.openLore(); }
       if (e.key === "m" || e.key === "M") G.say(SOUND.toggleMute() ? "Sound off (M to turn it back on)." : "Sound on.");
       if (e.key === "n" || e.key === "N") G.say(SOUND.toggleMusic() ? "Music on." : "Music off (N to bring it back). The world still sounds.");
@@ -3723,7 +3782,7 @@ class UIScene extends Phaser.Scene {
       "Aim: point the mouse at anything within two paces. Mouse outside the window: you act on what you face.",
       "Left click or Space: work with what you hold. Right click or E: interact. Q: study.",
       "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap). C: crafting.",
-      "K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help.",
+      "J: journal. K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help.",
       "",
       "PACING",
       "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, rites and running Air. Skill makes each act cheaper, and so does the hour of the matching god. An empty bar refills in about 12 seconds (slower when weary): a few blows, then a breath.",
@@ -3740,10 +3799,10 @@ class UIScene extends Phaser.Scene {
       "Hoe tills, the jar waters (refill at the well), the sickle cuts brush, the axe fells, the mattock breaks stone.",
       "Sow on tilled soil and water daily; crops watered every night or sown in their god's hour grow finer (★). Sell at the pithos.",
       "Goats: pet and milk them (E), keep manger and trough full. Honey every few days. Wine: mend the vat, tread grapes, wait 6 days.",
-      "Crafting: handwork anywhere (C). Build a workbench, hold it and click to set it down, then E at it for chests, fences, a kiln and a loom.",
+      "Crafting: handwork anywhere (C). Build a workbench, hold it and click to set it down, then E at it for chests, fences, a kiln, a loom, a press (oil, must) and a forge (bronze, tool work).",
       "",
       "THE WILD",
-      "East lies the wild; each place stays as you left it. Forage shows its fruit once you know the plant (Q).",
+      "East lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "",
@@ -3751,6 +3810,7 @@ class UIScene extends Phaser.Scene {
       "Each of the day's twelve hours belongs to a god of the Cosmic Wheel. Pray and make offerings at altars (E).",
       "Hesiod's signs mark the year: study one as it happens and it helps for 4 days. Birds on your right are fair omens, on your left a warning. Watch for glints: rare finds.",
       "Villagers: talk daily and give gifts (hold the item, E). Theron trades; Lykos upgrades tools and forges swords.",
+      "Ask villagers if they need anything, and for rumors of lands they've heard of. J: your journal of promises and rumors.",
     ];
     const hbg = this.add.rectangle(W / 2, H / 2, 920, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const title = this.add.text(W / 2, 18, "Works & Days", { ...font, fontSize: "20px" }).setOrigin(0.5, 0);
@@ -3965,6 +4025,8 @@ class UIScene extends Phaser.Scene {
       this.changeRel(v.id, d);
       this.talkTo(v, `${say}\n\n(${d >= 0 ? `+${d}` : d} with ${v.name}.)`);
     } });
+    this.requestOptions(v, opts);
+    this.rumorOptions(v, opts);
     if (v.id === "theron") opts.push({ label: "Trade at the mill", fn: () => this.openMarket("mill") });
     if (v.id === "lykos") this.smithOptions(v, opts);
     if (v.id === "myrrhine" && !G.data.arts.includes("hospitality")) opts.push({ label: "Ask her to teach you an Art", fn: () => {
@@ -3992,6 +4054,117 @@ class UIScene extends Phaser.Scene {
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
     this.showTalk(v.name, sub, line, opts, v.id);
+  }
+
+  // ---------------------------------------------------------------- requests and rumors
+  /** How many of a thing you carry at or above a quality. */
+  static countQ(id: string, minQ = 1) { return G.data.slots.reduce((n, s) => n + (s && s.id === id && (s.q ?? 1) >= minQ ? s.qty : 0), 0); }
+  /** Take n of a thing at or above a quality, the plainest first (so your best stays with you). */
+  static takeQ(id: string, n: number, minQ = 1) {
+    const slots = G.data.slots.map((s, i) => [s, i] as const).filter(([s]) => s && s.id === id && (s.q ?? 1) >= minQ).sort((a, b) => (a[0]!.q ?? 1) - (b[0]!.q ?? 1));
+    for (const [s, i] of slots) { const k = Math.min(n, s!.qty); s!.qty -= k; n -= k; if (!s!.qty) G.data.slots[i] = null; if (!n) break; }
+  }
+  static reqText(q: Request) {
+    const who = VILLAGERS[q.from].name, left = q.due - G.dayNumber;
+    const when = left <= 0 ? "by tonight" : `within ${left + 1} days`;
+    if (q.kind === "deliver") return `${who}: carry the parcel to ${VILLAGERS[q.to!].name} ${when}. (${money(q.silver)})`;
+    const have = UIScene.countQ(q.item, q.minQ ?? 1);
+    return `${who}: ${q.qty} ${q.minQ ? QUALITY[q.minQ] + " " : ""}${ITEMS[q.item].name.toLowerCase()} ${when}. You have ${have}. (${money(q.silver)})`;
+  }
+
+  requestOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
+    const today = G.dayNumber;
+    for (const q of G.data.requests.filter((r) => r.kind === "deliver" && r.to === v.id)) if (G.count("Parcel") > 0) opts.push({ label: `Hand over the parcel from ${VILLAGERS[q.from].name}`, fn: () => {
+      G.removeItem("Parcel", 1); G.data.requests.splice(G.data.requests.indexOf(q), 1);
+      G.data.silver += q.silver; this.changeRel(v.id, 1); this.changeRel(q.from, 2);
+      this.talkTo(v, `"For me? From ${VILLAGERS[q.from].name}? Thank you. ${VILLAGERS[q.from].name} left this for your trouble."\n\n(+${money(q.silver)}; +2 with ${VILLAGERS[q.from].name}, +1 with ${v.name}.)`);
+    } });
+    const mine = G.data.requests.find((r) => r.from === v.id);
+    if (mine && mine.kind === "bring" && UIScene.countQ(mine.item, mine.minQ ?? 1) >= mine.qty) opts.push({ label: `Give ${v.name} the ${mine.qty} ${ITEMS[mine.item].name.toLowerCase()} asked for`, fn: () => {
+      UIScene.takeQ(mine.item, mine.qty, mine.minQ ?? 1);
+      G.data.requests.splice(G.data.requests.indexOf(mine), 1);
+      G.data.silver += mine.silver; const early = mine.due - today >= 2 ? 1 : 0; this.changeRel(v.id, 2 + early);
+      SOUND.sfx("find");
+      this.talkTo(v, `"You came through. Here, as promised."\n\n(+${money(mine.silver)}; +${2 + early} with ${v.name}${early ? ", for being quick about it" : ""}.)`);
+    } });
+    else if (mine) opts.push({ label: "About what you asked of me…", fn: () => {
+      const left = mine.due - today + 1, have = UIScene.countQ(mine.item, mine.minQ ?? 1);
+      this.talkTo(v, mine.kind === "deliver" ? `"Has my parcel reached ${VILLAGERS[mine.to!].name} yet? ${left > 1 ? "There's still time." : "Today, if you can."}"`
+        : `"I'm still hoping for those ${mine.qty} ${mine.minQ ? QUALITY[mine.minQ] + " " : ""}${ITEMS[mine.item].name.toLowerCase()}. You have ${have} so far. ${left > 1 ? `I can wait ${left} more days.` : "I need them by tonight."}"`);
+    } });
+    if (!mine && G.data.askedReq[v.id] !== today) opts.push({ label: "Ask if they need anything", fn: () => this.offerRequest(v) });
+  }
+
+  offerRequest(v: Villager) {
+    const today = G.dayNumber; G.data.askedReq[v.id] = today;
+    const sub = `${v.household[0].toUpperCase() + v.household.slice(1)} · a request`;
+    if (Math.random() < 0.25) { this.talkTo(v, `"Not today, thank you. Ask me again another day."`); return; }
+    const parcels = PARCELS.filter((p) => p.from === v.id && !G.data.requests.some((r) => r.kind === "deliver"));
+    let q: Request, line: string;
+    if (parcels.length && Math.random() < 0.3) {
+      const p = parcels[Math.floor(Math.random() * parcels.length)];
+      q = { id: ++G.data.reqSeq, from: v.id, kind: "deliver", item: "Parcel", qty: 1, to: p.to, why: p.what, silver: 12 + Math.floor(Math.random() * 8), posted: today, due: today + 2 };
+      line = `"Could you take ${p.what} to ${VILLAGERS[p.to].name}? I can't leave the ${v.id === "theron" ? "mill" : v.id === "lykos" ? "forge" : v.id === "myrrhine" ? "altar" : "inn"}. ${VILLAGERS[p.to].name} will see you right."`;
+    } else {
+      const w = WANTS[v.id][Math.floor(Math.random() * WANTS[v.id].length)];
+      const qty = w.qty[0] + Math.floor(Math.random() * (w.qty[1] - w.qty[0] + 1));
+      q = { id: ++G.data.reqSeq, from: v.id, kind: "bring", item: w.item, qty, minQ: w.minQ, why: w.why, silver: requestPay(w.item, qty, w.minQ), posted: today, due: today + 3 + Math.floor(Math.random() * 4) + (w.minQ ? 2 : 0) };
+      line = `"${w.why} Could you bring me ${qty} ${w.minQ ? QUALITY[w.minQ] + " " : ""}${ITEMS[w.item].name.toLowerCase()}, within ${q.due - today + 1} days? I'd pay ${money(q.silver)}."`;
+    }
+    this.showTalk(v.name, sub, line, [
+      { label: "I'll do it", fn: () => {
+        if (q.kind === "deliver" && G.addItem("Parcel", 1) > 0) { this.talkTo(v, `"Your pack's too full to take it. Make room and ask me again."`); G.data.askedReq[v.id] = -1; return; }
+        G.data.requests.push(q);
+        this.talkTo(v, `"Thank you. I knew I could ask you."\n\n(Your journal, J, keeps track of what you've promised.)`);
+      } },
+      { label: "Not this time", fn: () => this.talkTo(v, `"No matter. Another time."`) },
+    ], v.id);
+  }
+
+  rumorOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
+    const today = G.dayNumber;
+    const open = G.data.rumors.find((r) => r.from === v.id && !r.told);
+    if (open?.found) opts.push({ label: `Tell ${v.name} about the ${terrain(open.terrain).name.toLowerCase()}`, fn: () => {
+      open.told = true; this.changeRel(v.id, 2);
+      const id = `t${open.terrain}`; if (LORE[id] && G.lore(id) < 1) G.data.lore.tier[id] = 1;
+      this.talkTo(v, `"You went? And it was true? Tell me everything." ${v.name} listens to every word, and adds a few things of their own about such places.\n\n(+2 with ${v.name}.)`);
+    } });
+    else if (open) opts.push({ label: "Where was that place again?", fn: () => { const [x, y] = open.key.split(",").map(Number); this.talkTo(v, `"${RUMOR_WORDS[open.terrain][0].toUpperCase() + RUMOR_WORDS[open.terrain].slice(1)}, ${directions(x, y)}. Count the stretches of country as you go."`); } });
+    else if (G.data.askedRumor[v.id] !== today) opts.push({ label: "Heard any rumors?", fn: () => {
+      G.data.askedRumor[v.id] = today;
+      const r = UIScene.makeRumor(v.id);
+      const src: Record<string, string> = { theron: "A carter on the mill road told me of", lykos: "An ore trader swore to me there's", myrrhine: "Pilgrims at the altar speak of", eudora: "A traveler at my table last night told of" };
+      if (!r) { this.talkTo(v, `"Nothing you haven't seen for yourself, by the sound of it. You get about more than I do."`); return; }
+      const [x, y] = r.key.split(",").map(Number);
+      this.talkTo(v, `"${src[v.id]} ${RUMOR_WORDS[r.terrain]}, ${directions(x, y)}. I've never been. Maybe you will."\n\n(Your journal, J, notes the way.)`);
+    } });
+  }
+
+  /** A place a villager has heard of: an unexplored stretch two to six screens out, of a land their trade brings news of. */
+  static makeRumor(vid: string): Rumor | null {
+    const cands: [string, number][] = [];
+    for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) {
+      const d = Math.abs(x) + Math.abs(y), key = `${x},${y}`;
+      if (d < 2 || d > 6 || (x === 0 && (y === 0 || y === 1)) || G.data.screens[key] || G.data.rumors.some((r) => r.key === key)) continue;
+      cands.push([key, 1 / d]);
+    }
+    if (!cands.length) return null;
+    let k = Math.random() * cands.reduce((n, [, w]) => n + w, 0), key = cands[0][0];
+    for (const [c, w] of cands) { if ((k -= w) <= 0) { key = c; break; } }
+    const ts = RUMOR_TERRAINS[vid];
+    const r: Rumor = { key, terrain: ts[Math.floor(Math.random() * ts.length)], from: vid, day: G.dayNumber };
+    G.data.rumors.push(r);
+    return r;
+  }
+
+  openJournal() {
+    const reqs = G.data.requests.map((q) => `• ${UIScene.reqText(q)}`);
+    const rum = G.data.rumors.filter((r) => !r.told).map((r) => {
+      const [x, y] = r.key.split(",").map(Number);
+      return `• ${VILLAGERS[r.from].name}: ${r.found ? `you found the ${terrain(r.terrain).name.toLowerCase()}; tell ${VILLAGERS[r.from].name}` : `${RUMOR_WORDS[r.terrain].split(",")[0]}, ${directions(x, y)}`}.`;
+    });
+    const text = `REQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
+    this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
 
   smithOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
@@ -4476,7 +4649,8 @@ class UIScene extends Phaser.Scene {
   buildCraft() {
     this.craft?.destroy();
     const at = this.craftAt;
-    const list = RECIPES.filter((r) => (r.at ?? "hand") === at);
+    // Tool work at the forge shows only while there's a better edge to give it.
+    const list = RECIPES.filter((r) => (r.at ?? "hand") === at && (!r.upgrade || G.toolLevel(r.out) < r.upgrade));
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     const row = 50, w = 600, h = 84 + list.length * row + 36, x0 = (W - w) / 2, y0 = Math.max(8, (H - h) / 2 - 30);
     const root = this.add.container(0, 0).setDepth(23);
@@ -4488,10 +4662,11 @@ class UIScene extends Phaser.Scene {
     root.add(this.add.text(W / 2, y0 + 40, sub, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     list.forEach((r, i) => {
       const y = y0 + 68 + i * row;
-      const ok = r.needs.every(([id, n]) => G.count(id) >= n);
+      const ok = r.needs.every(([id, n]) => G.count(id) >= n) && (!r.upgrade || G.count(r.out) > 0);
       root.add(this.add.image(x0 + 34, y + 16, "items", r.out).setScale(2));
-      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (${G.count(id)})`).join(", ");
-      const t = this.add.text(x0 + 64, y, `${ITEMS[r.out].name}${r.qty > 1 ? ` × ${r.qty}` : ""}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
+      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (${G.count(id)})`).join(", ") + (r.upgrade ? ` + your ${ITEMS[r.out].name.toLowerCase()}` : "");
+      const label = r.upgrade ? toolName(r.out, r.upgrade, ITEMS[r.out].name) : ITEMS[r.out].name;
+      const t = this.add.text(x0 + 64, y, `${label}${r.qty > 1 ? ` × ${r.qty}` : ""}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
       root.add(t);
       root.add(this.add.text(x0 + 64, y + 21, r.desc + (r.quality ? " ★" : ""), { ...font, fontSize: "12px", color: "#c9b48f" }));
       if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => this.makeRecipe(r));
@@ -4503,6 +4678,11 @@ class UIScene extends Phaser.Scene {
     const heavy = r.at && r.at !== "hand";
     if (labor(heavy ? EFFORT.station : EFFORT.hand, heavy ? 2 : 1, "Techne") === null) return;
     for (const [id, n] of r.needs) G.removeItem(id, n);
+    if (r.upgrade) {
+      G.data.tools[r.out] = r.upgrade; SOUND.sfx("chop");
+      G.say(`${STATION_NAME[r.at ?? "hand"]}: you heat, hammer and quench. Your ${ITEMS[r.out].name.toLowerCase()} is now a ${toolName(r.out, r.upgrade, ITEMS[r.out].name).toLowerCase()}.`);
+      this.buildCraft(); return;
+    }
     const qty = r.qty + (r.out === "Arrow" ? Math.max(0, G.boon("Hephaestus")) : 0);
     let q: number | undefined, note = "";
     if (r.quality) {

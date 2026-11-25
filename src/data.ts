@@ -154,6 +154,11 @@ export const ITEMS: Record<string, ItemDef> = {
   Lamp: { id: "Lamp", value: 10, name: "Clay lamp", greek: "lychnos", kind: "material", desc: "A little lamp burning beeswax. Carried, it lights caves wider than a torch, and never burns out." },
   Cloth: { id: "Cloth", value: 6, name: "Linen cloth", greek: "othone", kind: "material", desc: "A bolt of plain linen from your loom." },
   Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "material", desc: "A thick cloak pinned at the shoulder. Carried, it turns a little of every blow (Health +1)." },
+  Press: { id: "Press", value: 35, name: "Press", greek: "lenos", kind: "place", desc: "A beam press over a stone bed, for olives and grapes. Place it on your homestead." },
+  Forge: { id: "Forge", value: 45, name: "Forge", greek: "eschara", kind: "place", desc: "A clay hearth with leather bellows, for working bronze. Place it on your homestead." },
+  Olives: { id: "Olives", value: 2, name: "Olives", greek: "elaiai", kind: "crop", desc: "Black and bitter from the tree. Pressed, they give oil." },
+  OliveOil: { id: "OliveOil", value: 22, name: "Olive oil", greek: "elaion", kind: "material", desc: "Athena's gift, golden-green: for lamps, for the body, for the table and the altar." },
+  Parcel: { id: "Parcel", value: 0, name: "Parcel", kind: "material", desc: "Something a villager asked you to carry. Look in your journal (J) for whom it's for." },
   Garland: { id: "Garland", value: 5, name: "Garland", greek: "stephanos", kind: "material", desc: "Wildflowers woven on a fiber cord. Everyone likes a garland; Aphrodite most of all." },
   LionPelt: { id: "LionPelt", value: 70, name: "Lion pelt", greek: "leonte", kind: "material", desc: "The hide of a lion of the high country, mane and all. Heracles wore one. Worth a great deal, and more in glory." },
   Fibula: { id: "Fibula", value: 12, name: "Bronze fibula", greek: "porpe", kind: "find", desc: "A cloak pin, green with age. Someone lost it long ago." },
@@ -328,9 +333,10 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
 /** Practice makes the archer: experience per shot and per hit, and how much a level is. */
 export const ARCHERY = { perShot: 1, perHit: 5, perLevel: 20, maxLevel: 10 };
 /** Where a recipe is made: by hand anywhere, or at a station you have built and placed on the homestead. */
-export type Station = "hand" | "workbench" | "kiln" | "loom";
-export const STATION_NAME: Record<Station, string> = { hand: "Handwork", workbench: "The workbench", kiln: "The kiln", loom: "The loom" };
-export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string; at?: Station; quality?: boolean }[] = [
+export type Station = "hand" | "workbench" | "kiln" | "loom" | "press" | "forge";
+export const STATION_NAME: Record<Station, string> = { hand: "Handwork", workbench: "The workbench", kiln: "The kiln", loom: "The loom", press: "The press", forge: "The forge" };
+/** A recipe. `upgrade` raises a tool you carry to that level instead of making a new thing. */
+export const RECIPES: { out: string; qty: number; needs: [string, number][]; desc: string; at?: Station; quality?: boolean; upgrade?: number }[] = [
   { out: "Arrow", qty: 4, needs: [["Wood", 1], ["Stone", 1]], desc: "Shafts from wood, points knapped from stone." },
   { out: "bow", qty: 1, needs: [["Wood", 4], ["Fiber", 3]], desc: "A spare bow, strung with twisted fiber." },
   { out: "Arrow", qty: 6, needs: [["Wood", 1], ["Obsidian", 1]], desc: "Obsidian points: keener, and more of them." },
@@ -345,6 +351,17 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Fence", qty: 4, needs: [["Wood", 2]], desc: "Wattle fencing, for fields and pens.", at: "workbench" },
   { out: "Kiln", qty: 1, needs: [["Clay", 12], ["Stone", 6]], desc: "For firing clay: amphorae, lamps, figurines.", at: "workbench" },
   { out: "Loom", qty: 1, needs: [["Wood", 10], ["Fiber", 4]], desc: "For weaving linen and wool.", at: "workbench" },
+  { out: "Press", qty: 1, needs: [["Wood", 12], ["Stone", 8]], desc: "For olive oil, and must without treading.", at: "workbench" },
+  { out: "Forge", qty: 1, needs: [["Stone", 10], ["Clay", 6], ["Hide", 1]], desc: "For bronze: arrowheads, pins, and your own tool work.", at: "workbench" },
+  // At the press.
+  { out: "OliveOil", qty: 1, needs: [["Olives", 4]], desc: "Crush and press the olives, and let the oil settle.", at: "press", quality: true },
+  { out: "Must", qty: 2, needs: [["Grapes", 5]], desc: "Press grapes to must, for the vat to ferment.", at: "press" },
+  { out: "Must", qty: 1, needs: [["WildGrapes", 4]], desc: "Wild grapes give a thinner must.", at: "press" },
+  // At the forge.
+  { out: "Arrow", qty: 8, needs: [["Copper", 1], ["Wood", 2]], desc: "Cast bronze arrowheads, a whole quiver's worth.", at: "forge" },
+  { out: "Fibula", qty: 1, needs: [["Copper", 1]], desc: "A bronze cloak pin: a fine gift, or an offering to Athena.", at: "forge", quality: true },
+  { out: "axe", qty: 1, needs: [["Copper", 3], ["Wood", 4]], desc: "Rework your axe with a finer bronze edge (fells oaks in two blows).", at: "forge", upgrade: 2 },
+  { out: "mattock", qty: 1, needs: [["Copper", 4], ["Wood", 5]], desc: "Shoe your mattock with bronze (it splits boulders).", at: "forge", upgrade: 2 },
   // At the kiln.
   { out: "Amphora", qty: 1, needs: [["Clay", 3]], desc: "A two-handled jar for wine.", at: "kiln", quality: true },
   { out: "Lamp", qty: 1, needs: [["Clay", 1], ["Wax", 1]], desc: "A wax lamp: lights caves wide, and never burns out.", at: "kiln", quality: true },
