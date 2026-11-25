@@ -86,8 +86,10 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
-/** How much a blow is softened: Health above the baseline of 4, and a woolen cloak if you carry one. */
-const armor = () => G.data.health - 4 + (G.count("Cloak") > 0 ? 1 : 0);
+/** How much a blow is softened: a woolen cloak, if you carry one. (Health gives you more Vitality instead.) */
+const armor = () => (G.count("Cloak") > 0 ? 1 : 0);
+/** A creature's blow in Vitality: its old Fatigue figure scaled to Terata hits (a fox 2, a wolf 4, a boar 6, a lion 8). */
+const blowOf = (fatigueDmg: number) => Math.max(1, Math.round(fatigueDmg / 2.5));
 /** Extra yield for things you understand fully. */
 const mastery = (id: string, n = 1) => (G.lore(id) >= 3 ? n : 0);
 const OBJ_SUBJECT: Record<number, string> = {
@@ -179,8 +181,9 @@ function eatHeld() {
   const i = G.data.selected, s = G.data.slots[i]; if (!s) return;
   const id = s.id, q = s.q ?? 1, e = mealEffect(id, q), named = NAMED.find((n) => dishId(n) === id);
   s.qty--; if (s.qty <= 0) G.data.slots[i] = null;
+  const v0 = G.data.vitality; G.heal(3 + 3 * q);
   G.eatMeal(id, e); G.addFatigue(-(4 + 4 * q)); SOUND.sfx("pickup");
-  G.say(`${named ? named.eaten : `You eat the ${ITEMS[id].name.toLowerCase()}.`} (${effectText(e)}; Fatigue −${4 + 4 * q}.)`);
+  G.say(`${named ? named.eaten : `You eat the ${ITEMS[id].name.toLowerCase()}.`} (${effectText(e)}; ${G.data.vitality > v0 ? `Vitality +${Math.round(G.data.vitality - v0)}, ` : ""}Fatigue −${4 + 4 * q}.)`);
 }
 
 function give(id: string, qty: number, q?: number): string {
@@ -260,7 +263,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.spots = []; inDark = false;
     this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false;
     this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
-    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0; this.wounds = 0;
+    this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
     this.mouseIn = true;
     this.input.mouse?.disableContextMenu();
@@ -307,6 +310,7 @@ abstract class PlayScene extends Phaser.Scene {
   knock = 0; // seconds of being thrown back by a blow
   invuln = 0; // seconds before another blow can land
   mealT = 0;
+  lastHealAt = -1;
   /** Has tonight's Noumenia visit been rolled here? */
   noumRolled = false;
   /** On the night of Noumenia the dead come near the houses of the living. */
@@ -324,11 +328,9 @@ abstract class PlayScene extends Phaser.Scene {
     }
     G.say(say);
   }
-  /** Blows taken while already spent: it takes a few to fell you (big beasts count double). */
-  wounds = 0;
+
 
   movePlayer(dt: number) {
-    if (this.wounds && G.data.fatigue < 100) this.wounds = 0;
     if (this.invuln > 0) { this.invuln -= dt; this.player.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 12) % 2 ? 0.4 : 1); }
     if (this.knock > 0) { this.knock -= dt; return; }
     const k = this.keys, c = this.cursors;
@@ -678,11 +680,18 @@ abstract class PlayScene extends Phaser.Scene {
     }
   }
   /** Harm from no creature (lightning, fever, falling rocks): Fatigue, and if spent, you fall. */
-  harm(dmg: number, what: string, cause: string) {
+  harm(dmg: number, what: string, cause: string, body = false) {
     if (this.leaving) return;
-    G.addFatigue(dmg); SOUND.sfx("hurt");
+    SOUND.sfx("hurt");
     this.cameras.main.shake(160, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(220, () => this.player.clearTint());
+    if (body) { // wounds to the body: lightning, falling rock, drowning, stings
+      const v = Math.max(1, Math.round(dmg / 3)); G.heal(-v);
+      G.say(`${what} (−${v} Vitality)${this.lowWarn()}`);
+      if (G.data.vitality <= 0) this.struckDown(cause);
+      return;
+    }
+    G.addFatigue(dmg); // fevers, chills, malaise: they wear you down
     G.say(`${what} (+${dmg} Fatigue)`);
     if (G.data.fatigue >= 100) this.struckDown(cause);
   }
@@ -691,7 +700,7 @@ abstract class PlayScene extends Phaser.Scene {
     const ch = G.data.divine.charges;
     if (!G.warded("Hades") && !ch.Hades) return false;
     if (!G.warded("Hades")) ch.Hades = 0;
-    G.data.fatigue = 85;
+    G.data.vitality = Math.max(G.data.vitality, Math.ceil(G.vitalityMax * 0.25));
     for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); b.bolt(this.player); }
     G.say("You fall, and the earth will not take you. Hades holds back the Fates' shears, and you rise.");
     return true;
@@ -751,7 +760,7 @@ abstract class PlayScene extends Phaser.Scene {
       case "Dionysus": if (G.data.vat.must > 0) { G.data.vat.must = 0; G.data.vat.sealed = -1; G.say(`The wine in your vat has soured to vinegar. ${at}`); } else this.harm(20, `The world tilts and roars like a feast gone wrong. ${at}`, "Dionysus' madness"); break;
       case "Hermes": { const n = Math.round(G.data.silver * 0.2); G.data.silver -= n; G.say(`Thieves! Your purse is lighter by ${money(n)}. ${at}`); break; }
       case "Ares": { const w = this as unknown as { spawnMonster?: (k: MonsterKind) => void; rec?: ScreenRec }; const k = w.rec ? monsterFor(w.rec.terrain)?.kind : undefined; if (w.spawnMonster && k) { G.say(`${at} Something terrible comes.`); w.spawnMonster(k); } else { G.say(at); this.summon("boar"); } break; }
-      case "Zeus": { this.lightning(this.player.x + 40, this.player.y - 10); G.essence.Fire = 0; this.harm(20, `Lightning strikes beside you! ${at}`, "lightning"); break; }
+      case "Zeus": { this.lightning(this.player.x + 40, this.player.y - 10); G.essence.Fire = 0; this.harm(20, `Lightning strikes beside you! ${at}`, "lightning", true); break; }
       case "Hades": G.say(`The ground breathes cold. A shade rises. ${at}`); this.summon("eidolon"); break;
       case "Hecate": G.say(`Dogs howl where no dogs are. The dead gather. ${at}`); this.summon("eidolon", 2); break;
     }
@@ -762,13 +771,13 @@ abstract class PlayScene extends Phaser.Scene {
     const alive = (k: string) => this.animals.filter((a) => a.kind === k && a.state !== "dead" && a.state !== "gone").length;
     switch (god) {
       case "Artemis": if (alive("wolf") < 3) { G.say("Wolves, hunting you through Artemis' woods."); this.summon("wolf", 2); } break;
-      case "Hephaestus": this.harm(14, "Rocks come crashing down the hillside onto you!", "falling rocks"); break;
-      case "Poseidon": this.harm(12, "The ground turns to sucking water beneath you and drags you down!", "the water"); break;
+      case "Hephaestus": this.harm(14, "Rocks come crashing down the hillside onto you!", "falling rocks", true); break;
+      case "Poseidon": this.harm(12, "The ground turns to sucking water beneath you and drags you down!", "the water", true); break;
       case "Apollo": this.harm(10, "Fever: an unseen arrow of Apollo finds you.", "plague"); break;
       case "Dionysus": this.madUntil = this.time.now + 5000; G.say("Madness! Your feet will not go where you will them."); break;
       case "Hermes": { const n = Math.max(1, Math.round(G.data.silver * 0.1)); G.data.silver -= n; this.harm(8, `You lose your way, and your purse (-${money(n)}).`, "the road"); break; }
       case "Ares": { const w = this as unknown as { spawnMonster?: (k: MonsterKind) => void; rec?: ScreenRec; monster?: Animal }; const k = w.rec ? monsterFor(w.rec.terrain)?.kind : undefined; if (w.spawnMonster && k && !w.monster) w.spawnMonster(k); else if (alive("boar") < 2) this.summon("boar"); break; }
-      case "Zeus": { this.lightning(this.player.x, this.player.y); this.harm(18, "Lightning strikes you!", "lightning"); break; }
+      case "Zeus": { this.lightning(this.player.x, this.player.y); this.harm(18, "Lightning strikes you!", "lightning", true); break; }
       case "Hades": case "Hecate": if (alive("eidolon") < 3) { G.say(god === "Hades" ? "The dead are hunting you." : "Hecate's ghosts come for you out of the dark."); this.summon("eidolon"); } break;
     }
   }
@@ -856,7 +865,11 @@ abstract class PlayScene extends Phaser.Scene {
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
     this.ambience?.update(dt, this.paused);
-    if ((this.mealT -= dt) <= 0) { this.mealT = 1; for (const m of G.mealTick()) G.say(m); }
+    if ((this.mealT -= dt) <= 0) {
+      this.mealT = 1; for (const m of G.mealTick()) G.say(m);
+      // Slow healing while awake (a longer jump in time is sleep, which heals by itself).
+      const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo"))); this.lastHealAt = h;
+    }
     if (!this.spearChecked) { // your spear, if it lies where you left it
       this.spearChecked = true;
       const s = G.data.spearAt;
@@ -937,10 +950,10 @@ abstract class PlayScene extends Phaser.Scene {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
-    let dmg = Math.max(1, d.damage - armor()); // Health from character creation, and a cloak
+    let dmg = Math.max(1, blowOf(d.damage) - armor() + (G.exhausted ? 1 : 0)); // a cloak softens it; worn out, you take it worse
     if (G.warded("Ares")) dmg = Math.max(1, Math.floor(dmg / 2)); // Ares turns the blow
-    G.addFatigue(dmg);
-    if (G.warded("Ares")) G.data.fatigue = Math.min(G.data.fatigue, 99);
+    G.heal(-dmg); G.addFatigue(2);
+    if (G.warded("Ares")) G.data.vitality = Math.max(1, G.data.vitality);
     this.invuln = 1; this.knock = 0.22;
     const ang = Math.atan2(this.player.y - a.sprite.y, this.player.x - a.sprite.x);
     const throwV = a.kind === "centaur" ? 280 : 170; // the hooved charge knocks you sprawling
@@ -949,24 +962,16 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
     const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
-    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (+${dmg} Fatigue)`);
-    if (this.spentBlow(d.damage)) this.struckDown(a);
+    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
+    if (G.data.vitality <= 0) this.struckDown(a);
   }
 
-  /**
-   * A creature's blow when you are spent (Fatigue 100): you stagger on. The third such blow fells you,
-   * or the second from a beast that hits hard (10 or more). Small creatures alone can never fell you in one bite.
-   */
-  spentBlow(dmg: number): boolean {
-    if (G.data.fatigue < 100) return false;
-    this.wounds += dmg >= 10 ? 1.5 : 1;
-    if (this.wounds >= 3) { this.wounds = 0; return true; }
-    G.say(this.wounds < 2 ? "You're spent, and staggering: a couple more blows will fell you. Get away, or end it!" : "You can barely stand. One more blow and you fall.");
-    return false;
-  }
+  /** A warning when Vitality runs low. */
+  lowWarn() { const v = G.data.vitality, m = G.vitalityMax; return v > 0 && v <= m * 0.3 ? " You're badly hurt: get away, or eat something." : ""; }
 
   struckDown(a: Animal | string) {
     if (this.spareFromBelow()) return;
+    G.data.vitality = 0; // knocked out: the blow beyond your Vitality goes into your Life Thread
     G.data.lifeThread = Math.max(0, G.data.lifeThread - 1);
     G.data.currencies.Pathos++; // what suffering teaches
     for (const b of this.animals) if (b.state === "charge" || b.state === "recoil") { b.state = "idle"; b.sprite.setVelocity(0, 0); }
@@ -1327,7 +1332,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (G.essence.Air > drain) { G.essence.Air -= drain; return; }
     G.essence.Air = 0; G.spentFlash = { el: "Air", at: performance.now() };
     this.drownT -= dt;
-    if (this.drownT <= 0) { this.drownT = 1; this.harm(10, "You're drowning! Water fills your mouth.", "the water"); }
+    if (this.drownT <= 0) { this.drownT = 1; this.harm(10, "You're drowning! Water fills your mouth.", "the water", true); }
   }
 
   // ---------------------------------------------------------------- boats
@@ -1562,12 +1567,12 @@ abstract class PlayScene extends Phaser.Scene {
       if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
-    const dmg = Math.max(1, 8 - armor());
-    G.addFatigue(dmg); this.invuln = 0.8;
+    const dmg = Math.max(1, blowOf(8) - armor());
+    G.heal(-dmg); G.addFatigue(1); this.invuln = 0.8;
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    G.say(from.kind === "stymphalian" ? `A bronze feather slices into you! (+${dmg} Fatigue)` : `An arrow from the ${beast(from.kind)} finds you! (+${dmg} Fatigue)`);
-    if (this.spentBlow(8)) this.struckDown(from);
+    G.say(from.kind === "stymphalian" ? `A bronze feather slices into you! (−${dmg} Vitality)` : `An arrow from the ${beast(from.kind)} finds you! (−${dmg} Vitality)`);
+    if (G.data.vitality <= 0) this.struckDown(from);
   }
 
   /** A creature looses an arrow at where you will be, leading you a little. */
@@ -1946,7 +1951,7 @@ class CreationScene extends Phaser.Scene {
       txt(px0, y, `Points left: ${this.resLeft()} of ${RESOURCE_POINTS}`, 14, this.resLeft() ? "#fbe39a" : "#9ad07a"); y += 26;
       const br = BIRTHRIGHTS[this.picks[1]], as = ASTHENEIAI[this.picks[10]];
       const extra = { Wealth: (br.wealth ?? 0) + (as.wealth ?? 0), Health: (br.health ?? 0) + (as.health ?? 0), Stealth: br.stealth ?? 0 };
-      const what = { Wealth: (n: number) => `${Math.max(0, n) * SILVER_PER_WEALTH} silver to start`, Health: (n: number) => `blows hurt you ${n >= 4 ? n - 4 : 4 - n} ${n >= 4 ? "less" : "more"}`, Stealth: (n: number) => `creatures notice you ${Math.abs((n - 4) * 4)}% ${n >= 4 ? "later" : "sooner"}` };
+      const what = { Wealth: (n: number) => `${Math.max(0, n) * SILVER_PER_WEALTH} silver to start`, Health: (n: number) => `${6 * Math.max(2, n)} Vitality`, Stealth: (n: number) => `creatures notice you ${Math.abs((n - 4) * 4)}% ${n >= 4 ? "later" : "sooner"}` };
       for (const k of ["Wealth", "Health", "Stealth"] as const) {
         const v = this.res[k], total = v + extra[k];
         txt(px0, y, k, 14);
@@ -2028,6 +2033,7 @@ class CreationScene extends Phaser.Scene {
     for (const god of Object.keys(d.favor)) if (d.favor[god] >= 4) d.knownByName[god] = true;
     d.silver = Math.max(0, this.res.Wealth + (br.wealth ?? 0) + (ast.wealth ?? 0)) * SILVER_PER_WEALTH;
     d.health = this.res.Health + (br.health ?? 0) + (ast.health ?? 0);
+    d.vitality = 6 * Math.max(2, d.health);
     d.stealth = Math.max(0, this.res.Stealth + (br.stealth ?? 0));
     if (ast.rel) { for (const id of Object.keys(VILLAGERS)) if (!ast.relWith || ast.relWith === id) st.npcRec(id).rel = ast.rel; }
     d.lifeThread = YOUNG_ADULT.thread;
@@ -3258,7 +3264,7 @@ class WildScene extends PlayScene {
       if (dg.kind === "hazard" && dg.rain && !rain) continue;
       if (dg.kind === "hazard" && dg.cause === "bees" && on === "search" && G.selectedItem?.id === "Torch") { G.say("You hold the torch to the hollow: the smoke sends the bees drowsy."); continue; }
       if (Math.random() >= dg.chance) continue;
-      if (dg.kind === "hazard") { this.harm(dg.dmg, dg.text, dg.cause); continue; }
+      if (dg.kind === "hazard") { this.harm(dg.dmg, dg.text, dg.cause, true); continue; }
       if (on === "enter" && this.lmGuards.length) continue; // they've already come for you this visit
       G.say(dg.text);
       if (dg.kind === "monster") {
@@ -4084,11 +4090,11 @@ class WildScene extends PlayScene {
 
   /** Seduced: she feeds, and you wake alone among the flowers. */
   drained(a: Animal) {
-    G.addFatigue(30);
+    G.addFatigue(20); G.heal(-8);
     this.tweens.add({ targets: a.sprite, alpha: 0, duration: 800, onComplete: () => { a.state = "dead"; a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1); } });
     this.cameras.main.flash(500, 120, 20, 30);
-    G.say(`You wake alone among the trampled flowers, cold and weak, with two small wounds at your throat. (+30 Fatigue)${G.lore("empousa") < 1 ? "" : " An empousa."}`);
-    if (G.data.fatigue >= 100) this.struckDown(a);
+    G.say(`You wake alone among the trampled flowers, cold and weak, with two small wounds at your throat. (−8 Vitality, +20 Fatigue)${G.lore("empousa") < 1 ? "" : " An empousa."}`);
+    if (G.data.vitality <= 0) this.struckDown(a);
   }
 
   /** Refused, she may let you go, or show her true face (her Aggression roll). */
@@ -4716,10 +4722,10 @@ class UIScene extends Phaser.Scene {
     this.place = this.add.text(16, 110, "", { ...font, fontSize: "14px", color: "#f2e6c9", stroke: "#1f1712", strokeThickness: 4 });
 
     // Fatigue and Essence, top right.
-    this.add.rectangle(W - 312, 12, 300, 92, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
+    this.add.rectangle(W - 312, 12, 300, 108, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
     this.bars = this.add.graphics();
-    this.thread = this.add.text(W - 16, 130, "", { ...font, fontSize: "13px", color: "#e8c0b0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
-    this.purse = this.add.text(W - 16, 110, "", { ...font, fontSize: "14px", color: "#e8e2d0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
+    this.thread = this.add.text(W - 16, 146, "", { ...font, fontSize: "13px", color: "#e8c0b0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
+    this.purse = this.add.text(W - 16, 126, "", { ...font, fontSize: "14px", color: "#e8e2d0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
 
     // Hotbar.
     this.hotbarGfx = this.add.graphics();
@@ -4782,7 +4788,7 @@ class UIScene extends Phaser.Scene {
       "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
       "Sword (forged by Lykos): short reach, hardest blow. Axe, mattock and sickle serve at a pinch.",
       "Bow: hold Space to aim, click where the arrow lands. Lead moving quarry.",
-      "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows cost Fatigue; fall when spent and your Life Thread frays.",
+      "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows take Vitality (the red bar: 6 per point of Health). At 0 you fall, and your Life Thread frays. Food, sleep and time heal it.",
       "",
       "YOUR GUEST",
       "An old blind man, Tiresias, sits about the farm. Talk to him: his small requests lead you through the whole world, one a day.",
@@ -4889,6 +4895,7 @@ class UIScene extends Phaser.Scene {
     }
   }
 
+  vitText?: Phaser.GameObjects.Text;
   drawBars() {
     const g = this.bars; g.clear();
     const x = W - 300, y0 = 22;
@@ -4900,11 +4907,16 @@ class UIScene extends Phaser.Scene {
       if (flash && flash.el === label && since < 900 && Math.floor(since / 150) % 2 === 0) g.lineStyle(2, 0xfff3c0, 1).strokeRect(x + 69, y - 1, 212, 13);
       if (!this.labels[label]) this.labels[label] = this.add.text(x, y - 3, label, { fontFamily: FONT, fontSize: "13px", color: "#f2e6c9" });
     };
-    bar("Fatigue", y0, G.data.fatigue / 100, G.exhausted ? 0xb02a3a : 0xc98e62);
-    bar("Earth", y0 + 16, G.essence.Earth / G.essenceMax.Earth, 0x6fae52);
-    bar("Water", y0 + 32, G.essence.Water / G.essenceMax.Water, 0x3fa9a0);
-    bar("Air", y0 + 48, G.essence.Air / G.essenceMax.Air, 0xc9c4e8);
-    bar("Fire", y0 + 64, G.essence.Fire / G.essenceMax.Fire, 0xd63a2a);
+    const vf = G.data.vitality / G.vitalityMax, low = vf <= 0.3 && Math.floor(performance.now() / 400) % 2 === 0;
+    bar("Vitality", y0, vf, low ? 0xff6a5a : 0xc0392b);
+    const vt = `${Math.ceil(G.data.vitality)} / ${G.vitalityMax}`;
+    this.vitText ??= this.add.text(x + 175, y0 - 1, "", { fontFamily: FONT, fontSize: "10px", color: "#fff4e8", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(0.5, 0);
+    if (this.vitText.text !== vt) this.vitText.setText(vt);
+    bar("Fatigue", y0 + 16, G.data.fatigue / 100, G.exhausted ? 0xb02a3a : 0xc98e62);
+    bar("Earth", y0 + 32, G.essence.Earth / G.essenceMax.Earth, 0x6fae52);
+    bar("Water", y0 + 48, G.essence.Water / G.essenceMax.Water, 0x3fa9a0);
+    bar("Air", y0 + 64, G.essence.Air / G.essenceMax.Air, 0xc9c4e8);
+    bar("Fire", y0 + 80, G.essence.Fire / G.essenceMax.Fire, 0xd63a2a);
   }
 
   fillSlot(cell: Cell, i: number) {
@@ -5770,7 +5782,7 @@ class UIScene extends Phaser.Scene {
     if (b) {
       y += 6;
       root.add(this.add.text(x0 + 24, y, `Hamartia: ${b.hamartia[0]}. ${b.hamartia[1]}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } })); y += 20;
-      root.add(this.add.text(x0 + 24, y, `Astheneia: ${b.astheneia[0]}. ${b.astheneia[1]}   ·   Moros: hidden by the Fates.   ·   Health ${G.data.health} · Stealth ${G.data.stealth}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } }));
+      root.add(this.add.text(x0 + 24, y, `Astheneia: ${b.astheneia[0]}. ${b.astheneia[1]}   ·   Moros: hidden by the Fates.   ·   Health ${G.data.health} (Vitality ${Math.ceil(G.data.vitality)}/${G.vitalityMax}) · Stealth ${G.data.stealth}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } }));
     }
     root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "P or Esc to close   ·   F for the gods", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }
@@ -6270,7 +6282,7 @@ class UIScene extends Phaser.Scene {
     if (this.inv) this.toggleInventory();
     this.modal = true;
     const away = from.scene.key === "Wild" && !camp;
-    const { hoursSlept, recovered, notes } = G.sleep(collapsed, camp);
+    const { hoursSlept, recovered, healed, notes } = G.sleep(collapsed, camp);
     if (away && !cause) notes.unshift("A passing shepherd finds you and helps you home.");
     // By a campfire you wake where you lay down; otherwise beside your own bed.
     const ps = from as PlayScene;
@@ -6286,7 +6298,7 @@ class UIScene extends Phaser.Scene {
       `Dawn. ${G.dateLabel()}`,
       `${G.moon}`,
       "",
-      `${hoursSlept.toFixed(1)} hours of sleep${collapsed || camp ? " (poor rest: half counted)" : ""}, ${Math.round(recovered)} Fatigue cleared.`,
+      `${hoursSlept.toFixed(1)} hours of sleep${collapsed || camp ? " (poor rest: half counted)" : ""}, ${Math.round(recovered)} Fatigue cleared${healed >= 1 ? `, ${Math.round(healed)} Vitality healed` : ""}.`,
       ...notes,
       saved ? "Your life is saved." : "(This browser would not let the game save.)",
       "",

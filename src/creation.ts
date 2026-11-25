@@ -15,7 +15,7 @@ export const STEP_HELP: string[] = [
   "Specialized skills that add dice to particular actions. (Expertises come in a later build.)",
   "The supernatural quality that makes a mortal heroic. (Natural Thaumatai come in a later build.)",
   "Spread +4 and -2 favor among the gods, on top of your sign's gift.",
-  "Twelve points across Wealth (starting coin), Health (blows hurt you less) and Stealth (creatures let you closer). At least 1 in each.",
+  "Twelve points across Wealth (starting coin), Health (6 Vitality per point: how many blows you can take) and Stealth (creatures let you closer). At least 1 in each.",
   "Your personal weakness, which no effort will ever quite cure.",
   "Your fated doom. The Fates keep it hidden: it will come out over a lifetime, in omens, dreams and oracles.",
 ];

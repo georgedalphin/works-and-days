@@ -14,8 +14,8 @@ async def main():
         await pg.evaluate("game.scene.getScene('House').goTo('Farm')"); await pg.wait_for_timeout(2500)
         # 1. A fox bite when nearly spent no longer fells you at once.
         r = await pg.evaluate(f"""(()=>{{const f={F}; window._A=f.animals[0].constructor; const fox=new window._A(f,'fox',f.player.x+10,f.player.y,new Phaser.Geom.Rectangle(0,0,999,999)); f.animals.push(fox);
-          G.data.fatigue=97; const lt0=G.data.lifeThread; const out=[];
-          for(let i=0;i<4;i++){{ f.invuln=0; f.leaving=false; f.struck(fox); out.push([Math.round(G.data.fatigue), f.wounds, G.data.lifeThread]); if (G.data.lifeThread<lt0) break; }}
+          G.data.vitality=G.vitalityMax; const lt0=G.data.lifeThread; const out=[];
+          for(let i=0;i<30;i++){{ f.invuln=0; f.leaving=false; f.struck(fox); out.push(G.data.vitality); if (G.data.lifeThread<lt0) break; }}
           return {{lt0, out, msgs: G.messages.map(m=>m.text).slice(-4)}}; }})()""")
         print("fox bites:", r["out"], "| thread was", r["lt0"]); print("   ", r["msgs"])
         await pg.wait_for_timeout(2500); await pg.keyboard.press("Space"); await pg.wait_for_timeout(1500)
