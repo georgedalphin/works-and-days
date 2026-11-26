@@ -318,6 +318,7 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   heron: { hp: 1, size: 6, drops: [["Feather", 3]] },
   eagle: { hp: 2, size: 6, drops: [["Feather", 3]] },
   crab: { hp: 1, size: 5, drops: [["Meat", 1]] },
+  brigand: { hp: 3, size: 7, drops: [] }, // a man: three blows, and at the last he runs
   jackal: { hp: 1, size: 7, drops: [["Hide", 1]] },
   scorpion: { hp: 1, size: 5, drops: [] },
   ibex: { hp: 2, size: 8, drops: [["Meat", 2], ["Hide", 1], ["Antler", 1]] },

@@ -3,7 +3,7 @@
  * They walk, fetch water, gossip in pairs, watch their children play and go home at dusk.
  */
 import Phaser from "phaser";
-import { makeFigureTexture, POSES, POSE, TILE } from "./textures";
+import { makeFigureTexture, POSES, POSE, TILE, type FigureExtras } from "./textures";
 import { rng, type GameState } from "./state";
 
 const FONT = "Georgia, 'Times New Roman', serif";
@@ -36,7 +36,7 @@ export const GOSSIP: [string, string][] = [
 ];
 
 // ------------------------------------------------------------------ the village households
-export interface Folk { id: string; name: string; age: "adult" | "elder" | "child"; female: boolean; look: { tunic: string; hair: string; skin: string }; extras: { beard?: boolean; long?: boolean; veil?: string } }
+export interface Folk { id: string; name: string; age: "adult" | "elder" | "child"; female: boolean; look: { tunic: string; hair: string; skin: string }; extras: FigureExtras }
 export interface Household { trade: Trade; house: { tx: number; ty: number; key: string }; members: Folk[] }
 
 const TUNIC = ["#e9e1cf", "#b0412f", "#3a6a7a", "#6f8a3a", "#7a3a6a", "#c9a35a", "#5a4a3a", "#d8c8a8", "#8a6a4a"];
@@ -104,7 +104,7 @@ export class Walker {
     this.sprite.setSize(8, 5).setOffset(4, 10);
     if (folk.age === "child") this.sprite.setScale(0.8);
   }
-  get speed() { return this.folk.age === "child" ? 34 : this.folk.age === "elder" ? 14 : 22; }
+  get speed(): number { return this.folk.age === "child" ? 34 : this.folk.age === "elder" ? 14 : 22; }
   goTo(x: number, y: number) { this.tx = x; this.ty = y; this.doing = "walk"; this.wait = 12; }
   update(dt: number, paused: boolean) {
     const s = this.sprite;

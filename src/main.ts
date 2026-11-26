@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
-import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, T, TILE, POSES, POSE } from "./textures";
+import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
+import { WAYFARERS, rollWayfarers, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
@@ -17,7 +18,7 @@ import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, ty
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
 import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROUGH_MAX, HIVE_DAYS, type Goat, terrain, rollTerrain, HOME_TERRAIN,
-  CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, MELEE_REACH, WEAPONS, SPEAR_THROW, SWORD_ORDER, START_LIFE_THREAD } from "./data";
+  CROPS, seedId, QUALITY, QUALITY_MULT, money, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, MELEE_REACH, WEAPONS, SPEAR_THROW, SWORD_ORDER, START_LIFE_THREAD, SLICE_TERRAINS } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
@@ -113,6 +114,8 @@ const OBJ_SUBJECT: Record<number, string> = {
 };
 const loreName = (id: string) => (G.lore(id) >= 1 ? LORE[id].name : LORE[id].vague);
 /** A creature as you would name it: "wild boar" once you know it, "dark, bristling beast" before. */
+/** Monsters, and men, turn on you when hurt; beasts usually run. */
+const fightsBack = (k: string) => isMonster(k) || k === "brigand";
 const beast = (id: string) => (LORE[id] ? (G.lore(id) >= 1 ? LORE[id].name.toLowerCase() : LORE[id].vague.replace(/^(an?|your) /, "")) : id);
 
 /**
@@ -983,7 +986,7 @@ abstract class PlayScene extends Phaser.Scene {
     G.data.px = this.player.x; G.data.py = this.player.y;
     this.current = this.findTarget();
     const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56 && !(isMonster(a.kind) && !MONSTERS[a.kind].calm));
-    if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: isMonster(angry.kind) && G.lore(angry.kind) >= 1 ? MONSTERS[angry.kind].calm : `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
+    if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: angry.kind === "brigand" ? "Yield: throw them your purse" : isMonster(angry.kind) && G.lore(angry.kind) >= 1 ? MONSTERS[angry.kind].calm : `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
     ui(this).prompt(this.current ? this.current.label : null);
     if (Phaser.Input.Keyboard.JustDown(this.keys.E)) this.interactNow();
     const bow = G.selectedItem?.id === "bow";
@@ -1061,7 +1064,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setVelocity(Math.cos(ang) * throwV, Math.sin(ang) * throwV); if (a.kind === "centaur") this.knock = 0.35;
     this.cameras.main.shake(140, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    const verb: Record<string, string> = { boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
+    const verb: Record<string, string> = { brigand: "clubs", boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
     if (G.data.vitality <= 0) this.struckDown(a);
@@ -1298,7 +1301,7 @@ abstract class PlayScene extends Phaser.Scene {
       a.sprite.setVelocity(Math.cos(ang) * push, Math.sin(ang) * push);
       a.sprite.setTint(0xff8080); this.time.delayedCall(220, () => a.sprite.clearTint());
       if (a.state === "charge" || a.state === "recoil") { a.state = "recoil"; a.timer = 0.6; } // knocked back, it gathers itself
-      else if (!this.aggressionRoll(a, 2)) { if (isMonster(a.kind)) a.charge(6); else a.bolt(this.player); }
+      else if (!this.aggressionRoll(a, 2)) { if (fightsBack(a.kind)) a.charge(6); else a.bolt(this.player); }
       G.say(`You punch the ${name} and knock it back! (d12 ${roll}, needed 1–${target})${b}`);
       return true;
     }
@@ -1316,7 +1319,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return true; }
     a.sprite.setTint(0xff8080); this.time.delayedCall(250, () => a.sprite.clearTint());
     G.say(`You strike the ${name}! (d12 ${roll}, needed 1–${target})`);
-    if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) { if (isMonster(a.kind)) a.charge(6); else a.bolt(this.player); }
+    if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) { if (fightsBack(a.kind)) a.charge(6); else a.bolt(this.player); }
     return true;
   }
 
@@ -1525,7 +1528,7 @@ abstract class PlayScene extends Phaser.Scene {
         hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
         if (hit.kind === "skeleton") { G.say("Your spear cracks a rib, no more. Bone wants a crushing blow."); if (hit.state !== "charge") hit.charge(40); }
         else if (this.aggressionRoll(hit, 3)) G.say(`The spear strikes home! The wounded ${beast(hit.kind)} turns on you!`);
-        else if (isMonster(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`The spear strikes home! The ${beast(hit.kind)} turns on you!`); }
+        else if (fightsBack(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`The spear strikes home! The ${beast(hit.kind)} turns on you!`); }
         else { hit.bolt({ x, y: y - 20 }); G.say(`The spear strikes home! The ${beast(hit.kind)} is badly hurt and runs.`); }
       }
     } else {
@@ -1960,11 +1963,11 @@ abstract class PlayScene extends Phaser.Scene {
       else {
         hit.sprite.setTint(0xff8080); this.time.delayedCall(250, () => hit.sprite.clearTint());
         if (this.aggressionRoll(hit, 3)) G.say(`A hit! The wounded ${beast(hit.kind)} turns on you!`);
-        else if (isMonster(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`A hit! The ${beast(hit.kind)} turns on you!`); }
+        else if (fightsBack(hit.kind)) { hit.charge(8); if (hit.kind === "empousa") hit.sprite.setTexture("empousaTrue", 0); G.say(`A hit! The ${beast(hit.kind)} turns on you!`); }
         else { hit.bolt({ x, y: y - 20 }); G.say(`A hit! The ${beast(hit.kind)} is wounded and runs.`); }
       }
     } else {
-      if (goat) G.say("Your arrow thuds into the goat pen. The goats bleat at you reproachfully.");
+      if (goat) G.say(this.scene.key === "Farm" ? "Your arrow thuds into the goat pen. The goats bleat at you reproachfully." : "Your arrow thuds into the turf among the goats. Their herder shouts at you.");
       // The thud of a near miss sends creatures running.
       for (const a of this.animals) if (a.kind !== "goat" && a.state !== "dead" && a.state !== "gone" && Math.hypot(a.sprite.x - x, a.sprite.y - y) < 40) a.bolt({ x, y });
     }
@@ -3262,6 +3265,22 @@ function screenSeed(wx: number, wy: number) {
   return h;
 }
 
+/** A group of wayfarers on this screen, and what they are about. */
+interface WayGroup {
+  def: WayDef; people: Wayfarer[]; foes: FigureFoe[]; goats: Animal[]; raiders: Animal[];
+  phase: string; t: number; t2: number; t3?: number; wT?: number; life: number; met: boolean; talking: boolean;
+  /** What you've already done with them (the day you did it). */
+  done: Record<string, number>;
+  trail: [number, number][]; trailT: number; chatT: number; chatI: number; nearSaid: boolean; gone: boolean; kills: number; god: string;
+  anchor: [number, number]; restT: number; truth: number; shootT: number;
+  exit?: [number, number]; first?: [number, number][]; after?: [number, number][]; outT?: number; leaving?: boolean;
+  tree?: [number, number]; water?: [number, number]; fire?: Phaser.GameObjects.Image; glow?: Phaser.GameObjects.Image; stone?: Phaser.GameObjects.Image; gfx?: Phaser.GameObjects.Graphics;
+  bite?: number; swing?: number; stray?: Animal; leading?: boolean; quest?: string; raidT?: number; raidOn?: boolean; helpedRaid?: boolean; lost?: number;
+  cool?: Map<Animal, number>; pack?: Animal[]; prey?: Animal; beast?: Animal; killedBeast?: boolean;
+}
+/** Something a stranger would be glad to eat. */
+const isFoodGift = (id: string) => !!id && !!ITEMS[id] && (!!INGREDIENTS[id] || ITEMS[id].kind === "meal" || ITEMS[id].kind === "crop" || ["Milk", "Honey", "Plum", "Cornel", "WildGrapes", "Grapes", "Wine"].includes(id));
+
 class WildScene extends PlayScene {
   key = "";
   hasSpring = false;
@@ -3306,7 +3325,8 @@ class WildScene extends PlayScene {
       const rumor = G.data.rumors.find((x) => x.key === this.key && !x.found);
       const roll = rumor ? { terrain: rumor.terrain, special: false } : rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
       if (rumor && VILLAGERS[rumor.from]) G.note("rumor");
-      if (rumor) { rumor.found = true; if (VILLAGERS[rumor.from]) this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
+      if (rumor && rumor.from === "road") { rumor.found = true; rumor.told = true; this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as the traveler on the road said.`)); }
+      else if (rumor) { rumor.found = true; if (VILLAGERS[rumor.from]) this.time.delayedCall(600, () => G.say(`${RUMOR_WORDS[rumor.terrain][0].toUpperCase() + RUMOR_WORDS[rumor.terrain].slice(1)}: just as ${VILLAGERS[rumor.from].name} said. (Tell ${VILLAGERS[rumor.from].name} you found it.)`)); }
       const p = profile(roll.terrain);
       G.note("explore"); if (roll.terrain !== HOME_TERRAIN) G.note("foreign");
       G.data.screens[this.key] = { terrain: roll.terrain, special: roll.special, feature: p.features[Math.floor(r() * p.features.length)], cleared: [] };
@@ -3482,6 +3502,7 @@ class WildScene extends PlayScene {
     this.setupHut();
     this.setupSites();
     this.setupLandmark();
+    this.setupWayfarers();
     const arrivingByBoat = !!G.data.boatCarry && this.landBoat();
     this.drawPlaced();
     if (arrivingByBoat) { const o = this.placedObjs.find((q) => q.p.id === "Boat" && q.p.x === Math.floor(this.player.x / TILE) && q.p.y === Math.floor((this.player.y + 12) / TILE)) ?? this.placedObjs.filter((q) => q.p.id === "Boat").pop(); if (o) { this.boat = undefined; this.boardBoat(o, true); } }
@@ -4477,6 +4498,878 @@ class WildScene extends PlayScene {
     }
   }
 
+  // ---------------------------------------------------------------- wayfarers (wayfarers.ts)
+  ways: WayGroup[] = [];
+  wayT = 0;
+  /** The table of who may be met (for testing from the console). */
+  wayDefs = WAYFARERS;
+  /** Creatures going after something other than you: a wolf after a goat, a wounded boar after its hunter, a man running off. */
+  chase = new Map<Animal, { to: () => { x: number; y: number } | null; speed: number; reach: () => void; leave?: boolean }>();
+
+  /** On arrival: perhaps someone is here, on the road or at their work. */
+  setupWayfarers() {
+    this.ways = []; this.chase = new Map(); this.wayT = 50 + Math.random() * 60;
+    const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: this.water.length > 6, monster: !!this.monster, hutHere: !!this.rec.hut });
+    if (def) { const g = this.spawnWay(def, false); if (g) this.time.delayedCall(900, () => G.say(WAY_SEEN[def.id] ?? `Here: ${def.title.toLowerCase()}.`)); }
+  }
+
+  /** What it costs a walker to cross a tile: roads are easiest, brush and fords hard, trees, stone and deep water impossible. */
+  wayCost(x: number, y: number) {
+    if (x < 1 || y < 1 || x >= WW - 1 || y >= WH - 1) return Infinity;
+    const t = this.objects.getTileAt(x, y)?.index ?? -1;
+    if (this.wayBlocked(x, y)) return Infinity;
+    if (t === -1) return this.groundData?.[y]?.[x] === T.PATH ? 1 : 2;
+    if (t === T.FLOWERS) return 2.2;
+    if (t === T.SHALLOW) return 6;
+    if (t in BUSHES) return 6;
+    if (t in TRUNKS || t === T.WATER || SOLID.includes(t)) return Infinity;
+    return 3;
+  }
+  /** The hut, the shrine, the graves and the cave mouth stand in the way too. */
+  wayBlocked(x: number, y: number) {
+    const r = this.rec, inR = (tx: number, ty: number, w: number, h: number) => x >= tx && x < tx + w && y >= ty && y < ty + h;
+    return (!!r.hut && inR(r.hut.tx, r.hut.ty, 3, 3)) || (!!r.shrine && inR(r.shrine.tx, r.shrine.ty, 4, 3)) || (!!r.graveyard && inR(r.graveyard[0], r.graveyard[1], 4, 3)) || (this.hasCave && inR(CAVE_AT.x - 1, CAVE_AT.y - 1, 3, 2));
+  }
+  nearestOpen(x: number, y: number): [number, number] | null {
+    for (let r = 0; r <= 4; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === r && isFinite(this.wayCost(x + dx, y + dy))) return [x + dx, y + dy];
+    return null;
+  }
+  /** A walking route in world points, from a point to a tile. */
+  wayRoute(fx: number, fy: number, tx: number, ty: number): [number, number][] | null {
+    const a = this.nearestOpen(Math.floor(fx / TILE), Math.floor(fy / TILE)), b = this.nearestOpen(tx, ty);
+    if (!a || !b) return null;
+    const p = findPath(WW, WH, (x, y) => this.wayCost(x, y), a, b);
+    return p ? p.map(([x, y]) => [x * TILE + 8, y * TILE + 8] as [number, number]) : null;
+  }
+  /** The ways in and out of this screen: the gaps in its border, roads marked. */
+  wayGates() {
+    const out: { tile: [number, number]; off: [number, number]; road: boolean }[] = [];
+    for (const sd of ["N", "S", "E", "W"] as Side[]) {
+      if (!this.open[sd]) continue;
+      const roads = sideRoads(G.data.wx, G.data.wy, sd);
+      for (const g of this.gates[sd]) {
+        const tile: [number, number] = sd === "N" ? [g, 1] : sd === "S" ? [g, WH - 2] : sd === "W" ? [1, g] : [WW - 2, g];
+        if (!isFinite(this.wayCost(tile[0], tile[1]))) continue;
+        const off: [number, number] = sd === "N" ? [g * TILE + 8, -14] : sd === "S" ? [g * TILE + 8, WH * TILE + 14] : sd === "W" ? [-14, g * TILE + 8] : [WW * TILE + 14, g * TILE + 8];
+        out.push({ tile, off, road: roads.includes(g) });
+      }
+    }
+    return out;
+  }
+  /** A way across: in by one gap, out by another (by road, if they keep to roads). */
+  crossRoute(def: WayDef): { pts: [number, number][]; in: [number, number]; out: [number, number] } | null {
+    const gs = this.wayGates(); if (gs.length < 2) return null;
+    const roads = gs.filter((q) => q.road), pool = def.road && roads.length >= 2 && Math.random() < 0.85 ? roads : gs;
+    for (let tries = 0; tries < 6; tries++) {
+      const a = pool[Math.floor(Math.random() * pool.length)], others = pool.filter((q) => q !== a && Math.hypot(q.tile[0] - a.tile[0], q.tile[1] - a.tile[1]) > 10);
+      if (!others.length) continue;
+      const b = others[Math.floor(Math.random() * others.length)];
+      const pts = findPath(WW, WH, (x, y) => this.wayCost(x, y), a.tile, b.tile);
+      if (pts && pts.length > 6) return { pts: [[a.tile[0] * TILE + 8, a.tile[1] * TILE + 8], ...pts.map(([x, y]) => [x * TILE + 8, y * TILE + 8] as [number, number])], in: a.off, out: b.off };
+    }
+    return null;
+  }
+  /** An open spot for a group to stop at, away from you (near the road if they keep to roads). */
+  waySpot(minD: number, ok: (x: number, y: number) => boolean = () => true, road = false): [number, number] | null {
+    let best: [number, number] | null = null, bestS = -1;
+    for (let i = 0; i < 220; i++) {
+      const x = 3 + Math.floor(Math.random() * (WW - 6)), y = 3 + Math.floor(Math.random() * (WH - 6));
+      if (!this.dryAt(x, y) || !ok(x, y)) continue;
+      const d = Math.hypot(x * TILE + 8 - this.player.x, y * TILE + 8 - this.player.y);
+      if (d < minD) continue;
+      let s = Math.random();
+      if (road) { let nr = 99; for (let yy = y - 5; yy <= y + 5; yy++) for (let xx = x - 5; xx <= x + 5; xx++) if (this.groundData?.[yy]?.[xx] === T.PATH) nr = Math.min(nr, Math.hypot(xx - x, yy - y)); s += nr <= 1 ? 0.5 : nr < 6 ? 2 - nr / 4 : 0; }
+      if (s > bestS) { bestS = s; best = [x, y]; }
+    }
+    return best;
+  }
+  /** Dry, open ground to stand on (not a ford, not in the brush). */
+  dryAt(x: number, y: number) { const t = this.objects.getTileAt(x, y)?.index ?? -1; return (t === -1 || t === T.FLOWERS) && isFinite(this.wayCost(x, y)); }
+  /** Room for a fire and people round it. */
+  roomAt(x: number, y: number, r = 1) { for (let yy = y - r; yy <= y + r; yy++) for (let xx = x - r; xx <= x + r; xx++) if (!this.dryAt(xx, yy)) return false; return true; }
+
+  spawnWay(def: WayDef, arriving: boolean): WayGroup | null {
+    const seed = Math.floor(Math.random() * 1e9), folk = makeParty(def, seed), sc = this;
+    const g: WayGroup = { def, people: [], foes: [], goats: [], raiders: [], phase: "", t: 0, t2: 0, life: 120 + Math.random() * 120, met: false, talking: false, done: {}, trail: [], trailT: 0, chatT: 2 + Math.random() * 4, chatI: 0,
+      nearSaid: false, gone: false, kills: 0, god: def.god || TWELVE[Math.floor(Math.random() * TWELVE.length)], anchor: [0, 0], restT: 0, truth: Math.random() < 0.5 ? 0 : 1, shootT: 1.5 };
+    // Where they stand, and where they are going.
+    let spots: [number, number][] = [];
+    const ring = (cx: number, cy: number, r: number) => folk.map((_, i) => [cx + Math.cos((i / folk.length) * Math.PI * 2 + 0.6) * r, cy + Math.sin((i / folk.length) * Math.PI * 2 + 0.6) * r * 0.8] as [number, number]);
+    if (def.mode === "cross") {
+      const route = this.crossRoute(def); if (!route) return null;
+      const k = arriving ? 0 : Math.floor(route.pts.length * (0.2 + Math.random() * 0.4));
+      const start: [number, number] = arriving ? route.in : route.pts[k];
+      spots = folk.map((_, i) => (arriving ? [start[0], start[1]] : route.pts[Math.max(0, k - 2 * i)]) as [number, number]);
+      g.exit = route.out;
+      const rest = def.activity === "walk" && def.id !== "couple" && Math.random() < (arriving ? 0.25 : 0.45);
+      const restAt = rest ? k + Math.floor((route.pts.length - k) * (0.25 + Math.random() * 0.3)) : -1;
+      g.first = restAt > k ? route.pts.slice(k, restAt) : [...route.pts.slice(k), route.out];
+      if (restAt > k) { g.after = [...route.pts.slice(restAt), route.out]; g.restT = 12 + Math.random() * 20; }
+    } else {
+      let at: [number, number] | null = null;
+      const far = def.hostile ? 190 : 120;
+      if (def.activity === "chop") {
+        for (let i = 0; i < 260 && !at; i++) {
+          const x = 3 + Math.floor(Math.random() * (WW - 6)), y = 3 + Math.floor(Math.random() * (WH - 6)), t = this.objects.getTileAt(x, y)?.index ?? -1;
+          if (!(t === T.TREE || t === T.PINE || t === T.OLIVE)) continue;
+          for (const dx of [-1, 1]) if (!at && this.dryAt(x + dx, y) && Math.hypot((x + dx) * TILE - this.player.x, y * TILE - this.player.y) > far) { at = [x + dx, y]; g.tree = [x, y]; }
+        }
+      } else if (def.activity === "fish") {
+        const sh = this.water.filter(([x, y]) => Math.hypot(x * TILE - this.player.x, y * TILE - this.player.y) > 100).sort(() => Math.random() - 0.5);
+        for (const [wx0, wy0] of sh) {
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) { const t = this.objects.getTileAt(wx0 + dx, wy0 + dy)?.index ?? -1; if (!at && t === -1 && this.dryAt(wx0 + dx, wy0 + dy)) { at = [wx0 + dx, wy0 + dy]; g.water = [wx0 * TILE + 8 - dx * 10, wy0 * TILE + 8 - dy * 10]; } }
+          if (at) break;
+        }
+      } else if (def.activity === "camp") at = this.waySpot(far, (x, y) => this.roomAt(x, y, 1), true);
+      else if (def.activity === "lurk") at = this.waySpot(far, (x, y) => this.roomAt(x, y, 1), true);
+      else if (def.activity === "hurt" || def.activity === "argue") at = this.waySpot(100, (x, y) => this.roomAt(x, y, 1), true);
+      else at = this.waySpot(far, (x, y) => this.roomAt(x, y, 1));
+      if (!at) return null;
+      const ax = at[0] * TILE + 8, ay = at[1] * TILE + 8;
+      g.anchor = [ax, ay];
+      if (def.activity === "camp") {
+        g.fire = this.add.image(ax, ay + 7, "pl_Campfire").setOrigin(0.5, 1).setDepth(ay + 7);
+        g.glow = this.add.image(ax, ay + 1, "focusGlow").setDepth(ay + 6).setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD);
+        this.tweens.add({ targets: g.glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 420 });
+        this.tweens.add({ targets: g.fire, scaleY: 1.06, yoyo: true, repeat: -1, duration: 260 });
+        spots = ring(ax, ay, 17);
+      } else if (def.activity === "argue") {
+        g.stone = this.add.image(ax, ay + 2, "items", "Stone").setDepth(ay + 2).setScale(0.8);
+        spots = [[ax - 11, ay], [ax + 11, ay]];
+      } else if (def.activity === "lurk") spots = ring(ax, ay, 12);
+      else spots = folk.map((_, i) => [ax + (i ? (i % 2 ? 14 : -14) : 0), ay + (i ? 6 : 0)] as [number, number]);
+    }
+    // The people: brigands fight like beasts, so they are made as creatures; everyone else walks.
+    if (def.hostile) {
+      folk.forEach((f, i) => {
+        const key = `folk_${f.id}`; makeFigureTexture(this, key, f.look, f.extras);
+        if (!this.textures.exists("brigand")) makeFigureTexture(this, "brigand", f.look, f.extras);
+        const [x, y] = spots[i];
+        const a = new FigureFoe(this, "brigand", x, y, new Phaser.Geom.Rectangle(x - 12, y - 10, 24, 20), (px, py) => this.free(px, py));
+        a.sprite.setTexture(key, 0).setFlipX(false); a.folk = f; a.decide = () => {};
+        this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+        this.animals.push(a); g.foes.push(a);
+      });
+    } else folk.forEach((f, i) => {
+      const [x, y] = spots[i];
+      const w = new Wayfarer(this, f, x, y, [x, y]); w.pace = def.pace ?? 1;
+      g.people.push(w);
+      this.targets.push({ get x() { return w.sprite.x; }, get y() { return w.sprite.y + 2; }, get label() { return g.gone || !w.sprite.visible ? "" : sc.wayLabel(g, w); }, act: () => sc.talkWay(g, w) });
+    });
+    const lead = g.people[0];
+    if (lead && g.first) lead.walk(g.first);
+    if (lead && def.activity === "camp") g.people.forEach((w) => w.face(g.anchor[0], g.anchor[1]));
+    if (lead && def.activity === "argue") { g.people[0].face(g.anchor[0] + 20, g.anchor[1]); g.people[1].face(g.anchor[0] - 20, g.anchor[1]); }
+    if (lead && def.activity === "chop" && g.tree) { lead.face(g.tree[0] * TILE + 8, g.tree[1] * TILE + 8); lead.work = "chop"; }
+    if (lead && def.activity === "fish" && g.water) { lead.face(g.water[0], g.water[1]); lead.work = "fish"; g.gfx = this.add.graphics().setDepth(lead.sprite.y + 1); g.t2 = 15 + Math.random() * 20; }
+    if (def.activity === "hurt") for (const w of g.people) w.lying = true;
+    if (def.activity === "hunt") { g.phase = "seek"; g.t2 = 2; }
+    // A shepherd's flock: goats that keep near him. Sometimes one has strayed; sometimes wolves are watching.
+    if (def.activity === "herd" && lead) {
+      const n = 3 + Math.floor(Math.random() * 3), free = (x: number, y: number) => this.free(x, y);
+      for (let i = 0; i < n; i++) {
+        const gx = g.anchor[0] + (Math.random() - 0.5) * 50, gy = g.anchor[1] + (Math.random() - 0.5) * 36;
+        const a = new Animal(this, "goat", gx, gy, new Phaser.Geom.Rectangle(gx - 30, gy - 24, 60, 48), free);
+        this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+        this.animals.push(a); g.goats.push(a);
+      }
+      if (Math.random() < 0.45) {
+        const at = this.waySpot(200, (x, y) => Math.hypot(x * TILE - g.anchor[0], y * TILE - g.anchor[1]) > 200);
+        if (at) {
+          const [sx, sy] = [at[0] * TILE + 8, at[1] * TILE + 8];
+          const a = new Animal(this, "goat", sx, sy, new Phaser.Geom.Rectangle(sx - 20, sy - 16, 40, 32), free);
+          this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+          this.animals.push(a); g.stray = a; g.quest = "goat";
+          this.targets.push({ get x() { return a.sprite.x; }, get y() { return a.sprite.y + 2; }, get label() { return g.stray === a && !g.leading && !g.gone && a.sprite.active ? "Lead the stray goat back" : ""; },
+            act: () => { g.leading = true; G.say("You take the stray by her bell-strap. She comes, complaining, and keeps trying to eat your sleeve."); } });
+        }
+      }
+      if ([1, 2, 9, 10, 11, 12].includes(this.rec.terrain) && Math.random() < 0.35) g.raidT = 25 + Math.random() * 35;
+    }
+    this.ways.push(g);
+    G.note("wayfarer");
+    return g;
+  }
+
+  /** Who they are, in a line: names, and the children with them. */
+  wayNames(g: WayGroup) {
+    const ad = g.people.length ? g.people : [];
+    const big = ad.filter((w) => w.folk.age !== "child").map((w) => w.folk.name), kids = ad.filter((w) => w.folk.age === "child");
+    return (big.length > 2 ? `${big.slice(0, -1).join(", ")} and ${big[big.length - 1]}` : big.join(" and ")) + (kids.length ? `, and ${kids.length > 1 ? "children" : kids[0].folk.female ? "a girl" : "a boy"}` : "");
+  }
+  wayLabel(g: WayGroup, w: Wayfarer): string {
+    const d = g.def;
+    if (w.lying) return g.done.helped !== undefined ? "" : `Help ${g.met ? w.folk.name : "the hurt traveler"}`;
+    if (d.id === "runner") return g.done.cheer !== undefined ? "" : "Hail the runner";
+    return g.met ? `Talk to ${w.folk.name}` : `Greet ${theTitle(d.title)}`;
+  }
+
+  /** Every frame: chases, groups at their business, and newcomers. */
+  wayTick(dt: number) {
+    for (const [a, c] of [...this.chase]) {
+      const tgt = c.to();
+      if (!tgt || !a.sprite.active || a.state === "dead" || a.state === "gone" || a.state === "charge" || a.state === "recoil" || a.state === "flee" || (a.appeased && !c.leave)) { this.chase.delete(a); continue; }
+      if (this.paused) continue;
+      const dx = tgt.x - a.sprite.x, dy = tgt.y - a.sprite.y, d = Math.hypot(dx, dy) || 1;
+      a.state = "walk"; a.tx = tgt.x; a.ty = tgt.y; a.timer = 1;
+      a.sprite.setVelocity((dx / d) * c.speed, (dy / d) * c.speed);
+      if (d < 9) { this.chase.delete(a); c.reach(); }
+    }
+    for (const g of [...this.ways]) this.tickWay(g, dt);
+    if (this.paused) return;
+    // Now and then someone comes along while you're here.
+    if ((this.wayT -= dt) <= 0) {
+      this.wayT = 70 + Math.random() * 90;
+      if (this.ways.length < 2 && !this.ways.some((g) => g.def.hostile) && !this.monster) {
+        const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: false, monster: false, hutHere: true, only: (w) => w.mode === "cross" });
+        if (def && this.spawnWay(def, true)) G.say(WAY_COMING[def.id] ?? `Someone is coming along the way: ${def.title.toLowerCase()}.`);
+      }
+    }
+  }
+
+  tickWay(g: WayGroup, dt: number) {
+    const d = g.def, lead = g.people[0];
+    for (const w of g.people) w.step(dt, this.paused);
+    if (g.gfx) this.drawLine(g);
+    if (this.paused) return;
+    g.t += dt;
+    const px = this.player.x, py = this.player.y, far = (o: { x: number; y: number }) => Math.hypot(o.x - px, o.y - py);
+    if (d.hostile) { this.tickBrigands(g, dt); return; }
+    if (!lead) { this.dropWay(g); return; }
+    // Talking: they stand and face you while you talk.
+    if (g.talking) { if (ui(this).talkPanel) { if (d.id !== "runner") for (const w of g.people) { w.hold = Math.max(w.hold, 0.5); if (!w.lying) w.face(px, py); } } else g.talking = false; }
+    // Coming up to them, they look round and greet you.
+    if (!g.nearSaid && far(lead.sprite) < 44) {
+      g.nearSaid = true;
+      const w = g.people.find((p) => !p.lying && p.folk.age !== "child") ?? lead;
+      if (!w.lying) { w.say(d.id === "runner" ? "Make way!" : pick(NEAR_WORDS)); if (d.mode === "cross" && d.id !== "runner") for (const p of g.people) { p.hold = 2; p.face(px, py); } }
+    }
+    // Their talk among themselves (and the arguing farmers' arms flung up).
+    if (d.chatter && far(lead.sprite) < 300 && !g.talking && (g.chatT -= dt) <= 0) {
+      g.chatT = (d.activity === "argue" ? 3 : 6) + Math.random() * 6;
+      const w = g.people[g.chatI++ % g.people.length];
+      if (!w.lying && !(d.activity === "herd" && g.raiders.length)) { w.say(pick(d.chatter)); if (d.activity === "argue") { w.work = "draw"; this.time.delayedCall(800, () => { w.work = ""; }); } }
+    }
+    this.shyAnimals(g);
+    // Day folk head home at dusk; roamers move on after a while.
+    if (!g.leaving && !g.talking && !g.people.some((p) => p.lying) && ((d.when === "day" && !G.isDay && d.activity !== "hurt") || (d.mode === "roam" && (g.life -= dt) <= 0 && !g.raiders.length && g.phase !== "dress" && g.phase !== "draw" && !g.leading))) this.wayLeave(g);
+    if (d.mode === "cross" || g.leaving) {
+      // The leader keeps a trail, and the others walk in their steps.
+      if (lead.walking && (g.trailT -= dt) <= 0) { g.trailT = 0.22; g.trail.push([lead.sprite.x, lead.sprite.y]); if (g.trail.length > 90) g.trail.shift(); }
+      g.people.forEach((w, i) => {
+        if (i === 0 || w.hold > 0 || w.lying) return;
+        const c = g.trail[g.trail.length - 1 - 3 * i];
+        if (lead.walking && c && Math.hypot(c[0] - w.sprite.x, c[1] - w.sprite.y) > 6) w.walk([c]);
+        else if (!lead.walking && !w.walking && g.after) w.face(lead.sprite.x, lead.sprite.y);
+      });
+      if (d.activity === "herd") this.herdFollow(g, 30);
+      if (!lead.walking && lead.hold <= 0) {
+        if (g.after) {
+          if ((g.restT -= dt) <= 0) { lead.walk(g.after); g.after = undefined; }
+        } else if (!g.outT) { g.outT = 1; for (const w of g.people.slice(1)) w.walk([g.exit!]); }
+      }
+      if (g.outT && g.people.every((w) => !w.walking || this.offScreen(w.sprite))) this.dropWay(g);
+      return;
+    }
+    switch (d.activity) {
+      case "hunt": this.tickHunter(g, dt); break;
+      case "herd": this.tickHerder(g, dt); break;
+      case "gather": this.wander(g, dt, 70, "gather"); break;
+      case "chop": {
+        if (!g.tree || lead.walking) break;
+        lead.work = "chop";
+        const swing = Math.floor(lead.workT / 0.55);
+        if (swing !== g.swing) { g.swing = swing; if (swing % 2 === 0 && far(lead.sprite) < 240) { SOUND.sfx("chop"); if (swing % 6 === 0) this.chips(g.tree[0], g.tree[1], T.TREE, 2); } }
+        break;
+      }
+      case "fish": {
+        if ((g.t2 -= dt) <= 0) { g.t2 = 18 + Math.random() * 22; lead.say(pick(["Ha! Got one.", "A little one.", "Come here, you...", "Poseidon be thanked!"])); g.bite = 0.8; }
+        if (g.bite) g.bite = Math.max(0, g.bite - dt);
+        break;
+      }
+    }
+    // A child or companion keeps near the one they're with.
+    if (d.mode === "roam") g.people.forEach((w, i) => { if (i && !w.lying && w.hold <= 0 && !w.walking && Math.hypot(w.sprite.x - lead.sprite.x, w.sprite.y - lead.sprite.y) > 30) { const r = this.wayRoute(w.sprite.x, w.sprite.y, Math.floor((lead.sprite.x + (Math.random() - 0.5) * 30) / TILE), Math.floor((lead.sprite.y + 12) / TILE)); if (r) w.walk(r); } });
+  }
+
+  offScreen(s: { x: number; y: number }) { return s.x < -6 || s.y < -6 || s.x > WW * TILE + 6 || s.y > WH * TILE + 6; }
+
+  /** Wildlife shies from people as it does from you: from most folk at about the distance it bolts from you; a hunter creeps much closer. */
+  shyAnimals(g: WayGroup) {
+    for (const a of this.animals) {
+      const sp = SPECIES[a.kind];
+      if (!sp.scare || a.appeased || (a.state !== "idle" && a.state !== "walk") || this.chase.has(a) || isMonster(a.kind)) continue;
+      for (const w of g.people) {
+        if (w.lying) continue;
+        const k = g.def.activity === "hunt" ? 0.35 : 0.85;
+        if (Math.hypot(a.sprite.x - w.sprite.x, a.sprite.y - w.sprite.y) < sp.scare * k) { for (const b of a.flock.length ? a.flock : [a]) if (b.state !== "flee" && b.state !== "gone") b.bolt(w.sprite); break; }
+      }
+    }
+  }
+
+  /** Off to somewhere else: the nearest way out, or the one they meant to take. */
+  wayLeave(g: WayGroup) {
+    const lead = g.people[0]; if (!lead) return;
+    const gs = this.wayGates(); if (!gs.length) { this.dropWay(g); return; }
+    gs.sort((a, b) => Math.hypot(a.tile[0] * TILE - lead.sprite.x, a.tile[1] * TILE - lead.sprite.y) - Math.hypot(b.tile[0] * TILE - lead.sprite.x, b.tile[1] * TILE - lead.sprite.y));
+    const to = gs[Math.floor(Math.random() * Math.min(2, gs.length))];
+    const r = this.wayRoute(lead.sprite.x, lead.sprite.y, to.tile[0], to.tile[1]);
+    for (const w of g.people) { w.work = ""; w.lying = false; }
+    g.leaving = true; g.exit = to.off; g.after = undefined; g.trail = [];
+    lead.walk([...(r ?? []), to.off]);
+    if (g.fire) { this.tweens.add({ targets: [g.fire, g.glow], alpha: 0, duration: 2000 }); }
+    if (g.gfx) { g.gfx.destroy(); g.gfx = undefined; }
+  }
+
+  /** They have gone: take them (and their goats and fire) away. */
+  dropWay(g: WayGroup) {
+    if (g.gone) return;
+    g.gone = true;
+    for (const w of g.people) w.sprite.destroy();
+    for (const a of [...g.goats, ...(g.stray && g.leading ? [] : [])]) {
+      this.chase.delete(a);
+      this.tweens.add({ targets: a.sprite, alpha: 0, duration: 800, onComplete: () => { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } });
+    }
+    g.fire?.destroy(); g.glow?.destroy(); g.stone?.destroy(); g.gfx?.destroy();
+    const i = this.ways.indexOf(g); if (i >= 0) this.ways.splice(i, 1);
+  }
+
+  /** Root-cutters and the like: from spot to spot near where they are, stooping at each. */
+  wander(g: WayGroup, dt: number, radius: number, work: Wayfarer["work"]) {
+    const lead = g.people[0];
+    if (lead.walking || lead.hold > 0) return;
+    if ((g.wT = (g.wT ?? 0) - dt) > 0) { lead.work = work; return; }
+    lead.work = "";
+    g.wT = 4 + Math.random() * 6;
+    for (let i = 0; i < 12; i++) {
+      const tx = Math.floor((g.anchor[0] + (Math.random() - 0.5) * 2 * radius) / TILE), ty = Math.floor((g.anchor[1] + (Math.random() - 0.5) * 2 * radius * 0.75) / TILE);
+      if (!this.dryAt(tx, ty)) continue;
+      const r = this.wayRoute(lead.sprite.x, lead.sprite.y, tx, ty);
+      if (r && r.length < 20) { lead.walk(r); return; }
+    }
+  }
+
+  /** The fisher's line, and the float that dips when a fish takes it. */
+  drawLine(g: WayGroup) {
+    const w = g.people[0], gf = g.gfx!; gf.clear();
+    if (!w || !g.water || w.walking) return;
+    const dir = [[0, 1], [-1, 0], [1, 0], [0, -1]][w.facing], hx = w.sprite.x + dir[0] * 7 + (dir[1] ? 4 : 0), hy = w.sprite.y - 6 + dir[1] * 3;
+    const bob = Math.sin(this.time.now / 500) * 0.8 + (g.bite ? 2 : 0);
+    gf.lineStyle(1, 0xe0d8c0, 0.7).beginPath().moveTo(hx, hy).lineTo(g.water[0], g.water[1] + bob).strokePath();
+    gf.fillStyle(0xd84030, 1).fillCircle(g.water[0], g.water[1] + bob, 1.2);
+    gf.setDepth(w.sprite.y + 1);
+  }
+
+  // ---- the shepherd and his flock
+  /** The goats keep round the herder; a goat that falls behind hurries after. */
+  herdFollow(g: WayGroup, spread: number) {
+    const lead = g.people[0]; if (!lead) return;
+    for (const a of g.goats) {
+      if (!a.sprite.active || a.state === "dead") continue;
+      a.home.setTo(lead.sprite.x - spread, lead.sprite.y - spread * 0.6, spread * 2, spread * 1.2);
+      const d = Math.hypot(a.sprite.x - lead.sprite.x, a.sprite.y - lead.sprite.y);
+      if (d > spread * 1.8 && !this.chase.has(a) && (a.state === "idle" || a.state === "walk")) {
+        a.state = "walk"; a.tx = lead.sprite.x + (Math.random() - 0.5) * 20; a.ty = lead.sprite.y + (Math.random() - 0.5) * 14; a.timer = 2;
+        const dx = a.tx - a.sprite.x, dy = a.ty - a.sprite.y, l = Math.hypot(dx, dy) || 1; a.sprite.setVelocity((dx / l) * 30, (dy / l) * 30);
+      }
+    }
+  }
+
+  tickHerder(g: WayGroup, dt: number) {
+    const lead = g.people[0];
+    this.herdFollow(g, 28);
+    // The stray, led back by the bell-strap.
+    if (g.stray && g.leading && g.stray.sprite.active) {
+      const a = g.stray, d = Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y);
+      a.home.setTo(this.player.x - 14, this.player.y - 10, 28, 20);
+      if (d > 90) { a.sprite.setPosition(this.player.x - 16, this.player.y + 6); a.sprite.setAlpha(0.4); this.tweens.add({ targets: a.sprite, alpha: 1, duration: 400 }); } // she finds her own way round
+      if (d > 14) { a.state = "walk"; a.tx = this.player.x; a.ty = this.player.y + 4; a.timer = 1; const l = d || 1, v = d > 30 ? 60 : 34; a.sprite.setVelocity(((this.player.x - a.sprite.x) / l) * v, ((this.player.y + 4 - a.sprite.y) / l) * v); }
+      if (Math.hypot(a.sprite.x - lead.sprite.x, a.sprite.y - lead.sprite.y) < 48) {
+        g.leading = false; g.goats.push(a); g.stray = undefined; g.quest = undefined; g.done.goat = G.dayNumber;
+        lead.say("There she is!"); lead.hold = 2; lead.face(this.player.x, this.player.y);
+        G.addFavor("Hermes", 1, 6); G.data.silver += 6;
+        G.say(`${lead.folk.name} throws his arms round the goat's neck and scolds her like a child. "Bless you, stranger." He presses milk and coin on you: ${give("Milk", 2)}, +6 silver. (Hermes, god of herdsmen, is pleased.)`);
+      }
+    }
+    // Wolves come for the flock.
+    if (g.raidT !== undefined && (g.raidT -= dt) <= 0 && G.isDay) { g.raidT = undefined; this.raid(g); }
+    const goats = g.goats.filter((a) => a.sprite.active && a.state !== "dead");
+    const wolves = this.animals.filter((a) => (a.kind === "wolf" || a.kind === "jackal") && a.sprite.active && a.state !== "dead" && a.state !== "gone" && !a.appeased);
+    for (const wf of wolves) {
+      if (this.chase.has(wf) || wf.state === "charge" || wf.state === "recoil" || wf.state === "flee" || (g.cool?.get(wf) ?? 0) > this.time.now) continue;
+      const goat = goats.sort((a, b) => Math.hypot(a.sprite.x - wf.sprite.x, a.sprite.y - wf.sprite.y) - Math.hypot(b.sprite.x - wf.sprite.x, b.sprite.y - wf.sprite.y))[0];
+      if (!goat || (Math.hypot(goat.sprite.x - wf.sprite.x, goat.sprite.y - wf.sprite.y) > 190 && !g.pack?.includes(wf))) continue;
+      if (!g.raiders.includes(wf)) {
+        g.raiders.push(wf);
+        if (g.raiders.length === 1) { lead.say(pick(WOLF_CRY)); G.say(`${lead.folk.name} the shepherd shouts: ${wf.kind === "jackal" ? "jackals" : "wolves"} at the flock! (Help him drive them off.)`); }
+      }
+      this.chase.set(wf, { to: () => (goat.sprite.active && goat.state !== "dead" ? { x: goat.sprite.x, y: goat.sprite.y } : null), speed: SPECIES[wf.kind].charge * 0.75, reach: () => this.goatTaken(g, goat, wf) });
+    }
+    // The shepherd runs at them with his staff.
+    g.raiders = g.raiders.filter((a) => a.sprite.active && a.state !== "dead" && !a.appeased && !this.offScreen(a.sprite));
+    if (g.raiders.length) {
+      const wf = g.raiders.sort((a, b) => Math.hypot(a.sprite.x - lead.sprite.x, a.sprite.y - lead.sprite.y) - Math.hypot(b.sprite.x - lead.sprite.x, b.sprite.y - lead.sprite.y))[0];
+      const d = Math.hypot(wf.sprite.x - lead.sprite.x, wf.sprite.y - lead.sprite.y);
+      if ((g.t2 -= dt) <= 0) { g.t2 = 0.5; lead.pace = 1.4; lead.walk([[wf.sprite.x, wf.sprite.y]]); if (Math.random() < 0.3) lead.say(pick(WOLF_CRY)); }
+      if (d < 22) { lead.work = "draw"; this.chase.delete(wf); wf.bolt(lead.sprite); (g.cool ??= new Map()).set(wf, this.time.now + 5000); }
+      g.raidOn = true;
+    } else if (g.raidOn) {
+      g.raidOn = false; lead.pace = g.def.pace ?? 1; lead.work = "";
+      const lost = g.lost ?? 0;
+      if (g.helpedRaid && g.done.raid === undefined) {
+        g.done.raid = G.dayNumber; G.addFavor("Hermes", 1, 6); G.data.silver += 8; G.note("savedFlock");
+        lead.say("Pan bless you!");
+        G.say(`The ${lost ? "rest of the " : ""}flock is safe. ${lead.folk.name} wipes his face. "You've a strong arm, friend. Take this." ${give("Milk", 2)}, +8 silver.${lost ? "" : " Not one lost."} (Hermes +1)`);
+        G.earn("Kleos", 1, "you saved a shepherd's flock");
+      } else if (lost) G.say(`${lead.folk.name} counts his goats, and counts again, and curses the wolves.`);
+    }
+    if (!g.raiders.length && !g.leading) this.wander(g, dt, 90, "");
+  }
+
+  /** Wolves out of the brush, after the goats. */
+  raid(g: WayGroup) {
+    const kind: Species = this.rec.terrain === 11 ? "jackal" : "wolf", n = kind === "jackal" ? 2 : 1 + (Math.random() < 0.4 ? 1 : 0);
+    const gs = this.wayGates(), lead = g.people[0];
+    const from = gs.sort((a, b) => Math.hypot(b.tile[0] * TILE - lead.sprite.x, b.tile[1] * TILE - lead.sprite.y) - Math.hypot(a.tile[0] * TILE - lead.sprite.x, a.tile[1] * TILE - lead.sprite.y))[0];
+    if (!from) return;
+    for (let i = 0; i < n; i++) {
+      const x = from.tile[0] * TILE + 8 + i * 10, y = from.tile[1] * TILE + 8 + i * 6;
+      const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - 80, y - 80, 160, 160), (px, py) => this.free(px, py));
+      this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+      this.animals.push(a); (g.pack ??= []).push(a);
+    }
+    G.say(kind === "jackal" ? "Yipping in the scrub: jackals, slinking toward the goats." : "Grey shapes slip out of the brush, low to the ground, toward the flock: wolves.");
+  }
+
+  goatTaken(g: WayGroup, goat: Animal, wf: Animal) {
+    if (!goat.sprite.active || goat.state === "dead") return;
+    goat.state = "dead"; goat.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090);
+    g.lost = (g.lost ?? 0) + 1;
+    g.goats.splice(g.goats.indexOf(goat), 1);
+    this.time.delayedCall(1800, () => { this.tweens.add({ targets: goat.sprite, alpha: 0, duration: 600, onComplete: () => { goat.sprite.destroy(); const i = this.animals.indexOf(goat); if (i >= 0) this.animals.splice(i, 1); } }); });
+    G.say(`The ${beast(wf.kind)} pulls down one of the goats!`);
+    this.runOff(wf, 90);
+  }
+
+  /** A creature (or a man) makes for the nearest edge and is gone. */
+  runOff(a: Animal, speed = 80) {
+    const x = a.sprite.x, y = a.sprite.y;
+    const ex = [[-30, y], [WW * TILE + 30, y], [x, -30], [x, WH * TILE + 30]].sort((p, q) => Math.hypot(p[0] - x, p[1] - y) - Math.hypot(q[0] - x, q[1] - y))[0];
+    a.appeased = true; a.rolled = true;
+    this.chase.set(a, { to: () => ({ x: ex[0], y: ex[1] }), speed, reach: () => {}, leave: true });
+    this.time.delayedCall(9000, () => { if (a.sprite.active && this.offScreen(a.sprite)) { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } });
+    const check = this.time.addEvent({ delay: 300, loop: true, callback: () => {
+      if (!a.sprite.active) { check.remove(); return; }
+      if (this.offScreen(a.sprite)) { check.remove(); this.chase.delete(a); a.state = "gone"; a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); }
+      else if (!this.chase.has(a) && a.state !== "charge" && a.state !== "recoil" && a.state !== "dead") this.chase.set(a, { to: () => ({ x: ex[0], y: ex[1] }), speed, reach: () => {}, leave: true });
+    } });
+  }
+
+  // ---- the hunter
+  tickHunter(g: WayGroup, dt: number) {
+    const w = g.people[0];
+    if (w.lying) return;
+    const PREY: Species[] = ["deer", "hare", "boar", "ibex", "bustard"];
+    const alive = (a?: Animal) => !!a && a.sprite.active && a.state !== "dead" && a.state !== "gone" && a.sprite.visible && this.animals.includes(a);
+    const d = (a: Animal) => Math.hypot(a.sprite.x - w.sprite.x, a.sprite.y - w.sprite.y);
+    if (g.phase === "dress") {
+      const c = g.prey!;
+      if (!c.sprite.active) { g.phase = "seek"; return; }
+      if (d(c) > 16) { if (!w.walking) { const side = w.sprite.x < c.sprite.x ? -10 : 10, r = d(c) > 40 ? this.wayRoute(w.sprite.x, w.sprite.y, Math.floor(c.sprite.x / TILE), Math.floor(c.sprite.y / TILE)) : null; w.walk(r && r.length > 1 ? r : [[c.sprite.x + side, c.sprite.y]]); } return; }
+      w.work = "kneel"; w.face(c.sprite.x, c.sprite.y);
+      if ((g.t2 -= dt) <= 0) {
+        w.work = ""; g.kills++; g.phase = "seek"; g.t2 = 3;
+        this.tweens.add({ targets: c.sprite, alpha: 0, duration: 500, onComplete: () => { c.sprite.destroy(); const i = this.animals.indexOf(c); if (i >= 0) this.animals.splice(i, 1); } });
+        w.say(c.kind === "deer" ? "Lady Artemis, your share." : "Good."); if (g.kills >= 2) g.life = 0;
+      }
+      return;
+    }
+    if (g.phase === "draw") {
+      if (!alive(g.prey)) { g.phase = "seek"; w.work = ""; return; }
+      w.face(g.prey!.sprite.x, g.prey!.sprite.y); w.work = "draw";
+      if ((g.t2 -= dt) <= 0) { w.work = ""; g.phase = "loosed"; this.hunterLoose(g, w, g.prey!); }
+      return;
+    }
+    if (g.phase === "loosed") return;
+    if (g.phase === "stalk") {
+      const p = g.prey;
+      if (!alive(p) || p!.state === "flee" || d(p!) > 300) { g.phase = "seek"; g.t2 = 2; w.pace = 1; return; }
+      if (d(p!) <= 92 || this.chase.get(p!)) { w.walk([]); w.doing = "idle"; g.phase = "draw"; g.t2 = 0.9; return; }
+      if ((g.t3 = (g.t3 ?? 0) - dt) <= 0) { g.t3 = 1.2; w.pace = 0.55; const r = this.wayRoute(w.sprite.x, w.sprite.y, Math.floor(p!.sprite.x / TILE), Math.floor(p!.sprite.y / TILE)); if (r) w.walk(r.slice(0, Math.max(1, r.length - 3))); }
+      return;
+    }
+    // Looking for game.
+    if ((g.t2 -= dt) > 0) { this.wander(g, dt, 120, ""); return; }
+    g.t2 = 2;
+    const game = this.animals.filter((a) => PREY.includes(a.kind) && alive(a) && (a.state === "idle" || a.state === "walk") && !this.chase.has(a) && d(a) < 260).sort((a, b) => d(a) - d(b))[0];
+    if (game) { g.prey = game; g.phase = "stalk"; g.t3 = 0; if (Math.hypot(w.sprite.x - this.player.x, w.sprite.y - this.player.y) < 160) w.say("Shh..."); }
+  }
+
+  hunterLoose(g: WayGroup, w: Wayfarer, prey: Animal) {
+    const sx = w.sprite.x, sy = w.sprite.y - 4, tx = prey.sprite.x, ty = prey.sprite.y;
+    const img = this.add.image(sx, sy, "arrow").setDepth(100001).setRotation(Math.atan2(ty - sy, tx - sx));
+    if (Math.hypot(sx - this.player.x, sy - this.player.y) < 280) SOUND.sfx("loose");
+    this.tweens.add({ targets: img, x: tx, y: ty, duration: Math.max(180, (Math.hypot(tx - sx, ty - sy) / ARROW_SPEED) * 1000), onComplete: () => {
+      img.destroy();
+      if (g.gone) return;
+      g.phase = "seek"; g.t2 = 2.5;
+      const there = prey.sprite.active && prey.state !== "dead" && Math.hypot(prey.sprite.x - tx, prey.sprite.y - ty) < 14;
+      if (!there || Math.random() > 0.6) { if (prey.sprite.active && prey.state !== "dead") prey.bolt(w.sprite); w.say(pick(["Missed!", "Curse it.", "Too far."])); return; }
+      if (prey.hp < 0) prey.hp = QUARRY[prey.kind].hp;
+      prey.hp -= prey.kind === "boar" || prey.kind === "bear" ? 1 : 2; // a hunter's arrow goes where he means it to
+      if (prey.hp <= 0) {
+        prey.state = "dead"; prey.sprite.setVelocity(0, 0).setFlipY(true).setTint(0xb0a090); this.chase.delete(prey);
+        g.phase = "dress"; g.prey = prey; g.t2 = 3.5;
+        if (Math.hypot(sx - this.player.x, sy - this.player.y) < 300) G.say(`${w.folk.name} the hunter's arrow takes the ${beast(prey.kind)}.`);
+        return;
+      }
+      prey.sprite.setTint(0xff8080); this.time.delayedCall(250, () => prey.sprite.clearTint());
+      // A wounded boar or bear turns on whoever hurt it.
+      if (prey.kind === "boar" || prey.kind === "bear") {
+        g.phase = "draw"; g.t2 = 1.1; g.prey = prey;
+        w.say("Gods! It's coming!");
+        G.say(`The wounded ${beast(prey.kind)} turns on ${w.folk.name} the hunter!`);
+        this.chase.set(prey, { to: () => (w.lying || g.gone ? null : { x: w.sprite.x, y: w.sprite.y }), speed: SPECIES[prey.kind].charge * 0.8, reach: () => this.hunterGored(g, w, prey) });
+        g.beast = prey;
+      } else prey.bolt(w.sprite);
+    } });
+  }
+
+  hunterGored(g: WayGroup, w: Wayfarer, a: Animal) {
+    w.lying = true; w.work = ""; w.walk([]); g.phase = "hurt"; g.beast = a;
+    a.state = "idle"; a.timer = 3; a.rolled = false; a.sprite.setVelocity(0, 0);
+    this.cameras.main.shake(80, 0.002);
+    G.say(`The ${beast(a.kind)} catches ${w.folk.name} and throws him down! He lies in the grass, hurt. (Help him: food, or cloth to bind the wound.)`);
+    for (const p of g.people.slice(1)) p.say("Father!");
+  }
+
+  // ---- brigands
+  tickBrigands(g: WayGroup, dt: number) {
+    const live = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed);
+    const px = this.player.x, py = this.player.y;
+    const dist = (a: Animal) => Math.hypot(a.sprite.x - px, a.sprite.y - py);
+    const nearest = live.length ? Math.min(...live.map(dist)) : 999;
+    if (!live.length) {
+      if (g.phase === "fight" && g.done.won === undefined) {
+        g.done.won = G.dayNumber;
+        const slain = g.foes.filter((a) => a.state === "dead").length, loot = 4 + slain * (6 + this.depth * 2) + Math.floor(Math.random() * 6);
+        G.data.silver += loot;
+        G.say(`The road is quiet again. ${slain ? `Among the dead men's things you find a purse:` : "They dropped their purse as they ran:"} +${loot} silver.`);
+        G.earn("Kleos", 1, "you fought off brigands on the road");
+      }
+      if (g.foes.every((a) => !a.sprite.active || a.state === "dead")) { const i = this.ways.indexOf(g); if (i >= 0) this.ways.splice(i, 1); g.gone = true; }
+      return;
+    }
+    // Strike first, and it's a fight whatever was said.
+    if (g.phase !== "fight" && live.some((a) => a.state === "charge" || a.state === "recoil" || (a.hp >= 0 && a.hp < QUARRY.brigand.hp))) { if (g.phase === "parley") ui(this).closeTalk(); for (const a of live) a.appeased = false; this.brigandsAttack(g, "Blood is drawn, and that settles it."); return; }
+    if (g.phase === "") {
+      if (nearest < (G.isDay ? 120 : 84)) {
+        g.phase = "coming"; G.say(live.length > 1 ? `${live.length === 2 ? "Two" : "Three"} men step out onto the way ahead of you, and they are not smiling.` : "A man steps out onto the way ahead of you, and he is not smiling.");
+        for (const a of live) this.alarm(a);
+      }
+      return;
+    }
+    if (g.phase === "coming") {
+      for (const a of live) { if (a.state === "charge" || a.state === "recoil") continue; a.state = "walk"; a.tx = px; a.ty = py + 2; a.timer = 1; (a as FigureFoe).faceTo(px, py); }
+      if (nearest < 34) this.parley(g);
+      else if (nearest > 280) { g.phase = "gaveup"; G.say("You leave them behind. They don't follow far."); for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); } }
+      return;
+    }
+    if (g.phase === "gaveup") { if (nearest < 90) g.phase = "coming"; return; }
+    if (g.phase === "parley") {
+      for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); (a as FigureFoe).faceTo(px, py); }
+      if (!ui(this).talkPanel) this.brigandsAttack(g, "You turn your back on them. That was a mistake.");
+      return;
+    }
+    if (g.phase === "fight") {
+      for (const a of live) {
+        // Hurt badly, a man throws down his weapon and runs.
+        if (a.hp > 0 && a.hp <= 1) { this.rout(g, a); continue; }
+        if (a.state === "idle" || a.state === "walk") a.charge(30);
+        if ((a as FigureFoe).folk.extras.pole === "bow" && a.state === "charge" && dist(a) > 70 && dist(a) < 230 && (g.shootT -= dt) <= 0) {
+          g.shootT = 2.2 + Math.random(); a.state = "recoil"; a.timer = 0.6; a.sprite.setVelocity(0, 0);
+          this.time.delayedCall(250, () => { if (a.sprite.active && a.state !== "dead") this.shootAt(a); });
+        }
+      }
+    }
+  }
+
+  /** The brigands' demand, and what you can do about it. */
+  parley(g: WayGroup) {
+    const u = ui(this), live = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed), n = live.length;
+    g.phase = "parley";
+    const toll = Math.min(G.data.silver, 6 + 4 * n + this.depth * 2);
+    const go = (msg: string) => { u.closeTalk(); this.brigandsLeave(g, msg); };
+    const fight = (msg: string) => { u.closeTalk(); this.brigandsAttack(g, msg); };
+    const opts: { label: string; fn: () => void }[] = [];
+    if (G.data.silver > 0) opts.push({ label: `Hand over ${toll} silver`, fn: () => { G.data.silver -= toll; go(`They weigh the coins in their hands, grin, and melt back into the brush. (−${toll} silver)`); } });
+    else opts.push({ label: "Turn out your empty purse", fn: () => { const r = d12(); if (r <= 6) go("They stare at your empty purse, and laugh, and one of them claps you on the back. \"Poorer than us! Go on, then.\""); else fight("\"Nothing? Then we'll take it out of your hide.\""); } });
+    const tl = (G.data.aretai.Logos ?? 3) + 1 + G.boon("Hermes");
+    opts.push({ label: "Talk your way past (Logos)", fn: () => { const r = d12(); if (r <= tl) go(`You talk: about the soldiers you passed on the road, about the shepherd who saw them, about how poor you are and how rich the next fool will be. They look at each other, and let you by. (d12 ${r}, needed 1–${tl})`); else fight(`They hear you out, then laugh. "Pretty words." (d12 ${r}, needed 1–${tl})`); } });
+    const held = G.selectedItem?.id ?? "", armed = ["spear", "sword", "axe"].includes(held), kl = Math.min(3, Math.floor((G.data.currencies.Kleos ?? 0) / 3));
+    const tt = Math.max(1, (G.data.aretai.Thymos ?? 3) + (armed ? 2 : 0) + kl - (n - 1) + G.boon("Ares"));
+    opts.push({ label: `Face them down (Thymos${armed ? `, ${ITEMS[held].name.toLowerCase()} in hand` : ""})`, fn: () => { const r = d12(); if (r <= tt) { go(`You plant your feet and look them in the eye${armed ? `, your ${ITEMS[held].name.toLowerCase()} ready` : ""}${kl ? ", and one of them mutters your name" : ""}. They decide you are not worth it. (d12 ${r}, needed 1–${tt})`); G.earn("Kleos", 1, "you stared down brigands"); } else fight(`Your voice cracks. They smell it. (d12 ${r}, needed 1–${tt})`); } });
+    opts.push({ label: "Fight them", fn: () => fight("You won't pay. So be it.") });
+    const names = live.map((a) => (a as FigureFoe).folk.name).join(" and ");
+    u.showTalk(n > 1 ? "Brigands" : "A brigand", `${names} · men of the lonely roads`, `${pick(g.def.greet)}${live.some((a) => (a as FigureFoe).folk.extras.pole === "bow") ? "\n\nOne of them has an arrow on the string." : ""}`, opts);
+  }
+  brigandsAttack(g: WayGroup, msg: string) {
+    g.phase = "fight";
+    G.say(`${msg} They come at you!`);
+    for (const a of g.foes) if (a.sprite.active && a.state !== "dead" && !a.routed) { a.charge(30); this.alarm(a); }
+  }
+  brigandsLeave(g: WayGroup, msg: string) {
+    g.phase = "paid"; G.say(msg);
+    for (const a of g.foes) if (a.sprite.active && a.state !== "dead") { a.appeased = true; a.state = "idle"; this.runOff(a, 40); }
+  }
+  rout(g: WayGroup, a: FigureFoe) {
+    a.routed = true; a.appeased = true; a.state = "idle"; a.sprite.setVelocity(0, 0);
+    const what = a.folk.extras.pole === "bow" ? "bow" : a.folk.extras.pole ?? "knife";
+    G.say(`${a.folk.name} throws down his ${what} and runs for it!`);
+    this.runOff(a, 95);
+  }
+  /** Yielding in the fight: your purse thrown down in the road. */
+  yieldPurse(g: WayGroup) {
+    if (G.data.silver <= 0) { G.say("You've nothing to throw them. They keep coming."); return; }
+    const n = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed).length, toll = Math.min(G.data.silver, 10 + 5 * n + this.depth * 2);
+    G.data.silver -= toll;
+    for (const a of g.foes) if (a.state === "charge" || a.state === "recoil") { a.state = "idle"; a.sprite.setVelocity(0, 0); }
+    this.brigandsLeave(g, `You throw your purse down in the road. They snatch it up and are gone. (−${toll} silver)`);
+  }
+
+  // ---- what you do for them
+  /** A creature slain or calmed: it may be a wolf at the flock, or the boar that went for the hunter. */
+  creatureEvent(a: Animal, what: "slain" | "appeased") {
+    for (const g of this.ways) {
+      if (g.raiders.includes(a)) g.helpedRaid = true;
+      if (g.beast === a && what === "slain") {
+        const w = g.people[0];
+        if (w && !w.lying && g.done.saved === undefined) {
+          g.done.saved = G.dayNumber; g.phase = "seek"; w.work = ""; w.say("Artemis! You saved me!");
+          G.data.silver += 6; G.addFavor("Artemis", 1, 6);
+          G.say(`${w.folk.name} lets out his breath. "That was close as a whisker. You've a hunter's eye." He gives you a share of his purse: +6 silver. (Artemis +1)`);
+          G.earn("Kleos", 1, "you saved a hunter from a beast");
+        } else if (w && w.lying) g.killedBeast = true;
+      }
+      if (g.prey === a && what === "slain" && g.phase !== "dress") { const w = g.people[0]; if (w && !w.lying) { w.say("Hey! That one was mine!"); g.phase = "seek"; g.t2 = 3; w.work = ""; } }
+    }
+  }
+  appease(a: Animal) {
+    if (a.kind === "brigand") { const g = this.ways.find((x) => x.foes.includes(a as FigureFoe)); if (g) this.yieldPurse(g); return; }
+    super.appease(a);
+  }
+  kill(a: Animal) {
+    if (a.kind !== "brigand") { super.kill(a); return; }
+    G.note("kill");
+    a.state = "dead"; a.sprite.setVelocity(0, 0).setAngle(90).setTint(0xc8b8a8);
+    G.say("The brigand goes down, and does not get up.");
+    const g = this.ways.find((x) => x.foes.includes(a as FigureFoe));
+    if (g) for (const b of g.foes) if (b !== a && b.sprite.active && b.state !== "dead" && !b.routed && Math.random() < 0.5) this.rout(g, b);
+    this.time.delayedCall(3500, () => this.tweens.add({ targets: a.sprite, alpha: 0, duration: 1200, onComplete: () => { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } }));
+  }
+  struckDown(a: Animal | string) {
+    if (typeof a !== "string" && a.kind === "brigand" && G.data.silver > 0 && !G.warded("Hades") && !G.data.divine.charges.Hades) {
+      const lost = Math.ceil(G.data.silver / 2); G.data.silver -= lost;
+      G.say(`While you lie senseless, they go through your things: −${lost} silver.`);
+      const g = this.ways.find((x) => x.foes.includes(a as FigureFoe)); if (g) { g.phase = "paid"; for (const b of g.foes) if (b.sprite.active && b.state !== "dead") { b.appeased = true; this.runOff(b, 40); } }
+    }
+    super.struckDown(a);
+  }
+  /** Their campfire lights the dark as yours does, and the dead keep out of it. */
+  fireLights() {
+    const out = super.fireLights();
+    for (const g of this.ways) if (g.fire && !g.leaving) out.push({ x: g.fire.x, y: g.fire.y - 6, r: 60 });
+    return out;
+  }
+
+  /** Talking with wayfarers: news of the road, a little trade, and now and then someone who needs a hand. */
+  talkWay(g: WayGroup, w: Wayfarer, said?: string) {
+    const u = ui(this), d = g.def, today = G.dayNumber, first = !g.met;
+    g.met = true; g.talking = true;
+    if (d.id !== "runner") for (const p of g.people) { p.hold = Math.max(p.hold, 2); if (!p.lying) p.face(this.player.x, this.player.y); }
+    const again = (s: string) => this.talkWay(g, w, s);
+    const opts: { label: string; fn: () => void }[] = [];
+    const held = G.selectedItem?.id ?? "", food = isFoodGift(held), heldName = held ? ITEMS[held].name.toLowerCase() : "";
+    const buy = (id: string, price: number, qty = 1) => { if (G.data.silver >= price) opts.push({ label: `Buy ${qty > 1 ? `${qty} ` : ""}${ITEMS[id].name.toLowerCase()} (${price} silver)`, fn: () => { G.data.silver -= price; again(`${give(id, qty)}. (−${price} silver)`); } }); };
+    const news = (who: string) => { if (G.data.askedRumor.road !== today) opts.push({ label: "Ask about the road ahead", fn: () => {
+      G.data.askedRumor.road = today;
+      const r = UIScene.makeRumor("road", SLICE_TERRAINS.filter((t) => t !== this.rec.terrain));
+      if (!r) { again(`"Nothing you haven't seen yourself, by the look of your sandals."`); return; }
+      r.from = "road";
+      const [x, y] = r.key.split(",").map(Number);
+      again(`"${who} ${RUMOR_WORDS[r.terrain]}, ${directions(x, y)}. Worth the walk, if you've the legs for it."\n\n(Your journal, J, notes the way.)`);
+    } }); };
+    const share = (god: string, cap: number, thanks: string) => { if (food && g.done.fed === undefined) opts.push({ label: `Share your ${heldName} with ${g.people.length > 1 ? "them" : w.folk.female ? "her" : "him"}`, fn: () => {
+      g.done.fed = today; G.removeItem(held, 1); const v = G.addFavor(god, 1, cap); again(`${thanks} (${god} ${v >= 0 ? "+" : ""}${v})`);
+    } }); };
+    let text = said ?? (first ? pick(d.greet) : pick([`${w.folk.name} waits to hear what you want.`, `"Yes, friend?"`, `${w.folk.name} looks up.`]));
+    const sub = `${this.wayNames(g)} · ${g.god}${g.god.endsWith("s") ? "'" : "'s"} folk`;
+    switch (d.id) {
+      case "traveler":
+        news("I came by"); share("Zeus", 5, "\"Bless you. A stranger's bread tastes of the gods.\" Zeus Xenios sees it.");
+        break;
+      case "peddler":
+        buy("Torch", 3); buy("Wax", 4); buy("Arrow", 5, 3); buy("Fiber", 3, 4); buy("Cloth", 12); news("A carter told me of");
+        break;
+      case "pilgrim": case "pilgrims": {
+        const known = Object.entries(G.data.screens).find(([k, s]) => s.shrine && k !== this.key);
+        if (g.done.way === undefined) {
+          if (known) opts.push({ label: `Tell ${g.people.length > 1 ? "them" : "him"} the way to the shrine of ${known[1].shrine!.god}`, fn: () => {
+            g.done.way = today; const [x, y] = known[0].split(",").map(Number);
+            const a = G.addFavor("Hermes", 1, 5), b = G.addFavor(known[1].shrine!.god, 1, 4);
+            again(`You tell them of the shrine of ${known[1].shrine!.god}, ${directions(x, y)}. They repeat it back twice to be sure, and thank you, and promise to say your name to the god. (Hermes ${a >= 0 ? "+" : ""}${a}, ${known[1].shrine!.god} ${b >= 0 ? "+" : ""}${b})`);
+          } });
+          else if (this.rec.shrine) opts.push({ label: "Point them to the shrine here", fn: () => { g.done.way = today; const b = G.addFavor(this.rec.shrine!.god, 1, 4); again(`"Here? Gods, we walked right past it!" They laugh at themselves, and promise to say your name at the altar. (${this.rec.shrine!.god} ${b >= 0 ? "+" : ""}${b})`); } });
+        }
+        share("Zeus", 5, "They eat a little, and pray over the rest, and thank you.");
+        break;
+      }
+      case "rhapsode": {
+        const teach = MELODIES.filter((m) => m.source === "taught" && m.id !== "augury" && !G.data.songs.includes(m.id));
+        if (g.done.song === undefined) opts.push({ label: food ? `Give him your ${heldName}, and ask for a song` : "Ask him for a song", fn: () => {
+          if (!food) { again(`"A song for a crust, I said. Singers eat too, friend." (Hold some food to give him.)`); return; }
+          g.done.song = today; G.removeItem(held, 1);
+          if (teach.length) { const m = teach[Math.floor(Math.random() * teach.length)]; again(`He eats, wipes his fingers on his cloak, and sings, and makes you sing it back until you have it.\n\n${u.learnSong(m)}`); }
+          else { const v = G.addFavor("Apollo", 1, 4); again(`He eats, and sings of the wrath of Achilles until the light changes. You know every song he knows, he says, so he gives you his best instead. (Apollo ${v >= 0 ? "+" : ""}${v})`); }
+        } });
+        if (!G.count("Lyre")) buy("Lyre", 35);
+        news("I sang at a wedding past");
+        break;
+      }
+      case "runner":
+        text = said ?? "\"Can't stop! Message for the council!\" He's past you before you can say more.";
+        if (g.done.cheer === undefined) opts.push({ label: "Cheer him on his way", fn: () => { g.done.cheer = today; const v = G.addFavor("Hermes", 1, 3); u.closeTalk(); w.say("Ha!"); G.say(`He raises a hand without slowing. Hermes loves a runner, and those who speed him. (Hermes ${v >= 0 ? "+" : ""}${v})`); } });
+        break;
+      case "hunter": {
+        if (w.lying) { this.helpHurt(g, w, opts, again, "Artemis"); text = said ?? `${w.folk.name} lies clutching his side, grey in the face. "The boar... it came out of nowhere. Help me up, friend, or help me some other way."`; break; }
+        if (g.kills) buy("Meat", 4); buy("Hide", 6);
+        if (g.done.game === undefined) opts.push({ label: "Ask about the hunting here", fn: () => {
+          g.done.game = today; G.data.archeryXp += 8;
+          const kinds = [...new Set(this.animals.filter((a) => a.state !== "dead" && !["goat", "eidolon", "brigand"].includes(a.kind) && !isMonster(a.kind)).map((a) => beast(a.kind)))];
+          again(`"${kinds.length ? `There's ${kinds.slice(0, 3).join(", ")} about, if you've eyes.` : "Thin today. Everything's gone to ground."} Walk slow, keep the wind in your face, and loose before you're sure, not after." He shows you how he nocks without looking. (Archery practice +8)`);
+        } });
+        break;
+      }
+      case "herder": {
+        buy("Milk", 4);
+        if (!G.data.songs.includes("shepherd") && g.done.song === undefined) opts.push({ label: "Ask him for a song", fn: () => { g.done.song = today; again(`"The call? Every shepherd has it. Listen." He whistles it to the goats, who come trotting, and then makes you do it until they come for you too.\n\n${u.learnSong(melody("shepherd"))}`); } });
+        if (g.quest === "goat" && !said) text = `${text}\n\n"And if you see a brown nanny with a bell on her, she's mine. Strayed off this morning, the wretch. Bring her back and you'll not be sorry."`;
+        if (g.raiders.length) text = said ?? `"The wolves! Never mind talking, help me!"`;
+        break;
+      }
+      case "woodcutter":
+        buy("Wood", 4, 3);
+        if (g.done.tip === undefined) opts.push({ label: "Ask about the woods", fn: () => { g.done.tip = today; const v = G.addFavor("Athena", 1, 3); again(`"Cut where the tree tells you. Look at the lean, look at the crown. Fell the old ones, and leave the young; take one, plant one, and the dryads don't mind. Much." (Athena ${v >= 0 ? "+" : ""}${v})`); } });
+        break;
+      case "herbwoman": {
+        if (g.done.taught === undefined) opts.push({ label: "Ask her to show you a plant", fn: () => {
+          g.done.taught = today;
+          const unknown = Object.keys(FORAGE).filter((id) => G.lore(id) < 1 && LORE[id]);
+          if (unknown.length) { const id = unknown[Math.floor(Math.random() * unknown.length)]; G.data.lore.tier[id] = 1; again(`She shows you ${LORE[id].vague}, and names it: ${LORE[id].name}. "Now you'll know it when you see it." (${LORE[id].name}: Basics)`); }
+          else again("\"You know them as well as I do. Who taught you? Never mind. Go on with you.\"");
+        } });
+        buy("Thyme", 3); buy("Mint", 4);
+        break;
+      }
+      case "fisher": {
+        const sea = this.rec.terrain === 7;
+        buy(sea ? "Sardine" : "Chub", 3); if (!G.count("rod")) buy("rod", 8);
+        if (g.done.tip === undefined) opts.push({ label: "Ask how they're biting", fn: () => { g.done.tip = today; again(`"Dawn and dusk, and after rain. ${sea ? "The deep water holds the big ones, if you've a boat." : "In the slow water by the bank, where it's dark."} And don't stamp about."`); } });
+        break;
+      }
+      case "wounded": case "parched":
+        if (d.id === "wounded") { this.helpHurt(g, w, opts, again, "Zeus"); text = said ?? (g.done.helped === undefined ? pick(d.greet) : "\"Gods keep you, friend.\""); break; }
+        if (g.done.helped === undefined) {
+          const water = G.count("jar") > 0 && G.data.jarWater > 0;
+          opts.push({ label: water ? "Give him water from your jar" : G.count("jar") ? "Your jar is empty" : "You have no water to give", fn: () => {
+            if (!water) { again("He looks at your empty hands and sags. (Fill your jar at a spring, a river or your well.)"); return; }
+            g.done.helped = today; const n = Math.min(G.data.jarWater, 3); G.data.jarWater -= n;
+            const v = G.addFavor("Zeus", 1, 6), gift = pick(["Obsidian", "OldCoin", "Amber"]);
+            u.closeTalk(); w.lying = false;
+            G.say(`He drinks like a dry field drinks rain. "I owe you my life. Here, it's all I have that's worth anything." ${give(gift, 1)}. (Zeus ${v >= 0 ? "+" : ""}${v})`);
+            this.time.delayedCall(2500, () => { if (!g.gone) this.wayLeave(g); });
+          } });
+        }
+        break;
+      case "couple":
+        if (g.done.secret === undefined) {
+          opts.push({ label: "Promise you never saw them", fn: () => { g.done.secret = today; const v = G.addFavor("Aphrodite", 1, 5); u.closeTalk(); for (const p of g.people) { p.pace = 1.6; p.hold = 0; } G.say(`"Thank you! Thank you!" They are already running. (Aphrodite ${v >= 0 ? "+" : ""}${v})`); } });
+          opts.push({ label: "Tell them to go home to her father", fn: () => { g.done.secret = today; const v = G.addFavor("Hera", 1, 4); G.addFavor("Aphrodite", -1); u.closeTalk(); for (const p of g.people) p.hold = 0; G.say(`The girl bursts into tears; the boy glares at you. They go on anyway, the way they were going. Hera, keeper of marriages, approves of you, if they don't. (Hera ${v >= 0 ? "+" : ""}${v}, Aphrodite −1)`); } });
+        }
+        break;
+      case "quarrel":
+        if (g.done.judged === undefined) {
+          const [old, young] = g.people;
+          const tl = (G.data.aretai.Logos ?? 3) + 2 + G.boon("Athena");
+          opts.push({ label: "Hear them both out, and judge (Logos)", fn: () => {
+            const r = d12();
+            if (r > tl) { G.addFatigue(5); again(`You listen, and ask, and listen, and by the end they are both shouting at you instead of each other. (d12 ${r}, needed 1–${tl}; +5 Fatigue)`); return; }
+            g.done.judged = today; const v = G.addFavor("Zeus", 1, 6); G.data.silver += 5; G.earn("Kleos", 1, "you judged a boundary quarrel");
+            u.closeTalk(); G.say(`You walk the line with them, find the old hole where the stone stood, and set it back. They grumble, and then they shake hands, and press 5 silver on you for your trouble. (d12 ${r}, needed 1–${tl}; Zeus of boundaries ${v >= 0 ? "+" : ""}${v}; +5 silver)`);
+            this.time.delayedCall(2000, () => { if (!g.gone) this.wayLeave(g); });
+          } });
+          const side = (i: number) => () => {
+            g.done.judged = today; u.closeTalk();
+            const right = i === g.truth, v = G.addFavor("Zeus", right ? 1 : -1, 6);
+            G.say(right ? `You side with ${g.people[i].folk.name}. The other one's face falls; he knows he moved it. (Zeus, who guards boundaries, ${v >= 0 ? "+" : ""}${v})` : `You side with ${g.people[i].folk.name}, and he smirks a little too much. You have just helped a man steal a field. (Zeus ${v >= 0 ? "+" : ""}${v})`);
+            this.time.delayedCall(2000, () => { if (!g.gone) this.wayLeave(g); });
+          };
+          opts.push({ label: `Side with ${old.folk.name}, the elder`, fn: side(0) });
+          opts.push({ label: `Side with ${young.folk.name}`, fn: side(1) });
+        }
+        break;
+      case "camp": {
+        if (g.done.sat !== today) opts.push({ label: "Sit by their fire a while", fn: () => {
+          g.done.sat = today; G.addFatigue(-20); G.heal(4); G.essence = { ...G.essenceMax };
+          again(`They make room for you on the log. Someone hands you bread and a cup; someone else tells a story about a one-eyed giant that you're fairly sure isn't true. (Fatigue −20, Vitality +4, Essence full)`);
+        } });
+        share("Zeus", 6, "You add your share to the common pot, as a guest should. Zeus Xenios sees it.");
+        if (G.data.songs.length && g.done.sang === undefined) opts.push({ label: "Sing them a song", fn: () => {
+          g.done.sang = today; const m = melody(pick(G.data.songs)), coin = 2 + Math.floor(Math.random() * 5); G.data.silver += coin;
+          const v = G.addFavor("Apollo", 1, 4);
+          again(`You sing them ${songName(m)}. They clap along, badly, and toss you a few coins when you're done. (+${coin} silver, Apollo ${v >= 0 ? "+" : ""}${v})`);
+        } });
+        news("We came by");
+        break;
+      }
+      case "caravan":
+        buy("Wine", 10); buy("OliveOil", 8); buy("Cloth", 12); buy("Honey", 6); buy("Lamp", 10); news("We came through");
+        break;
+      case "procession":
+        text = said ?? `${text}\n\nThey go to the festival of ${g.god}.`;
+        if (g.done.hymn !== today) opts.push({ label: `Walk with them a while, and join the hymn to ${g.god}`, fn: () => {
+          g.done.hymn = today; G.data.clock = Math.min(G.data.clock + 0.5, 23.5); const v = G.addFavor(g.god, 2, 6);
+          u.closeTalk(); G.say(`You fall in with them and sing until your throat is raw, and turn back where the road bends. (Half an hour passes; ${g.god} ${v >= 0 ? "+" : ""}${v})`);
+        } });
+        break;
+      case "soldiers":
+        if (g.done.news === undefined) opts.push({ label: "Ask them for news", fn: () => { g.done.news = today; again(pick(["\"Brigands on the far roads, three of them, one with a bow. If you meet them, run, or pay. Don't be a hero.\"", "\"Wolves came down off the mountain last winter and took half a village's sheep. Keep your goats in at night.\"", "\"Nothing. Marching, mostly. Our captain's lost, but don't tell him we said so.\""])); } });
+        if (held === "Wine") opts.push({ label: "Offer them a drink of your wine", fn: () => { G.removeItem("Wine", 1); const v = G.addFavor("Ares", 1, 4); again(`They pass it round and it's gone in a breath. "A good farmer. Ares keep your fields." (Ares ${v >= 0 ? "+" : ""}${v})`); } });
+        break;
+    }
+    u.showTalk(d.title, sub, text, opts);
+  }
+
+  /** Someone lying hurt: food, or cloth to bind the wound, and they'll get up and go on. */
+  helpHurt(g: WayGroup, w: Wayfarer, opts: { label: string; fn: () => void }[], again: (s: string) => void, god: string) {
+    if (g.done.helped !== undefined || !w.lying) return;
+    const held = G.selectedItem?.id ?? "", food = isFoodGift(held), cloth = G.count("Cloth") > 0 ? "Cloth" : G.count("Fiber") >= 2 ? "Fiber" : "";
+    const helped = (how: string) => {
+      g.done.helped = G.dayNumber; w.lying = false; w.hold = 2;
+      const v = G.addFavor(god, god === "Zeus" ? 2 : 1, god === "Zeus" ? 8 : 6);
+      let gift = "";
+      if (g.def.id === "hunter") { gift = ` ${give("Meat", 2)}, ${give("Hide", 1)}.`; G.data.archeryXp += 15; gift += " And he shows you the trick of a second arrow nocked before the first lands. (Archery practice +15)"; }
+      else { G.data.silver += 8; gift = " He presses 8 silver on you: \"All I have, and gladly.\""; }
+      ui(this).closeTalk();
+      G.say(`${how} He gets up, slowly, and tests his weight.${gift} (${god} ${v >= 0 ? "+" : ""}${v})`);
+      G.earn("Kleos", g.killedBeast ? 2 : 1, g.killedBeast ? "you killed the beast and saved its hunter" : "you helped a stranger hurt on the road");
+      this.time.delayedCall(3000, () => { if (!g.gone) { for (const p of g.people) p.pace = 0.6; this.wayLeave(g); } });
+    };
+    if (food) opts.push({ label: `Give ${w.folk.female ? "her" : "him"} your ${ITEMS[held].name.toLowerCase()}`, fn: () => { G.removeItem(held, 1); helped(`${w.folk.name} eats as if it were the first food in days. Color comes back into ${w.folk.female ? "her" : "his"} face.`); } });
+    if (cloth) opts.push({ label: `Bind the wound with ${cloth === "Cloth" ? "cloth" : "twisted fiber"}`, fn: () => { G.removeItem(cloth, cloth === "Cloth" ? 1 : 2); helped(`You bind the wound tight. ${w.folk.name} hisses through his teeth, then nods.`); } });
+    if (!food && !cloth) opts.push({ label: "You have nothing to help with", fn: () => again("(Hold some food to give, or carry cloth or fiber to bind the wound.)") });
+  }
+
   /** Wolves hunt the forests from dusk. */
   wolvesOut = false;
   maybeWolves(gen: () => number = Math.random) {
@@ -4499,6 +5392,7 @@ class WildScene extends PlayScene {
     this.updateMythborn(dt);
     this.directHutFolk(dt);
     this.directSiteFolk(dt);
+    this.wayTick(dt);
     this.landmarkTick();
     if (!this.common(dt)) return;
     this.maybeWolves();
@@ -6035,7 +6929,7 @@ class UIScene extends Phaser.Scene {
   }
 
   /** A place a villager has heard of: an unexplored stretch two to six screens out, of a land their trade brings news of. */
-  static makeRumor(vid: string): Rumor | null {
+  static makeRumor(vid: string, terrains?: number[]): Rumor | null {
     const cands: [string, number][] = [];
     for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) {
       const d = Math.abs(x) + Math.abs(y), key = `${x},${y}`;
@@ -6045,7 +6939,7 @@ class UIScene extends Phaser.Scene {
     if (!cands.length) return null;
     let k = Math.random() * cands.reduce((n, [, w]) => n + w, 0), key = cands[0][0];
     for (const [c, w] of cands) { if ((k -= w) <= 0) { key = c; break; } }
-    const ts = RUMOR_TERRAINS[vid];
+    const ts = terrains ?? RUMOR_TERRAINS[vid];
     const r: Rumor = { key, terrain: ts[Math.floor(Math.random() * ts.length)], from: vid, day: G.dayNumber };
     G.data.rumors.push(r);
     return r;
@@ -6207,6 +7101,7 @@ class UIScene extends Phaser.Scene {
     const reqs = G.data.requests.map((q) => `• ${UIScene.reqText(q)}`);
     const rum = G.data.rumors.filter((r) => !r.told).map((r) => {
       const [x, y] = r.key.split(",").map(Number);
+      if (!VILLAGERS[r.from]) return `• Heard on the road: ${RUMOR_WORDS[r.terrain].split(",")[0]}, ${directions(x, y)}.`;
       return `• ${VILLAGERS[r.from].name}: ${r.found ? `you found the ${terrain(r.terrain).name.toLowerCase()}; tell ${VILLAGERS[r.from].name}` : `${RUMOR_WORDS[r.terrain].split(",")[0]}, ${directions(x, y)}`}.`;
     });
     const gq = Object.entries(G.data.divine.quests).filter(([, q]) => q).map(([g, q]) => `• ${g}: ${q!.qty} ${ITEMS[q!.item].name.toLowerCase()}, to any shrine of ${g}. You have ${UIScene.countQ(q!.item)}.`);

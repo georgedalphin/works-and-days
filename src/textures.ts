@@ -994,7 +994,10 @@ export const POSE = { stand: 0, walk1: 1, walk2: 2, raise: 3, strike: 4, lookA: 
  */
 export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) { makeFigureTexture(scene, "player", look); }
 
-export interface FigureExtras { beard?: boolean; long?: boolean; veil?: string }
+export interface FigureExtras { beard?: boolean; long?: boolean; veil?: string;
+  /** A traveler's broad-brimmed hat (petasos), in this color. */ hat?: string;
+  /** Something carried upright: a walking staff, a spear, a club, or a bow. */ pole?: "staff" | "spear" | "club" | "bow";
+  /** A bundle on the back, in this color. */ pack?: string }
 /** Any walking person: the player, villagers, the folk of the wild huts. Same 28 frames as the player. */
 export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tunic: string; hair: string; skin: string }, ex: FigureExtras = {}) {
   if (scene.textures.exists(key)) scene.textures.remove(key);
@@ -1026,6 +1029,10 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
         const ex = pose === 5 ? 8 : pose === 6 ? 6 : 7;
         p(ex, 3, 1, 1, eye); p(ex + 1, 3, 1, 1, eye);
       } else if (side) p(pose === 6 ? 8 : 9, 3, 1, 1, eye);
+      // The pack on the back (drawn first on the back view, so it sits on the tunic).
+      if (ex.pack) { if (f === 3) { p(5, 6, 6, 5, ex.pack); p(6, 7, 4, 1, "rgba(0,0,0,0.18)"); } else if (side) p(3, 6, 2, 5, ex.pack); else { p(6, 6, 1, 3, "#6b4a2b"); p(9, 6, 1, 3, "#6b4a2b"); } }
+      // The petasos: a wide brim over the brow and a low crown.
+      if (ex.hat) { if (side) { p(4, 1, 9, 1, ex.hat); p(6, 0, 4, 1, ex.hat); } else { p(3, 1, 10, 1, ex.hat); p(6, 0, 4, 1, ex.hat); } }
       // Arms, by pose.
       const sk = look.skin;
       if (!side) {
@@ -1043,6 +1050,16 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
         else if (pose === 3) { p(6, 2, 1, 5, sk); p(5, 0, 2, 2, toolHead); p(6, 2, 1, 1, tool); }
         else if (pose === 4) { p(9, 8, 4, 1, sk); p(13, 7, 1, 3, tool); p(14, 9, 2, 2, toolHead); }
         else { p(9, 5, 1, 3, sk); p(9, 2, 3, 1, sk); p(10, 3, 1, 1, sk); }
+      }
+      // What they carry, held upright while they walk or stand (not in the working poses).
+      if (ex.pole && (pose <= 2 || pose >= 5)) {
+        const wood = "#8a6a42", bronze = "#c8c0a8", bx = side ? 10 : f === 3 ? 4 : 12;
+        if (ex.pole === "bow") { const bw = "#7a4a22"; if (f === 3) { p(7, 4, 1, 1, bw); p(8, 5, 1, 1, bw); p(9, 6, 1, 1, bw); p(10, 7, 1, 1, bw); } else { p(bx, 4, 1, 1, bw); p(bx + 1, 5, 1, 5, bw); p(bx, 10, 1, 1, bw); p(bx, 5, 1, 5, "#d8d0b8"); } }
+        else {
+          p(bx, ex.pole === "spear" ? 1 : 3, 1, ex.pole === "spear" ? 13 : 11, wood);
+          if (ex.pole === "spear") p(bx, 0, 1, 2, bronze);
+          if (ex.pole === "club") p(bx - 1, 2, 2, 3, "#6a4a2a");
+        }
       }
     }
   });
