@@ -29,7 +29,7 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   boar: { name: "boar", walk: 16, flee: 80, scare: 48, idle: [1, 3.5], body: [11, 5, 2, 10], frameRate: 6, aggression: 5, charge: 100, damage: 15 },
   bat: { name: "bat", walk: 40, flee: 90, scare: 30, idle: [0.2, 0.8], body: [6, 4, 5, 6], frameRate: 14, aggression: 0, charge: 0, damage: 0 },
   myrmex: { name: "myrmex", walk: 16, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 1, 9], frameRate: 8, aggression: 8, charge: 92, damage: 12, notice: 84 },
-  eidolon: { name: "eidolon", walk: 10, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 6, 4, 9], frameRate: 3, aggression: 6, charge: 68, damage: 10, notice: 80 },
+  eidolon: { name: "eidolon", walk: 8, flee: 0, scare: 0, idle: [1.5, 4], body: [8, 6, 4, 9], frameRate: 3, aggression: 6, charge: 42, damage: 5, notice: 72 }, // slow, drifting; a chill touch (2 Vitality)
   lampad: { name: "lampad", walk: 6, flee: 0, scare: 0, idle: [2, 5], body: [8, 6, 4, 9], frameRate: 3, aggression: 1, charge: 50, damage: 5, notice: 70 },
   // Wandering monsters (AEGIS Terata). The centaur gallops; the dead march and never tire.
   centaur: { name: "centaur", walk: 26, flee: 0, scare: 0, idle: [1, 3], body: [14, 6, 5, 16], frameRate: 8, aggression: 5, charge: 118, damage: 13, notice: 120, giveUp: 320 },
@@ -71,6 +71,8 @@ export class Animal {
   rolled = false;
   rerollT = 0;
   appeased = false;
+  /** A shade that has already shrunk from the light once (so it is said only once). */
+  shunned = false;
   /** A ghost circling a crossroads or graveyard on the night of Noumenia: the center, radius and its place in the ring. */
   orbit?: { cx: number; cy: number; r: number; phase: number };
   /** The scene decides what happens when it notices you (the Aggression roll) and when it lands a blow. */

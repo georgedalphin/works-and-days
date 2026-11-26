@@ -1183,6 +1183,22 @@ abstract class PlayScene extends Phaser.Scene {
     G.say(`${intro}. The tune: ${HARMONIAI[m.mode].name}, ${m.notes.join(" ")}. Sing it back before it fades from your mind (hold V; the wheel changes harmonia).`);
   }
 
+  /** Firelight on this screen: placed campfires, and a torch or lamp in your hand. */
+  fireLights(): { x: number; y: number; r: number }[] {
+    const out = this.placedObjs.filter((o) => o.p.id === "Campfire" && o.img).map((o) => ({ x: o.img!.x, y: o.img!.y - 6, r: 60 }));
+    const held = G.selectedItem?.id;
+    if (held === "Torch" || held === "Lamp") out.push({ x: this.player.x, y: this.player.y, r: held === "Torch" ? 46 : 38 });
+    return out;
+  }
+  /** Keep a shade out of the light: pushed back if it is inside, held at the edge if it would come in. */
+  shunLight(a: Animal, lights: { x: number; y: number; r: number }[]) {
+    const s = a.sprite, v = s.body!.velocity as Phaser.Math.Vector2;
+    for (const L of lights) {
+      const dx = s.x - L.x, dy = s.y - L.y, d = Math.hypot(dx, dy) || 1, nx = dx / d, ny = dy / d;
+      if (d < L.r) { s.setVelocity(nx * 50, ny * 50); if (!a.shunned) { a.shunned = true; G.say("The shade shrinks back from the light, and hovers at its edge."); } }
+      else if (d < L.r + 10) { const inward = -(v.x * nx + v.y * ny); if (inward > 0) s.setVelocity(v.x + nx * inward, v.y + ny * inward); } // slide along the edge
+    }
+  }
   /** A warning when Vitality runs low. */
   lowWarn() { const v = G.data.vitality, m = G.vitalityMax; return v > 0 && v <= m * 0.3 ? " You're badly hurt: get away, or eat something." : ""; }
 
@@ -1946,6 +1962,7 @@ abstract class PlayScene extends Phaser.Scene {
     const running = this.dashLvl > 0.3 && this.player.body!.velocity.length() > 80;
     const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.data.stealth - 4));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
+    const lights = this.animals.some((a) => a.kind === "eidolon") ? this.fireLights() : [];
     if (!this.paused) for (const a of this.animals) {
       a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
       // Noumenia: the gathered dead circle their crossroads or graveyard, until something draws them.
@@ -1954,6 +1971,8 @@ abstract class PlayScene extends Phaser.Scene {
         const dx = tx - a.sprite.x, dy = ty - a.sprite.y, d = Math.hypot(dx, dy) || 1, sp = Math.min(16, d * 2);
         a.sprite.setVelocity((dx / d) * sp, (dy / d) * sp); a.state = "walk"; a.timer = 1;
       }
+      // The dead shrink from fire: they come at you, but will not cross into the light of a campfire or a torch.
+      if (a.kind === "eidolon" && a.state !== "dead" && a.state !== "gone") this.shunLight(a, lights);
     }
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
   }
