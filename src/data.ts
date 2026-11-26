@@ -172,6 +172,8 @@ export const ITEMS: Record<string, ItemDef> = {
   Obsidian: { id: "Obsidian", value: 10, name: "Obsidian flake", greek: "obsidianos", kind: "find", desc: "Black volcanic glass, sharper than bronze. It makes keen arrowheads." },
   Amber: { id: "Amber", value: 15, name: "Amber bead", greek: "elektron", kind: "find", desc: "Golden and warm to the touch; rub it and it draws chaff." },
   OwlFeather: { id: "OwlFeather", value: 6, name: "Owl feather", greek: "pteron glaukos", kind: "find", desc: "Soft and silent. Athena's bird." },
+  Pearl: { id: "Pearl", value: 40, name: "Pearl", greek: "margarites", kind: "find", desc: "A sea-pearl, round and moon-pale. Aphrodite's, who rose from the foam." },
+  Moly: { id: "Moly", value: 30, name: "Moly", greek: "moly", kind: "find", desc: "Black at the root, milk-white in flower: the herb Hermes gave Odysseus. Carried, no song or spell can bend your will." },
   Thunderstone: { id: "Thunderstone", value: 60, name: "Thunderstone", greek: "keraunia", kind: "find", desc: "Black iron fallen from the sky where Zeus' bolt struck. Carried, Zeus' favor sits heavier on you." },
   HeliadTear: { id: "HeliadTear", value: 50, name: "Tear of the Heliades", greek: "dakry Heliadon", kind: "find", desc: "Amber that holds a faint light: a sister of Phaethon wept it. Carried, Apollo's aim is yours." },
   SeaFennel: { id: "SeaFennel", value: 3, name: "Sea fennel", greek: "krithmon", kind: "material", desc: "Salty shore greens, good pickled." },

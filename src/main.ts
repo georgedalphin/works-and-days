@@ -1,6 +1,8 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
+import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, type SiteInfo, type FortLayout } from "./sites";
+import type { SiteRec } from "./sites";
 import { WAYFARERS, rollWayfarers, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
@@ -39,7 +41,7 @@ let inDark = false;
 const darkPen = () => (!inDark || G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber ? 0 : Math.max(0, Math.min(6, 3 - G.boon("Hecate"))));
 
 /** Things that fill a tile: arrows and dropped things are lost in them. */
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.SHALLOW, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.SHALLOW, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN, T.CYCLO, T.COLUMN];
 /** Water: 1 for shallows (wade), 2 for deep (swim), 0 for none. */
 const waterKind = (t: number | undefined) => (t === T.SHALLOW ? 1 : t === T.WATER ? 2 : 0);
 /** Bushes slow you as you push through; they do not stop you. */
@@ -1090,7 +1092,7 @@ abstract class PlayScene extends Phaser.Scene {
     const w = this as unknown as { hasSpring?: boolean };
     if (w.hasSpring && Math.hypot(spot[0] - SPRING.x, spot[1] - SPRING.y - 2) < 6) { G.say("This is the Naiad's own pool. You would not dare cast a hook into it."); return; }
     const b = labor(EFFORT.hand, 1, "Metis"); if (b === null) return;
-    const [tx, ty] = spot, deep = waterKind(o.getTileAt(tx, ty)?.index) === 2, sea = (this.wildRec?.terrain ?? 0) === 7;
+    const [tx, ty] = spot, deep = waterKind(o.getTileAt(tx, ty)?.index) === 2, sea = [6, 7].includes(this.wildRec?.terrain ?? 0);
     const bob = this.add.image(tx * TILE + 8, ty * TILE + 8, "bobber", 0).setDepth(ty * TILE + 9);
     this.tweens.add({ targets: bob, y: bob.y - 1, yoyo: true, repeat: -1, duration: 700 });
     const line = this.add.graphics().setDepth(99990);
@@ -3195,13 +3197,28 @@ Object.assign(PROFILES, {
 const profile = (t: number) => PROFILES[t] ?? PROFILES[1];
 const SPRING = { x: 28, y: 9 }, REVEL = { x: 12, y: 20 }, CAVE_AT = { x: 9, y: 7 };
 
-/** A stable seed for each screen of this save's world. */
+/**
+ * Where a citadel's road comes in: the edge between the middle screen of its gate side and the land beyond. Both
+ * screens ask, so both agree: one gap, in the middle, and a road through it.
+ */
+function fortGateEdge(kind: "H" | "V", x: number, y: number): number | null {
+  const [bx, by] = kind === "H" ? [x, y + 1] : [x + 1, y];
+  const fa = fortressAt(G.data.seed, x, y), fb = fortressAt(G.data.seed, bx, by);
+  if (!!fa === !!fb) return null; // inside one (or none)
+  const f = (fa ?? fb)!, mx = f.x0 + 1, my = f.y0 + 1;
+  if (kind === "H" && f.gate === "S" && fa && x === mx && y === f.y0 + 2) return 20;
+  if (kind === "H" && f.gate === "N" && fb && bx === mx && by === f.y0) return 20;
+  if (kind === "V" && f.gate === "E" && fa && x === f.x0 + 2 && y === my) return 15;
+  if (kind === "V" && f.gate === "W" && fb && bx === f.x0 && by === my) return 15;
+  return null;
+}
 /**
  * The gaps in the border between two neighbouring screens. Both screens ask the same question of the same
  * edge, so their gaps always line up. "H" is the edge below screen (x, y); "V" the edge to its right.
  * Returns tile positions along the edge (x for H, y for V): one to three gaps, anywhere along it.
  */
 function edgeGates(kind: "H" | "V", x: number, y: number): number[] {
+  const fg = fortGateEdge(kind, x, y); if (fg !== null) return [fg];
   if (kind === "V" && x === 0 && y === 0) return [15]; // the farm's east gate
   if (kind === "H" && x === 0 && y === 1) return [20]; // the village's south road
   const len = kind === "H" ? WW : WH;
@@ -3220,6 +3237,7 @@ function edgeGates(kind: "H" | "V", x: number, y: number): number[] {
  */
 function edgeRoads(kind: "H" | "V", x: number, y: number): number[] {
   const gates = edgeGates(kind, x, y);
+  if (fortGateEdge(kind, x, y) !== null) return gates; // the road up to a citadel's gate
   if (kind === "V" && x === 0 && y === 0) return gates;
   if (kind === "H" && x === 0 && y >= 1) return gates.filter((g) => g === 20);
   const r = rng((Math.imul(G.data.seed ^ 0x70ad, 17) ^ Math.imul(x + (kind === "H" ? 7 : 3), 2654435761) ^ Math.imul(y, 40503)) >>> 0);
@@ -3242,6 +3260,7 @@ function riverSpan(kind: "col" | "row", n: number): [number, number] | null {
   return [from, from + len];
 }
 function edgeRiver(kind: "H" | "V", x: number, y: number): { at: number; w: number } | null {
+  if (fortressAt(G.data.seed, x, y) || (kind === "H" ? fortressAt(G.data.seed, x, y + 1) : fortressAt(G.data.seed, x + 1, y))) return null; // rivers keep clear of citadels
   const span = kind === "H" ? riverSpan("col", x) : riverSpan("row", y);
   if (!span) return null;
   const [a, b] = span, n0 = kind === "H" ? y : x;
@@ -3276,7 +3295,7 @@ interface WayGroup {
   exit?: [number, number]; first?: [number, number][]; after?: [number, number][]; outT?: number; leaving?: boolean;
   tree?: [number, number]; water?: [number, number]; fire?: Phaser.GameObjects.Image; glow?: Phaser.GameObjects.Image; stone?: Phaser.GameObjects.Image; gfx?: Phaser.GameObjects.Graphics;
   bite?: number; swing?: number; stray?: Animal; leading?: boolean; quest?: string; raidT?: number; raidOn?: boolean; helpedRaid?: boolean; lost?: number;
-  cool?: Map<Animal, number>; pack?: Animal[]; prey?: Animal; beast?: Animal; killedBeast?: boolean;
+  cool?: Map<Animal, number>; pack?: Animal[]; prey?: Animal; fortress?: boolean; beast?: Animal; killedBeast?: boolean;
 }
 /** Something a stranger would be glad to eat. */
 const isFoodGift = (id: string) => !!id && !!ITEMS[id] && (!!INGREDIENTS[id] || ITEMS[id].kind === "meal" || ITEMS[id].kind === "crop" || ["Milk", "Honey", "Plum", "Cornel", "WildGrapes", "Grapes", "Wine"].includes(id));
@@ -3318,9 +3337,22 @@ class WildScene extends PlayScene {
     const r = rng(screenSeed(wx, wy));
 
     // First visit: roll the terrain from the land just left, and the screen's feature.
-    let firstVisit = false;
+    let firstVisit = false, foundNow: SiteRec | null = null;
+    const fromSea = !!G.data.fromSea; G.data.fromSea = false;
     if (!G.data.screens[this.key]) {
       firstVisit = true;
+      const fort = fortressAt(G.data.seed, wx, wy), isle = fromSea ? isleAt(G.data.seed, wx, wy) : null;
+      if (fort && (foundNow = this.foundSite(fort))) { /* the whole citadel is laid out */ }
+      else if (isle && (foundNow = this.foundSite(isle))) { /* the whole isle */ }
+      else if (fromSea) {
+        // Rowing on from the open sea: more sea, mostly; now and then a coast, the sea at your back.
+        const e = G.data.entry, coast = r() < 0.18;
+        const corner: [number, number] = [e === "W" ? 0 : e === "E" ? WW - 1 : r() < 0.5 ? 0 : WW - 1, e === "N" ? 0 : e === "S" ? WH - 1 : r() < 0.5 ? 0 : WH - 1];
+        G.data.screens[this.key] = coast ? { terrain: 7, special: false, feature: "Driftwood beach", cleared: [], corner } : { terrain: 6, special: false, feature: "Open sea", cleared: [] };
+        G.note("explore");
+      }
+    }
+    if (!G.data.screens[this.key]) {
       // A land someone told you of is what they said it was.
       const rumor = G.data.rumors.find((x) => x.key === this.key && !x.found);
       const roll = rumor ? { terrain: rumor.terrain, special: false } : rollTerrain(G.data.lastTerrain || HOME_TERRAIN, r);
@@ -3332,6 +3364,11 @@ class WildScene extends PlayScene {
       G.data.screens[this.key] = { terrain: roll.terrain, special: roll.special, feature: p.features[Math.floor(r() * p.features.length)], cleared: [] };
     }
     this.rec = G.data.screens[this.key];
+    this.isSea = this.rec.terrain === 6;
+    this.site = this.rec.site ? G.data.sites[this.rec.site] : undefined;
+    this.siteInfo = this.site ? (this.site.kind === "fortress" ? fortressAt(G.data.seed, wx, wy) : isleAt(G.data.seed, wx, wy)) ?? undefined : undefined;
+    if (this.site && !this.siteInfo) this.site = undefined; // (a world whose seed no longer agrees: treat it as plain land)
+    if (this.isSea) for (const sd of ["N", "S", "E", "W"] as Side[]) this.open[sd] = true;
     const p = profile(this.rec.terrain);
     const gen = rng(screenSeed(wx, wy) ^ 0x9e3779b9); // layout depends only on the screen, so it never changes
 
@@ -3358,7 +3395,8 @@ class WildScene extends PlayScene {
     }
     // The shore: the sea fills one corner of a coastal screen (the gateways at the middle of each side stay dry).
     if (this.rec.terrain === 7) {
-      const [kx, ky] = [gen() < 0.5 ? 0 : WW - 1, gen() < 0.5 ? 0 : WH - 1], R = 12 + gen() * 3;
+      const [kx, ky] = this.rec.corner ?? [gen() < 0.5 ? 0 : WW - 1, gen() < 0.5 ? 0 : WH - 1], R = 12 + gen() * 3;
+      this.seaCorner = [kx, ky, R];
       for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
         const d = Math.hypot(x - kx, (y - ky) * 1.2) + (field(x, y) - 0.5) * 4;
         if (d < R) { objs[y][x] = T.WATER; ground[y][x] = T.SAND; } else if (d < R + 3) { ground[y][x] = T.SAND; if (objs[y][x] !== T.EDGE) objs[y][x] = gen() < 0.08 ? T.STONE : -1; }
@@ -3375,13 +3413,19 @@ class WildScene extends PlayScene {
         }
       }
     }
+    // A citadel's walls and halls, or the open sea and its isle, over the land drawn so far.
+    this.fort = undefined;
+    if (this.isSea) this.stampSea(objs, ground, gen);
+    else if (this.site?.kind === "fortress") this.stampFortress(objs, ground);
+    const plain = !this.isSea && !this.site;
     const cx = 20, cy = 15;
     // The village road runs south from the farm.
     if (wx === 0 && wy >= 2) for (let y = 0; y < WH; y++) { ground[y][cx] = T.PATH; for (let x = cx - 1; x <= cx + 1; x++) if (y > 0 && y < WH - 1 || x === cx || objs[y][x] !== T.EDGE) objs[y][x] = -1; objs[y][cx] = -1; }
     // The screen's landmark (or small feature), somewhere away from the middle.
-    const lmDef = LANDMARKS[this.rec.feature];
+    const lmDef = plain ? LANDMARKS[this.rec.feature] : undefined;
     this.lm = null;
-    if (lmDef) {
+    if (!plain) { /* a site has its own features */ }
+    else if (lmDef) {
       const r = lmDef.r, west = gen() < 0.5;
       const lx = west ? r + 2 + Math.floor(gen() * Math.max(1, 12 - r)) : WW - r - 3 - Math.floor(gen() * Math.max(1, 12 - r));
       const ly = r + 2 + Math.floor(gen() * Math.max(1, WH - 2 * r - 4));
@@ -3399,8 +3443,10 @@ class WildScene extends PlayScene {
     const carve = (x: number, y: number, road = false) => { for (let yy = y; yy <= y + 1; yy++) for (let xx = x; xx <= x + 1; xx++) if (xx > 0 && yy > 0 && xx < WW - 1 && yy < WH - 1) objs[yy][xx] = waterKind(objs[yy][xx]) ? (road ? T.SHALLOW : objs[yy][xx]) : -1; };
     const ggen = rng(screenSeed(wx, wy) ^ 0x6a7e);
     const roadSides: Side[] = [];
+    const within = this.siteSides(wx, wy);
     for (const sd of ["N", "S", "E", "W"] as Side[]) {
       if (!this.open[sd]) continue;
+      if (within.includes(sd)) { this.gates[sd] = this.openAlong(objs, sd); continue; }
       const roads = sideRoads(wx, wy, sd);
       for (const g of (this.gates[sd] = sideGates(wx, wy, sd))) {
         const [sx0, sy0] = sd === "N" ? [g, 0] : sd === "S" ? [g, WH - 1] : sd === "W" ? [0, g] : [WW - 1, g];
@@ -3410,7 +3456,7 @@ class WildScene extends PlayScene {
         if (road && !roadSides.includes(sd)) roadSides.push(sd);
         let x = sx0, y = sy0;
         const tx = road ? cx : cx + Math.round((ggen() - 0.5) * 6), ty = road ? cy : cy + Math.round((ggen() - 0.5) * 4);
-        for (let step = 0; step < 90 && (Math.abs(x - tx) > (road ? 0 : 1) || Math.abs(y - ty) > (road ? 0 : 1)); step++) {
+        for (let step = 0; step < (plain ? 90 : 6) && (Math.abs(x - tx) > (road ? 0 : 1) || Math.abs(y - ty) > (road ? 0 : 1)); step++) {
           carve(x - 1, y - 1, road);
           if (road) ground[y][x] = T.PATH;
           const px0 = x;
@@ -3422,7 +3468,7 @@ class WildScene extends PlayScene {
         if (road) ground[y][x] = T.PATH;
       }
     }
-    for (const sd of ["N", "S", "E", "W"] as Side[]) { const rv = sideRiver(wx, wy, sd); if (rv) this.gates[sd].push(rv.at + Math.floor(rv.w / 2)); }
+    if (!this.isSea) for (const sd of ["N", "S", "E", "W"] as Side[]) { const rv = sideRiver(wx, wy, sd); if (rv) this.gates[sd].push(rv.at + Math.floor(rv.w / 2)); }
     // Roads: where three or more meet in the middle there is a crossroads, and a herm stands at it.
     this.rec.roads = roadSides;
     const nRoads = roadSides.reduce((n, sd) => n + sideRoads(wx, wy, sd).filter((g) => this.gates[sd].includes(g)).length, 0);
@@ -3434,10 +3480,10 @@ class WildScene extends PlayScene {
     };
     // Anchors: the Naiad's spring lies at a near site fixed for this world; the satyrs revel in the first flowering valley you find.
     if (!G.data.anchors.spring) { const r0 = rng(G.data.seed ^ 0x5eed5); const [ax, ay] = SPRING_SITES[Math.floor(r0() * SPRING_SITES.length)]; G.data.anchors.spring = `${ax},${ay}`; }
-    if (!G.data.anchors.satyrs && this.rec.terrain === 1 && Math.abs(wx) + Math.abs(wy) >= 1 && this.key !== G.data.anchors.spring) G.data.anchors.satyrs = this.key;
+    if (!G.data.anchors.satyrs && plain && this.rec.terrain === 1 && Math.abs(wx) + Math.abs(wy) >= 1 && this.key !== G.data.anchors.spring) G.data.anchors.satyrs = this.key;
     // The first cave: in the first mineral hills at least two screens out, or by three screens out, wherever you are.
     const dist0 = Math.abs(wx) + Math.abs(wy);
-    if (!G.data.anchors.cave && this.key !== G.data.anchors.spring && this.key !== G.data.anchors.satyrs && ((this.rec.terrain === 4 && dist0 >= 2) || dist0 >= 3)) G.data.anchors.cave = this.key;
+    if (!G.data.anchors.cave && plain && this.key !== G.data.anchors.spring && this.key !== G.data.anchors.satyrs && ((this.rec.terrain === 4 && dist0 >= 2) || dist0 >= 3)) G.data.anchors.cave = this.key;
     this.hasCave = this.key === G.data.anchors.cave;
     if (this.hasCave) ring0(CAVE_AT.x, CAVE_AT.y + 1, 3, (x, y) => { objs[y][x] = -1; });
     this.hasSpring = this.key === G.data.anchors.spring;
@@ -3448,7 +3494,7 @@ class WildScene extends PlayScene {
     if (this.hasSpring) ring(SPRING.x, SPRING.y, 4, (x, y, d) => { objs[y][x] = d <= 1.5 ? T.WATER : d > 3.2 && gen() < 0.5 ? T.FLOWERS : -1; if (d <= 3) ground[y][x] = T.MEADOW; });
     if (this.hasRevel) ring(REVEL.x, REVEL.y, 5, (x, y, d) => { objs[y][x] = d > 4.3 && gen() < 0.6 ? T.FLOWERS : -1; });
 
-    this.carveRivers(objs, ground, wx, wy); // last, so nothing cuts the river (roads cross it at fords)
+    if (!this.isSea) this.carveRivers(objs, ground, wx, wy); // last, so nothing cuts the river (roads cross it at fords)
     // Where water meets land it is shallow: deep water only in the middle of things.
     const wet = (x: number, y: number) => x < 0 || y < 0 || x >= WW || y >= WH || objs[y][x] === T.WATER || objs[y][x] === T.SHALLOW || objs[y][x] === -2 || objs[y][x] === T.EDGE;
     for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) if (objs[y][x] === T.WATER && (!wet(x - 1, y) || !wet(x + 1, y) || !wet(x, y - 1) || !wet(x, y + 1))) objs[y][x] = -2;
@@ -3459,7 +3505,7 @@ class WildScene extends PlayScene {
     this.groundData = ground;
     if (p.ground2 !== p.ground) softenPatches(map, this.groundLayer, ground, p.ground2, p.ground, seasonGroundTint(G));
     if (this.rec.roads?.length) softenPatches(map, this.groundLayer, ground, T.PATH, p.ground, seasonGroundTint(G), "softRoad");
-    jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.rec.terrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0), true);
+    jitterLayer(map.createBlankLayer("details", ts)!.putTilesAt(scatterDetails(this.landTerrain, screenSeed(wx, wy) ^ 0xdec0, objs, () => false), 0, 0), true);
     this.objects = map.createBlankLayer("objects", ts)!;
     this.objects.putTilesAt(objs, 0, 0);
     this.objects.setCollision(SOLID).setDepth(1);
@@ -3485,32 +3531,355 @@ class WildScene extends PlayScene {
     if (e === "C") { sx = CAVE_AT.x * TILE + 8; sy = (CAVE_AT.y + 1.6) * TILE; }
     G.data.entry = ""; G.data.scene = "Wild";
     this.makePlayer(sx, sy);
-    this.ambience = new Ambience(this, G, { outdoor: true, terrain: this.rec.terrain, layer: this.objects });
+    this.ambience = new Ambience(this, G, { outdoor: true, terrain: this.landTerrain, layer: this.objects });
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.objects); this.buildTrunks();
     this.wolvesOut = false;
     // Forage: placed from the screen's own seed, so the same plants are there every visit.
     const fgen = rng(screenSeed(wx, wy) ^ 0x2545f491);
-    this.placeForage(fgen, this.rec.terrain, 4 + Math.floor(fgen() * 4), (x, y) =>
-      x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH);
-    this.spawnCreatures(p, gen);
-    this.spawnMythborn();
+    this.placeForage(fgen, this.landTerrain, this.isSea ? (this.site ? 3 + Math.floor(fgen() * 3) : 0) : 4 + Math.floor(fgen() * 4), (x, y) =>
+      x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH && ground[y][x] !== T.FLAGS);
+    if (!this.isSea) this.spawnCreatures(p, gen); else { this.animals = []; this.chase = new Map(); }
+    if (plain) this.spawnMythborn();
     if (this.hasCave) this.placeCaveMouth();
     this.setupBarrow();
-    this.maybeMonster();
-    this.setupGlint();
-    this.setupHut();
-    this.setupSites();
+    this.monster = undefined;
+    if (plain) { this.maybeMonster(); this.setupGlint(); this.setupHut(); this.setupSites(); }
+    else { this.siteFolk = []; this.hutFolk = []; this.ghostsRolled = true; } // no huts, shrines or herms in a site or at sea
     this.setupLandmark();
-    this.setupWayfarers();
+    if (!this.isSea && !(this.site && partOf(this.site, wx, wy) === "the heart of it")) this.setupWayfarers(); else { this.ways = []; this.chase = new Map(); this.wayT = 9999; }
+    this.setupSite(foundNow);
     const arrivingByBoat = !!G.data.boatCarry && this.landBoat();
     this.drawPlaced();
     if (arrivingByBoat) { const o = this.placedObjs.find((q) => q.p.id === "Boat" && q.p.x === Math.floor(this.player.x / TILE) && q.p.y === Math.floor((this.player.y + 12) / TILE)) ?? this.placedObjs.filter((q) => q.p.id === "Boat").pop(); if (o) { this.boat = undefined; this.boardBoat(o, true); } }
     this.cameras.main.fadeIn(250);
 
     const t = terrain(this.rec.terrain);
-    if (firstVisit) G.say(`New land: ${t.name} (${t.aretai}, ${t.element}). Here: ${this.rec.feature.toLowerCase()}.${this.rec.special ? " Something about this place feels set apart." : ""}`);
+    if (this.site) this.siteArrival(foundNow);
+    else if (this.isSea) G.say(firstVisit ? "The open sea. The land drops behind you, and there is nothing ahead but water and sky. (Row off any edge to go on.)" : "The open sea.");
+    else if (firstVisit) G.say(`New land: ${t.name} (${t.aretai}, ${t.element}). Here: ${this.rec.feature.toLowerCase()}.${this.rec.special ? " Something about this place feels set apart." : ""}`);
     else G.say(`${t.name}, as you left it.`);
+  }
+
+  // ---------------------------------------------------------------- sites: citadels and isles (sites.ts)
+  isSea = false;
+  site?: SiteRec;
+  siteInfo?: SiteInfo;
+  fort?: FortLayout;
+  seaCorner?: [number, number, number];
+  siteBeast?: Animal;
+  seaSaidT = 0;
+  /** What land this is, for plants, ground details and the air: an isle's own, the shore's at sea. */
+  get landTerrain() { return this.site?.kind === "isle" ? ISLES[this.site.isle!].land : this.isSea ? 7 : this.rec.terrain; }
+
+  /**
+   * The first sight of any part of a site lays out all of it: every screen gets its record, so the rest is known
+   * (and joins up) however you come at it. Not if some of it was already walked as something else.
+   */
+  foundSite(si: SiteInfo): SiteRec | null {
+    for (let y = si.y0; y < si.y0 + si.h; y++) for (let x = si.x0; x < si.x0 + si.w; x++) if (G.data.screens[`${x},${y}`]) return null;
+    const used = new Set(Object.values(G.data.sites).map((s) => s.name));
+    let rec: SiteRec;
+    if (si.kind === "fortress") {
+      const c = CITADELS.find((q) => !used.has(q.name));
+      const rolled = rollTerrain(G.data.lastTerrain || HOME_TERRAIN, rng(si.seed)).terrain;
+      rec = { kind: "fortress", name: c?.name ?? "a nameless citadel", god: c?.god ?? "Zeus", line: c?.line ?? "A citadel whose name no one remembers.",
+        x0: si.x0, y0: si.y0, w: 3, h: 3, seed: si.seed, found: G.dayNumber, terrain: [5, 6, 7].includes(rolled) ? 4 : rolled,
+        gate: si.gate, fate: c?.fate ?? si.fate, beast: c?.beast ?? si.beast, looted: [], marks: {} };
+    } else {
+      const d = ISLES[si.isle!], name = d.names.find((n) => !used.has(n)) ?? (si.isle === "nymph" ? "a nymph's isle" : si.isle === "sirens" ? "a sirens' rock" : d.names[0]);
+      rec = { kind: "isle", name, god: d.god, line: d.line, isle: si.isle, x0: si.x0, y0: si.y0, w: si.w, h: si.h, seed: si.seed, found: G.dayNumber, terrain: 6, looted: [], marks: {} };
+    }
+    G.data.sites[si.id] = rec;
+    for (let y = si.y0; y < si.y0 + si.h; y++) for (let x = si.x0; x < si.x0 + si.w; x++) {
+      G.data.screens[`${x},${y}`] = { terrain: rec.terrain, special: false, feature: si.kind === "fortress" ? "Citadel" : "Isle", cleared: [], site: si.id, hut: null, shrine: null, graveyard: null };
+      for (const ru of G.data.rumors) if (ru.key === `${x},${y}`) { ru.found = true; ru.told = true; }
+    }
+    G.note("explore"); G.note("site");
+    return rec;
+  }
+
+  /** The sides of this screen that open onto more of the same site (at sea: every side, all water). */
+  siteSides(wx: number, wy: number): Side[] {
+    if (this.isSea && !this.site) return ["N", "S", "E", "W"];
+    const s = this.site; if (!s) return [];
+    const out: Side[] = [];
+    if (wy > s.y0) out.push("N"); if (wy < s.y0 + s.h - 1) out.push("S"); if (wx > s.x0) out.push("W"); if (wx < s.x0 + s.w - 1) out.push("E");
+    if (this.isSea) for (const sd of ["N", "S", "E", "W"] as Side[]) if (!out.includes(sd)) out.push(sd); // the isle's outer sides are sea too
+    return out;
+  }
+  /** Every place along a side you can pass (an open border inside a site, or the open sea). */
+  openAlong(objs: number[][], sd: Side): number[] {
+    const out: number[] = [], len = sd === "N" || sd === "S" ? WW : WH;
+    for (let i = 1; i < len - 1; i++) {
+      const [a, b] = sd === "N" ? [objs[0][i], objs[1][i]] : sd === "S" ? [objs[WH - 1][i], objs[WH - 2][i]] : sd === "W" ? [objs[i][0], objs[i][1]] : [objs[i][WW - 1], objs[i][WW - 2]];
+      if (!SOLID.includes(a) && !SOLID.includes(b)) out.push(i);
+    }
+    return out;
+  }
+
+  stampFortress(objs: number[][], ground: number[][]) {
+    const si = this.siteInfo!, wx = G.data.wx, wy = G.data.wy;
+    const L = fortressLayout(si, { WALL: T.CYCLO, FLAGS: T.FLAGS, COLUMN: T.COLUMN, STONE: T.STONE, BOULDER: T.BOULDER, BRUSH: T.BRUSH, TREE: T.TREE, OLIVE: T.OLIVE, WATER: T.WATER, PATH: T.PATH, DIRT: T.DIRT, LIMESTONE: T.LIMESTONE, FLOWERS: T.FLOWERS });
+    this.fort = L;
+    const ox = (wx - si.x0) * WW, oy = (wy - si.y0) * WH, within = this.siteSides(wx, wy);
+    const borderSide = (x: number, y: number): Side | null => (y === 0 ? "N" : y === WH - 1 ? "S" : x === 0 ? "W" : x === WW - 1 ? "E" : null);
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const c = L.cells[oy + y][ox + x], b = borderSide(x, y);
+      if (b && within.includes(b) && objs[y][x] === T.EDGE) objs[y][x] = -1; // inside the site the border is open
+      if (!c) continue;
+      if (c.g !== undefined) ground[y][x] = c.g;
+      if (c.o === undefined) continue;
+      if (b && !within.includes(b) && objs[y][x] === T.EDGE && c.g !== T.PATH) continue; // the site's own outer edge stays, but for the road
+      objs[y][x] = c.o;
+    }
+  }
+
+  /** Where an isle's heart is (site tiles): its grotto, altar, forge or wreck. Off the seams between screens. */
+  isleFeature(si: { w: number; h: number }): [number, number] { return [Math.floor((si.w * WW) / 2) - (si.w > 1 ? 9 : 0), Math.floor((si.h * WH) / 2) - (si.h > 1 ? 8 : 0)]; }
+
+  stampSea(objs: number[][], ground: number[][], gen: () => number) {
+    const si = this.siteInfo, wx = G.data.wx, wy = G.data.wy, type = this.site?.isle;
+    const land = si ? isleLand(si) : null, ox = si ? (wx - si.x0) * WW : 0, oy = si ? (wy - si.y0) * WH : 0;
+    const G0: Record<string, number> = { nymph: T.MEADOW, sirens: T.GRASS, goats: T.FOREST, sacred: T.LIMESTONE, forge: T.REDROCK, reef: T.SAND };
+    const inner = (): number => {
+      const k = gen();
+      switch (type) {
+        case "nymph": return k < 0.1 ? T.TREE : k < 0.22 ? T.FLOWERS : k < 0.25 ? T.BRUSH : -1;
+        case "sirens": return k < 0.28 ? T.FLOWERS : k < 0.33 ? T.BOULDER : k < 0.37 ? T.STONE : -1;
+        case "goats": return k < 0.22 ? T.TREE : k < 0.3 ? T.BRUSH : k < 0.34 ? T.STONE : k < 0.37 ? T.SAPLING : -1;
+        case "sacred": return k < 0.05 ? T.OLIVE : k < 0.09 ? T.STONE : k < 0.14 ? T.FLOWERS : -1;
+        case "forge": return k < 0.06 ? T.ORE : k < 0.14 ? T.STONE : k < 0.2 ? T.BOULDER : -1;
+        default: return k < 0.06 ? T.STONE : -1;
+      }
+    };
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const n = land ? land(ox + x, oy + y) : 9;
+      if (n < 1) { const beach = n > 0.8; ground[y][x] = beach ? T.SAND : G0[type ?? "reef"]; objs[y][x] = beach ? (gen() < 0.05 ? T.STONE : -1) : inner(); }
+      else { ground[y][x] = T.SAND; objs[y][x] = !land && x > 2 && y > 2 && x < WW - 3 && y < WH - 3 && gen() < 0.0012 ? T.BOULDER : T.WATER; }
+    }
+    if (si && type) {
+      const [fx, fy] = this.isleFeature(si), lx = fx - ox, ly = fy - oy;
+      for (let y = ly - 3; y <= ly + 3; y++) for (let x = lx - 4; x <= lx + 4; x++) if (objs[y]?.[x] !== undefined && objs[y][x] !== T.WATER) objs[y][x] = -1;
+      if (type === "nymph") for (let y = ly - 1; y <= ly + 1; y++) for (let x = lx + 4; x <= lx + 6; x++) if (objs[y]?.[x] !== undefined && Math.hypot(x - lx - 5, y - ly) < 1.3) objs[y][x] = T.WATER; // her spring
+    }
+  }
+
+  /** Props, searches, keepers and dangers of the site, on this screen. */
+  setupSite(found: SiteRec | null) {
+    this.siteBeast = undefined;
+    const s = this.site, si = this.siteInfo; if (!s || !si) return;
+    void found;
+    const sc = this, wx = G.data.wx, wy = G.data.wy, ox = (wx - si.x0) * WW, oy = (wy - si.y0) * WH;
+    const here = ([x, y]: [number, number]) => x >= ox && x < ox + WW && y >= oy && y < oy + WH;
+    const at = ([x, y]: [number, number]): [number, number] => [(x - ox) * TILE + 8, (y - oy) * TILE + 8];
+    const prop = (key: string, p: [number, number], solid = true, dy = 6) => { const [x, y] = at(p); const img = this.add.image(x, y + dy, key).setOrigin(0.5, 1).setDepth(y + dy); if (solid) this.solidAt(x, y + dy - 4, Math.min(img.width - 4, 30), 8); return img; };
+    s.looted ??= []; s.marks ??= {};
+    const heart = partOf(s, wx, wy) === "the heart of it";
+    if (s.kind === "fortress" && this.fort) {
+      const L = this.fort;
+      if (here(L.hearth)) {
+        prop("hearth", L.hearth, false, 10);
+        this.targets.push({ x: at(L.hearth)[0], y: at(L.hearth)[1], get label() { return s.fate === "haunted" && !s.cleared ? "Pour a libation for the restless dead" : ""; }, act: () => sc.layToRest() });
+      }
+      if (here(L.throne)) prop("throne", L.throne);
+      if (here(L.altar)) {
+        prop("altar", L.altar);
+        this.targets.push({ x: at(L.altar)[0], y: at(L.altar)[1] + 4, label: `Make an offering to ${s.god} at the old altar`, act: () => ui(sc).priestTalk(s.god, "", `the altar of ${s.name}`, true, 6) });
+      }
+      L.pithoi.forEach((p) => {
+        if (!here(p)) return;
+        const key = `${p[0]},${p[1]}`, img = prop("pithos", p);
+        if (s.looted!.includes(key)) img.setTint(0x9a9080);
+        this.targets.push({ x: at(p)[0], y: at(p)[1] + 6, get label() { return s.looted!.includes(key) ? "" : "Search the storage jar"; }, act: () => sc.searchJar(key, img) });
+      });
+      if (here(L.treasury)) {
+        const hoard = s.treasury ? null : prop("hoard", L.treasury, false, 8);
+        this.targets.push({ x: at(L.treasury)[0], y: at(L.treasury)[1], get label() { return s.treasury ? "" : "Search the king's treasury"; }, act: () => sc.searchTreasury(hoard) });
+      }
+      if (here(L.tholos)) {
+        prop("stele", L.tholos, true, 4);
+        this.targets.push({ x: at(L.tholos)[0], y: at(L.tholos)[1] + 6, get label() { return s.marks!.tholos ? "" : "Search the beehive tomb"; }, act: () => sc.searchTholos() });
+        if (s.fate === "haunted" && !s.cleared && !G.isDay) this.time.delayedCall(1500, () => this.summon("eidolon", 1));
+      }
+      // What holds the citadel now.
+      if (heart && !s.cleared) {
+        if (s.fate === "brigands") { const g = this.spawnWay(this.wayDefs.find((w) => w.id === "brigands")!, false); if (g) g.fortress = true; }
+        else if (s.fate === "beast") { this.spawnMonster(s.beast as MonsterKind); this.siteBeast = this.monster; }
+        else if (s.fate === "haunted" && !G.isDay) this.time.delayedCall(1800, () => { G.say("Shapes stand up out of the dark between the columns: the old dead of the citadel, who were never given their due."); this.summon("eidolon", 2); });
+      }
+      return;
+    }
+    // ---- isles
+    const type = s.isle!, f = this.isleFeature(si), land = isleLand(si);
+    const spawnOn = (kind: Species, n: number) => {
+      for (let k = 0; k < n; k++) for (let i = 0; i < 60; i++) {
+        const tx = 3 + Math.floor(Math.random() * (WW - 6)), ty = 3 + Math.floor(Math.random() * (WH - 6)), x = tx * TILE + 8, y = ty * TILE + 8;
+        if (land(ox + tx, oy + ty) > 0.8 || !this.free(x, y)) continue;
+        const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - 40, y - 30, 80, 60), (px, py) => this.free(px, py) && land(ox + Math.floor(px / TILE), oy + Math.floor(py / TILE)) < 0.9);
+        this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite); this.animals.push(a); break;
+      }
+    };
+    if (type === "goats") spawnOn("ibex", 3 + Math.floor(Math.random() * 2));
+    if (type === "nymph") { spawnOn("deer", 1); spawnOn("hare", 2); }
+    if (type === "sacred") spawnOn("bird", 3);
+    if (type === "reef") spawnOn("crab", 2);
+    if (type === "sirens" && G.isDay && !s.cleared) { this.spawnMonster("siren"); this.siteBeast = this.monster; }
+    // The wreck lies on the beach south of the heart (on the reef, at it).
+    let wreck: [number, number] = f;
+    if (type === "sirens") { for (let y = f[1]; y < si.h * WH; y++) if (land(f[0], y) > 0.86) { wreck = [f[0] + 2, y - 1]; break; } }
+    if (!here(f) && !here(wreck)) return;
+    const name = s.name;
+    switch (type) {
+      case "nymph": {
+        if (!here(f)) break;
+        prop("cavemouth", f, true, 4);
+        const [nx, ny] = at([f[0], f[1] + 2]);
+        const nymph = this.add.image(nx, ny + 6, "naiad").setOrigin(0.5, 1).setDepth(ny + 6);
+        this.tweens.add({ targets: nymph, y: ny + 5, yoyo: true, repeat: -1, duration: 1400 });
+        const who = name === "Aiaia" ? "Circe" : name === "Ogygia" ? "Calypso" : "the nymph";
+        this.targets.push({ x: nx, y: ny, label: `Speak with ${who}`, act: () => sc.nymphTalk(who) });
+        break;
+      }
+      case "goats": if (here(f)) { prop("cavemouth", f, true, 4); this.targets.push({ x: at(f)[0], y: at(f)[1] + 8, get label() { return s.marks!.cave === seasonKey(G.data.year, G.month.season) ? "" : "Look into the great cave"; }, act: () => sc.cyclopsCave() }); } break;
+      case "sacred": if (here(f)) {
+        prop("palm", f, true, 6); prop("altar", [f[0] + 2, f[1] + 1]);
+        this.targets.push({ x: at([f[0] + 2, f[1] + 1])[0], y: at([f[0] + 2, f[1] + 1])[1] + 4, label: "Make an offering to Apollo and Artemis", act: () => ui(sc).priestTalk("Apollo", "", "Leto's altar on Ortygia", true, 8) });
+        this.targets.push({ x: at(f)[0], y: at(f)[1] + 6, get label() { return s.marks!.palm ? "" : "Pray under Leto's palm"; }, act: () => sc.letoPalm() });
+      } break;
+      case "forge": if (here(f)) { prop("pl_Forge", f, true, 6); this.targets.push({ x: at(f)[0], y: at(f)[1] + 8, get label() { return s.marks!.forge === seasonKey(G.data.year, G.month.season) ? "" : "Search about the god's forge"; }, act: () => sc.godsForge() }); } break;
+      case "sirens": case "reef": if (here(wreck)) {
+        const img = prop("wreck", wreck, false, 8); if (s.treasury) img.setAlpha(0.8);
+        this.targets.push({ x: at(wreck)[0], y: at(wreck)[1], get label() { return s.treasury ? "" : "Search the wreck"; }, act: () => sc.searchWreck() });
+      } break;
+    }
+  }
+
+  /** On arriving: the first sight of a site, or where in it you are. */
+  siteArrival(found: SiteRec | null) {
+    const s = this.site!, part = partOf(s, G.data.wx, G.data.wy), wx = G.data.wx, wy = G.data.wy;
+    const cap = (t: string) => t[0].toUpperCase() + t.slice(1);
+    if (s.kind === "fortress") {
+      if (found) {
+        const ix = wx - s.x0, iy = wy - s.y0, run = [iy < 2 ? "south" : "", iy > 0 ? "north" : "", ix < 2 ? "east" : "", ix > 0 ? "west" : ""].filter(Boolean);
+        const hint = s.fate === "brigands" ? "Smoke rises from inside the walls: someone has made the ruin their own." : s.fate === "beast" ? "There are gnawed bones in the gateway. Something large has its lair inside." : "No birds sing on these walls, and the wind sounds like voices.";
+        G.say(`Walls of huge unworked boulders, too great for men to have lifted: Cyclopean work. ${cap(s.line)} You are at ${part === "the heart of it" ? "its heart" : part}; the walls run on ${run.join(" and ")}. ${hint} (Your journal, J, marks the place.)`);
+      } else G.say(`${cap(s.name)}, ${part === "the heart of it" ? "within the walls" : part}.${s.cleared ? "" : s.fate === "brigands" && part === "the heart of it" ? " Smoke from the brigands' fire." : ""}`);
+      if (part === "the heart of it" && !s.cleared && s.fate === "haunted" && G.isDay) this.time.delayedCall(1200, () => G.say("By daylight the hall is empty. But the cold by the hearth is not the cold of stone. (Bring wine, honey or milk to pour for the dead.)"));
+    } else {
+      if (found) G.say(`Land, out of the open sea. ${s.line} This is ${s.name}.${s.w * s.h > 1 ? " It runs on past what you can see from here." : ""}`);
+      else G.say(`${cap(s.name)}.`);
+    }
+  }
+
+  /** Each frame: is the citadel's beast dead? Have its brigands been beaten? */
+  siteTick() {
+    const s = this.site; if (!s || s.cleared) return;
+    const b = this.siteBeast;
+    if (b && (!b.sprite.active || b.state === "dead" || b.state === "gone" || b.appeased)) {
+      this.siteBeast = undefined;
+      if (s.kind === "fortress") { s.cleared = true; G.earn("Kleos", 1, `you rid ${s.name} of its ${beast(s.beast!)}`); this.time.delayedCall(1200, () => G.say(`With the ${beast(s.beast!)} gone, ${s.name} is quiet. Nothing now stands between you and the king's treasury.`)); }
+      else if (s.isle === "sirens" && b.state === "dead") { s.cleared = true; this.time.delayedCall(1200, () => G.say("The song has stopped. The flowery isle is only an island now.")); }
+    }
+  }
+
+  // ---- searches and the like
+  searchJar(key: string, img: Phaser.GameObjects.Image) {
+    const s = this.site!; if (s.looted!.includes(key)) return;
+    s.looted!.push(key); this.gesture("act"); img.setTint(0x9a9080);
+    const k = Math.random();
+    const got = k < 0.3 ? null : k < 0.5 ? give("Millet", 2) : k < 0.62 ? give("Wine", 1) : k < 0.72 ? give("OldCoin", 1) : k < 0.82 ? give("Figurine", 1) : k < 0.9 ? give("Fibula", 1) : give("Arrowhead", 2);
+    G.say(got ? `You tip the great jar and reach down into it. ${got}.` : pick(["Only dust and a dead mouse.", "Empty, but for the smell of old oil.", "Cracked, and long since emptied."]));
+  }
+  searchTreasury(hoard: Phaser.GameObjects.Image | null) {
+    const s = this.site!; if (s.treasury) return;
+    if (s.fate === "haunted" && !s.cleared) { G.say("As your hand touches the gold, the air goes cold. The dead guard their king's treasure."); this.summon("eidolon", 2); }
+    s.treasury = true; this.gesture("act"); hoard?.destroy();
+    const silver = 40 + Math.floor(Math.random() * 40) + this.depth * 4; G.data.silver += silver;
+    const extra = [Math.random() < 0.3 ? give("Thunderstone", 1) : give("Amber", 2), give("OldCoin", 3), give("Fibula", 1)];
+    if (!G.count("sword") && Math.random() < 0.6) extra.push(give("sword", 1));
+    G.say(`The treasury of ${s.name}: +${silver} silver, ${extra.join(", ")}.`);
+    G.earn("Kleos", 2, `you found the treasure of ${s.name}`); G.note("treasury");
+  }
+  searchTholos() {
+    const s = this.site!; if (s.marks!.tholos) return;
+    s.marks!.tholos = G.dayNumber; this.gesture("act");
+    G.say(`You crawl in under the great lintel. The beehive dome closes over you, every stone ring smaller than the one below. In the floor, a shaft grave: ${[give("Amber", 2), give("OldCoin", 2), give("Figurine", 1)].join(", ")}.`);
+    if ((s.fate === "haunted" && !s.cleared) || (!G.isDay && Math.random() < 0.4)) { this.time.delayedCall(900, () => G.say("Something stirs behind you, in the dark of the dome.")); this.summon("eidolon", 1); }
+  }
+  layToRest() {
+    const s = this.site!; if (s.cleared) return;
+    const held = G.selectedItem?.id ?? "";
+    if (!["Wine", "Honey", "Milk", "OliveOil"].includes(held)) { G.say("The dead want a libation: hold wine, honey, milk or oil, and pour it on the hearth."); return; }
+    G.removeItem(held, 1); this.gesture("act");
+    s.cleared = true; const v = G.addFavor("Hades", 2, 8);
+    for (const a of this.animals) if (a.kind === "eidolon") { a.appeased = true; a.state = "idle"; this.tweens.add({ targets: a.sprite, alpha: 0, duration: 1500 }); }
+    G.say(`You pour the ${ITEMS[held].name.toLowerCase()} on the cold hearth and speak the names you guess at, kings and their women, servants, the children. The cold goes out of the hall like a breath let go. ${s.name}'s dead are at rest. (Hades ${v >= 0 ? "+" : ""}${v})`);
+    G.earn("Kleos", 1, `you laid the dead of ${s.name} to rest`);
+  }
+  searchWreck() {
+    const s = this.site!; if (s.treasury) return;
+    if (s.isle === "sirens" && !s.cleared && G.isDay && this.siteBeast) G.say("You search with the song in your ears the whole time, sweeter and sweeter.");
+    s.treasury = true; this.gesture("act");
+    if (s.isle === "sirens") {
+      const silver = 30 + Math.floor(Math.random() * 30); G.data.silver += silver;
+      G.say(`Among the ribs of the ship, the crew's chest, and their bones around it: +${silver} silver, ${[give("Pearl", 1), give("OldCoin", 2), Math.random() < 0.15 ? give("Thunderstone", 1) : give("Amber", 1)].join(", ")}.`);
+    } else {
+      const silver = 10 + Math.floor(Math.random() * 15); G.data.silver += silver;
+      G.say(`Sealed jars still wedged in the hold, and a captain's purse: +${silver} silver, ${[give(Math.random() < 0.5 ? "Wine" : "OliveOil", 2), give("OldCoin", 1), ...(Math.random() < 0.4 ? [give("Pearl", 1)] : [])].join(", ")}.`);
+    }
+  }
+  cyclopsCave() {
+    const s = this.site!, sk = seasonKey(G.data.year, G.month.season); if (s.marks!.cave === sk) return;
+    s.marks!.cave = sk; this.gesture("act");
+    G.say(`A cave big enough to stable a ship. Pens of lambs and kids, racks of cheeses, pails of whey: the master is out with his flock. You help yourself: ${give("Milk", 3)}, ${give("Meat", 2)}.`);
+    if (Math.random() < 0.25) this.time.delayedCall(1200, () => this.harm(12, "A boulder the size of a cart comes thundering down the slope, flung by something enormous coming home. It glances off you!", "a Cyclops' boulder", true));
+  }
+  letoPalm() {
+    const s = this.site!; if (s.marks!.palm) return;
+    s.marks!.palm = G.dayNumber; this.gesture("look");
+    const a = G.addFavor("Artemis", 2, 8), b = G.addFavor("Apollo", 1, 8);
+    G.say(`You lay your hand on the palm Leto clung to when she bore the twins, and pray. Quail rise from the grass all round you. (Artemis ${a >= 0 ? "+" : ""}${a}, Apollo ${b >= 0 ? "+" : ""}${b})`);
+  }
+  godsForge() {
+    const s = this.site!, sk = seasonKey(G.data.year, G.month.season); if (s.marks!.forge === sk) return;
+    s.marks!.forge = sk; this.gesture("act");
+    const v = G.addFavor("Hephaestus", 1, 6);
+    G.say(`The anvil is still warm. Around it lie the god's leavings: ${[give("Obsidian", 2), give("Copper", 2), ...(Math.random() < 0.2 ? [give("Thunderstone", 1)] : [])].join(", ")}. (Hephaestus ${v >= 0 ? "+" : ""}${v})`);
+  }
+  nymphTalk(who: string, said?: string) {
+    const s = this.site!, u = ui(this), today = G.dayNumber, again = (t: string) => this.nymphTalk(who, t);
+    const opts: { label: string; fn: () => void }[] = [];
+    if (s.marks!.rest !== today) opts.push({ label: "Rest in her grotto", fn: () => {
+      s.marks!.rest = today; G.addFatigue(-100); G.heal(99); G.essence = { ...G.essenceMax };
+      again("You sleep on fleeces by a fire of cedar and citron-wood, and wake whole. (Rested: Fatigue, Vitality and Essence restored)");
+    } });
+    if (!s.treasury) opts.push({ label: "Ask her for a parting gift", fn: () => {
+      s.treasury = true;
+      if (who === "Circe") { const v = G.addFavor("Hecate", 1, 6); again(`"Since you ask so prettily." She digs a black-rooted, white-flowered herb from the hillside and puts it in your hand. "You'll want this, near singers and witches." ${give("Moly", 1)}. (Hecate ${v >= 0 ? "+" : ""}${v})`); }
+      else { const v = G.addFavor("Hermes", 1, 6); again(`She gives you a cloak she wove at her loom, and a pearl from the sea-floor below her island. "Go, then. They all go." ${give("Cloth", 2)}, ${give("Pearl", 1)}. (Hermes ${v >= 0 ? "+" : ""}${v})`); }
+    } });
+    if (who === "Circe" && s.marks!.cup !== today) opts.push({ label: "Drink from the cup she offers", fn: () => {
+      s.marks!.cup = today;
+      if (G.count("Moly") > 0) { G.earn("Kleos", 1, "you drank Circe's cup unchanged"); const v = G.addFavor("Hermes", 1, 6); again(`You drink. Nothing happens. She stares at you, then at the moly at your belt, and laughs, delighted. "Hermes' doing! Well. You must be the clever one they told me of." (Hermes ${v >= 0 ? "+" : ""}${v})`); return; }
+      u.closeTalk(); G.addFatigue(40); G.data.clock = Math.min(G.data.clock + 3, 23.5);
+      G.say("The wine is sweet, and then the world tilts. You come to yourself hours later, on all fours in her sty, rooting among the acorns, with a nose too short and a voice that won't make words. Then it passes. She is laughing. (Time passes; +40 Fatigue. Moly, they say, protects against her.)");
+    } });
+    if (who === "Calypso") opts.push({ label: "Ask her the way home", fn: () => again(`"Home! Always home. I could make you deathless, and you'd still sit on the shore and weep for a stony farm." She sighs. "East, and then the way you came."`) });
+    const greet = who === "Circe" ? `A woman with heavy braided hair sits weaving at a loom in the grotto's mouth, singing. Wolves and lions lie about her like dogs. "A guest! Come in, sit, drink."`
+      : who === "Calypso" ? `A nymph with hair like dark water looks up from her loom, and smiles as though she has been waiting a long time. "Another one the sea has sent me."` : `A nymph of the island watches you from the grotto's mouth.`;
+    u.showTalk(who === "the nymph" ? "A nymph" : who, `${s.name} · a goddess of the island`, said ?? greet, opts);
+  }
+
+  /** Walking off into the sea without a boat, or off an isle: not without a boat. */
+  mayLeave(dx: number, dy: number): boolean {
+    if (this.boat) return true;
+    const k = `${G.data.wx + dx},${G.data.wy + dy}`, n = G.data.screens[k];
+    if (this.rec.site && n?.site === this.rec.site) return true;
+    if (!this.isSea && n?.terrain !== 6) return true;
+    this.player.setPosition(Math.max(12, Math.min(WW * TILE - 12, this.player.x - dx * 8)), Math.max(12, Math.min(WH * TILE - 14, this.player.y - dy * 8)));
+    if (this.time.now > this.seaSaidT) { this.seaSaidT = this.time.now + 4000; G.say("Open sea that way, as far as you can see. Not without a boat."); }
+    return false;
   }
 
   // ---------------------------------------------------------------- landmarks (landmarks.ts)
@@ -4399,7 +4768,7 @@ class WildScene extends PlayScene {
       if (!m.sprite.active || m.state === "dead") continue;
       const d = Math.hypot(m.sprite.x - this.player.x, m.sprite.y - this.player.y);
       if (m.kind === "siren" && G.isDay) {
-        const stopped = G.selectedItem?.id === "Wax";
+        const stopped = G.selectedItem?.id === "Wax" || G.count("Moly") > 0;
         if (d < 170 && !stopped && !this.paused && this.knock <= 0) {
           // The song pulls you toward her; you can still walk hard away.
           const v = this.player.body!.velocity, k = 42 / Math.max(1, d);
@@ -4501,6 +4870,8 @@ class WildScene extends PlayScene {
   // ---------------------------------------------------------------- wayfarers (wayfarers.ts)
   ways: WayGroup[] = [];
   wayT = 0;
+  /** Where sites are (for testing from the console). */
+  siteFns = { fortressAt, isleAt };
   /** The table of who may be met (for testing from the console). */
   wayDefs = WAYFARERS;
   /** Creatures going after something other than you: a wolf after a goat, a wounded boar after its hunter, a man running off. */
@@ -4509,7 +4880,7 @@ class WildScene extends PlayScene {
   /** On arrival: perhaps someone is here, on the road or at their work. */
   setupWayfarers() {
     this.ways = []; this.chase = new Map(); this.wayT = 50 + Math.random() * 60;
-    const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: this.water.length > 6, monster: !!this.monster, hutHere: !!this.rec.hut });
+    const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: this.water.length > 6, monster: !!this.monster, hutHere: !!this.rec.hut, only: this.site ? (w) => w.mode === "cross" : undefined });
     if (def) { const g = this.spawnWay(def, false); if (g) this.time.delayedCall(900, () => G.say(WAY_SEEN[def.id] ?? `Here: ${def.title.toLowerCase()}.`)); }
   }
 
@@ -5056,6 +5427,7 @@ class WildScene extends PlayScene {
         G.data.silver += loot;
         G.say(`The road is quiet again. ${slain ? `Among the dead men's things you find a purse:` : "They dropped their purse as they ran:"} +${loot} silver.`);
         G.earn("Kleos", 1, "you fought off brigands on the road");
+        if (g.fortress && this.site && !this.site.cleared) { this.site.cleared = true; this.time.delayedCall(1500, () => G.say(`${this.site!.name} is free of them. The king's treasury is yours to search.`)); }
       }
       if (g.foes.every((a) => !a.sprite.active || a.state === "dead")) { const i = this.ways.indexOf(g); if (i >= 0) this.ways.splice(i, 1); g.gone = true; }
       return;
@@ -5272,7 +5644,7 @@ class WildScene extends PlayScene {
         break;
       }
       case "fisher": {
-        const sea = this.rec.terrain === 7;
+        const sea = this.rec.terrain === 7 || this.rec.terrain === 6;
         buy(sea ? "Sardine" : "Chub", 3); if (!G.count("rod")) buy("rod", 8);
         if (g.done.tip === undefined) opts.push({ label: "Ask how they're biting", fn: () => { g.done.tip = today; again(`"Dawn and dusk, and after rain. ${sea ? "The deep water holds the big ones, if you've a boat." : "In the slow water by the bank, where it's dark."} And don't stamp about."`); } });
         break;
@@ -5393,6 +5765,7 @@ class WildScene extends PlayScene {
     this.directHutFolk(dt);
     this.directSiteFolk(dt);
     this.wayTick(dt);
+    this.siteTick();
     this.landmarkTick();
     if (!this.common(dt)) return;
     this.maybeWolves();
@@ -5400,10 +5773,10 @@ class WildScene extends PlayScene {
     this.desertHeat(dt);
     const px = this.player.x, py = this.player.y;
     if (this.knock > 0) return; // a blow can't throw you onto the next map
-    if (px < 7 && this.open.W) this.leaveFor(-1, 0, "E");
-    else if (px > WW * TILE - 7 && this.open.E) this.leaveFor(1, 0, "W");
-    else if (py < 6 && this.open.N) this.leaveFor(0, -1, "S");
-    else if (py > WH * TILE - 12 && this.open.S) this.leaveFor(0, 1, "N");
+    if (px < 7 && this.open.W) { if (this.mayLeave(-1, 0)) this.leaveFor(-1, 0, "E"); }
+    else if (px > WW * TILE - 7 && this.open.E) { if (this.mayLeave(1, 0)) this.leaveFor(1, 0, "W"); }
+    else if (py < 6 && this.open.N) { if (this.mayLeave(0, -1)) this.leaveFor(0, -1, "S"); }
+    else if (py > WH * TILE - 12 && this.open.S) { if (this.mayLeave(0, 1)) this.leaveFor(0, 1, "N"); }
   }
 
   subjectAt(): string | null {
@@ -5425,6 +5798,9 @@ class WildScene extends PlayScene {
       // Row on to the next stretch of water: the boat comes with you.
       G.data.placed = G.data.placed.filter((q) => q !== this.boat!.p);
       G.data.boatCarry = true;
+      // Off the sea side of a shore, or on across the open sea: the next new water is sea.
+      const sc0 = this.seaCorner;
+      G.data.fromSea = this.isSea || (this.rec.terrain === 7 && !!sc0 && Math.hypot(this.player.x / TILE - sc0[0], (this.player.y / TILE - sc0[1]) * 1.2) < sc0[2] + 3);
       const nx0 = G.data.wx + dx, ny0 = G.data.wy + dy;
       if (nx0 === 0 && (ny0 === 0 || ny0 === 1)) { G.data.boatCarry = false; G.addItem("Boat", 1); G.say("You haul the boat out and carry it home on your back."); }
     }
@@ -6273,6 +6649,7 @@ class UIScene extends Phaser.Scene {
       "THE WILD",
       "East of the farm lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
+      "Far out lie citadels of the heroes' age, three screens by three, walled with Cyclopean stone; and off the coasts, row on into the open sea to find its isles. Both go in your journal's Places.",
       "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
@@ -6776,7 +7153,7 @@ class UIScene extends Phaser.Scene {
       const [lo, hi] = kind === "tirShrine" ? [2, 3] : [3, 4], r = rng((G.data.seed ^ (kind === "tirShrine" ? 0x5417e : 0x6a7e)) >>> 0), cands: string[] = [];
       for (let y = -hi; y <= hi; y++) for (let x = -hi; x <= hi; x++) {
         const d = Math.abs(x) + Math.abs(y), k = `${x},${y}`;
-        if (d < lo || d > hi || x === 0 || G.data.screens[k] || k === a.cave || k === a.spring || k === a.satyrs || k === a.tirShrine || k === a.tirGrave) continue;
+        if (d < lo || d > hi || x === 0 || G.data.screens[k] || fortressAt(G.data.seed, x, y) || k === a.cave || k === a.spring || k === a.satyrs || k === a.tirShrine || k === a.tirGrave) continue;
         cands.push(k);
       }
       a[kind] = cands.length ? cands[Math.floor(r() * cands.length)] : kind === "tirShrine" ? "3,0" : "4,0";
@@ -6933,7 +7310,7 @@ class UIScene extends Phaser.Scene {
     const cands: [string, number][] = [];
     for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) {
       const d = Math.abs(x) + Math.abs(y), key = `${x},${y}`;
-      if (d < 2 || d > 6 || (x === 0 && (y === 0 || y === 1)) || G.data.screens[key] || G.data.rumors.some((r) => r.key === key)) continue;
+      if (d < 2 || d > 6 || (x === 0 && (y === 0 || y === 1)) || G.data.screens[key] || fortressAt(G.data.seed, x, y) || G.data.rumors.some((r) => r.key === key)) continue;
       cands.push([key, 1 / d]);
     }
     if (!cands.length) return null;
@@ -7109,7 +7486,13 @@ class UIScene extends Phaser.Scene {
     const ts = G.data.tir, st = TIRESIAS[ts.step];
     if (st && ts.said === ts.step) reqs.unshift(`• Tiresias: ${st.title.toLowerCase()}. ${st.check(this.tirCtx())[0] ? "Done: go and tell him." : `${st.check(this.tirCtx())[1]}.`} ${st.how}`);
     const fests = festUpcoming(3).map(({ f, d }) => `• ${f.name} (${f.god}): ${d === 0 ? "today!" : d === 1 ? "tomorrow" : `in ${d} days`}, ${f.day} ${MONTHS[f.month].name}. ${f.feastWord[0].toUpperCase() + f.feastWord.slice(1)} for the feast${f.agon ? `; ${f.agon.name}` : ""}.`);
-    const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
+    const places = Object.values(G.data.sites).map((p) => {
+      const mx = p.x0 + Math.floor(p.w / 2), my = p.y0 + Math.floor(p.h / 2);
+      const state = p.kind === "isle" ? ISLES[p.isle!].line.split(".")[0].replace(/^A |^An /, "a ").toLowerCase()
+        : p.fate === "brigands" ? (p.cleared ? "brigands driven out" : "held by brigands") : p.fate === "beast" ? (p.cleared ? `its ${beast(p.beast!)} is dead` : `a ${beast(p.beast!)} lairs there`) : p.cleared ? "its dead at rest" : "haunted";
+      return `• ${p.name[0].toUpperCase() + p.name.slice(1)} (${p.kind === "fortress" ? "citadel" : "isle"}), ${directions(mx, my)}: ${state}${p.treasury ? (p.kind === "fortress" ? "; treasury taken" : "") : ""}.`;
+    });
+    const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}${places.length ? `\n\nPLACES\n${places.join("\n")}` : ""}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
 

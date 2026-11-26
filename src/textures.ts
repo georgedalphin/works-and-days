@@ -16,9 +16,11 @@ export const T = {
   PEBBLES: 33, LEAVES: 34, TUFT: 35, MUSHRING: 36, TWIGS: 37, SKULL: 38, SHELLS: 39, CRACKS: 40, BLOOMS: 41,
   // Water you can wade (half speed); WATER itself is deep (swim, briefly, at a quarter).
   SHALLOW: 42,
+  // Citadels: Cyclopean masonry, paving, a palace column.
+  CYCLO: 43, FLAGS: 44, COLUMN: 45,
 };
 export const TILE = 16;
-const COUNT = 43;
+const COUNT = 46;
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -82,6 +84,17 @@ function drawTile(c: Ctx, i: number) {
       for (const [x, y] of [[3, 3], [10, 5], [6, 10], [12, 12], [1, 13]]) px(c, o + x, y, 2, 1, "#a89870");
       for (const [x, y] of [[2, 6], [9, 9], [5, 14]]) px(c, o + x, y, 4, 1, "#b4dce0");
       break;
+    case T.CYCLO: { // great rough blocks, fitted without mortar
+      px(c, o, 0, TILE, TILE, "#9a907a");
+      const blocks: [number, number, number, number][] = [[0, 0, 9, 6], [9, 0, 7, 7], [0, 6, 6, 5], [6, 7, 10, 5], [0, 11, 8, 5], [8, 12, 8, 4]];
+      const shades = ["#b9ae94", "#aca288", "#c4ba9f", "#b3a98e", "#a69c82", "#bdb399"];
+      blocks.forEach(([x, y, w, h], i) => { px(c, o + x + 1, y + 1, w - 1, h - 1, shades[i]); px(c, o + x + 1, y + 1, w - 2, 1, "#d2c9b0"); px(c, o + x + 1, y + h - 1, w - 1, 1, "#7e7562"); });
+      break;
+    }
+    case T.FLAGS: speckle(c, o, "#cdbf9c", ["#d8cca9", "#bfb18f"], 10, 113); for (const y of [0, 8]) px(c, o, y, 16, 1, "#a89a7a"); px(c, o + 5, 0, 1, 8, "#a89a7a"); px(c, o + 12, 8, 1, 8, "#a89a7a"); break;
+    case T.COLUMN: // a palace column, red, on a stone base, its dark cushion capital
+      px(c, o + 3, 13, 10, 3, "#8e846e"); px(c, o + 5, 3, 6, 10, "#9c3a2a"); px(c, o + 5, 3, 2, 10, "#b8523e"); px(c, o + 10, 3, 1, 10, "#6e2a1e");
+      px(c, o + 3, 0, 10, 3, "#2e2a24"); px(c, o + 4, 0, 8, 1, "#4a443a"); break;
     case T.CAVEWALL: speckle(c, o, "#3a332c", ["#4a4238", "#2a241e", "#524a40"], 26, 61); px(c, o, 13, 16, 3, "#2a241e"); break;
     case T.CAVEFLOOR: speckle(c, o, "#5a5046", ["#4a4238", "#6a6054", "#544a40"], 16, 67); break;
     case T.ORE:
@@ -761,6 +774,11 @@ export function makeTextures(scene: Phaser.Scene) {
   canvasTex(scene, "spearFly", 20, 3, (c) => { px(c, 0, 1, 16, 1, "#9c7445"); px(c, 16, 0, 3, 3, "#c98a55"); px(c, 19, 1, 1, 1, "#e8c48a"); px(c, 0, 0, 1, 3, "#c98a55"); });
   canvasTex(scene, "spearStuck", 7, 18, (c) => { px(c, 3, 3, 1, 14, "#9c7445"); px(c, 2, 0, 3, 3, "#c98a55"); px(c, 3, 0, 1, 1, "#e8c48a"); px(c, 1, 16, 5, 2, "rgba(0,0,0,0.25)"); });
   canvasTex(scene, "arrowStuck", 5, 8, (c) => { px(c, 2, 0, 1, 7, "#a87443"); px(c, 1, 0, 1, 2, "#e8e2d0"); px(c, 3, 0, 1, 2, "#e8e2d0"); px(c, 1, 7, 3, 1, "rgba(0,0,0,0.25)"); });
+  // A stone throne, high-backed, its arms carved as griffins long worn away.
+  canvasTex(scene, "throne", 14, 20, (c) => {
+    px(c, 2, 0, 10, 12, "#a89a7c"); px(c, 3, 1, 8, 10, "#bcae8e"); px(c, 0, 9, 14, 4, "#9a8c70"); px(c, 1, 9, 12, 2, "#c4b696");
+    px(c, 2, 13, 10, 5, "#8e8066"); px(c, 0, 18, 14, 2, "rgba(0,0,0,0.25)"); px(c, 5, 3, 4, 3, "#9c3a2a");
+  });
   canvasTex(scene, "pithos", 12, 16, (c) => {
     px(c, 2, 2, 8, 13, "#b5643b"); px(c, 1, 5, 10, 7, "#c4703f"); px(c, 3, 0, 6, 3, "#9c5532"); px(c, 2, 8, 8, 1, "#2a1d14");
   });

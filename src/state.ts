@@ -1,3 +1,4 @@
+import type { SiteRec } from "./sites";
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
 import { ALL_GODS, DIVINE, boonOf, giftChance, DRIFT_DAYS } from "./divine";
@@ -22,6 +23,8 @@ export interface ScreenRec { terrain: number; special: boolean; feature: string;
   /** The landmark: what has been taken from it this season, and whether its cache has been searched. */
   lmTook?: Record<number, string>; lmCache?: string; lmSeen?: boolean; boatRolled?: boolean;
   river?: boolean; ford?: [number, number] | null;
+  /** Part of a citadel or an isle (its id in G.data.sites); for a coast reached from the sea, the corner the sea fills. */
+  site?: string; corner?: [number, number];
   roads?: string[]; crossroads?: boolean; hecateNight?: number; met?: boolean; graveyard?: [number, number] | null; shrine?: { tx: number; ty: number; god: string; seed: number } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";
@@ -92,6 +95,10 @@ export interface SaveData {
   arts: string[];
   blessing: { id: string; until: number } | null;
   hostedDay: number;
+  /** Citadels and isles found: id → what is known of them. */
+  sites: Record<string, SiteRec>;
+  /** Rowing on from the open sea: the next new screen is sea too. */
+  fromSea?: boolean;
   anchors: { spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
   caves: Record<string, { type: "common" | "sacred" | "chthonic"; boss: "alive" | "appeased" | "slain"; hoard: boolean; mined: Record<string, string[]> }>;
   cave: { key: string; level: number }; // where you are underground
@@ -226,7 +233,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.vitality ??= 6 * Math.max(2, d.health ?? 4); d.meal ??= {}; d.dishes ??= []; d.songs ??= []; d.fest ??= {}; d.songUsed ??= {}; d.songBuff ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.sites ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.vitality ??= 6 * Math.max(2, d.health ?? 4); d.meal ??= {}; d.dishes ??= []; d.songs ??= []; d.fest ??= {}; d.songUsed ??= {}; d.songBuff ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
     if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
     // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
     if (!d.spearHotbar) {
@@ -298,7 +305,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, vitality: 24, meal: {}, dishes: [], fest: {}, songs: [], songUsed: {}, songBuff: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, sites: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, vitality: 24, meal: {}, dishes: [], fest: {}, songs: [], songUsed: {}, songBuff: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -321,7 +328,9 @@ export class GameState {
     if (this.data.scene === "Cave") { const c = this.data.caves[this.data.cave.key]; return `A ${c?.type ?? ""} cave · level ${this.data.cave.level}${this.data.torchLit ? " · torchlit" : " · in darkness"}`; }
     const rec = this.data.screens[`${this.data.wx},${this.data.wy}`];
     const dist = Math.abs(this.data.wx) + Math.abs(this.data.wy);
-    return `${rec ? terrain(rec.terrain).name : "The wild"} · ${dist} screen${dist === 1 ? "" : "s"} from home`;
+    const site = rec?.site ? this.data.sites[rec.site] : undefined;
+    const where = site ? `${site.name[0].toUpperCase()}${site.name.slice(1)}${site.kind === "isle" ? "" : `, ${terrain(rec!.terrain).name.toLowerCase()}`}` : rec?.terrain === 6 ? "The open sea" : rec ? terrain(rec.terrain).name : "The wild";
+    return `${where} · ${dist} screen${dist === 1 ? "" : "s"} from home`;
   }
   /** Your understanding of a kind of thing: 0 Unknown, 1 Basics, 2 Deep, 3 Full. */
   get archery() { return Math.min(ARCHERY.maxLevel, Math.floor(this.data.archeryXp / ARCHERY.perLevel)); }
