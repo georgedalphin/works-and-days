@@ -51,7 +51,7 @@ async def main():
         # Save/reload keeps the meal straight: eat, save, reload, let it lapse.
         # The campfire menu.
         await pg.evaluate(f"G.data.clock=3; {Ho}.goTo('Farm')"); await pg.wait_for_timeout(2500)
-        await pg.evaluate(f"(()=>{{const f={F}; const p={{id:'Campfire',where:'farm',x:30,y:20}}; G.data.placed.push(p); f.spawnPlaced(p); f.targets.find(t=>t.label&&t.label.includes('campfire')).act(); }})()")
+        await pg.evaluate(f"(()=>{{const f={F}; const p={{id:'Campfire',where:'farm',x:30,y:20,fuel:G.absHour+10}}; G.data.placed.push(p); f.spawnPlaced(p); f.targets.find(t=>t.label&&t.label.includes('campfire')).act(); }})()")
         print("campfire:", await pg.evaluate(f"{U}.talkPanel.list.filter(o=>o.type==='Text').map(o=>o.text).join(' / ')"))
         await pg.evaluate(f"(()=>{{const o={U}.talkPanel.list.find(o=>o.type==='Text'&&o.text.includes('Cook')); o.emit('pointerdown'); }})()")
         print("cook panel open:", await pg.evaluate(f"!!{U}.craft && {U}.cookAt"))

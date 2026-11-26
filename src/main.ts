@@ -97,6 +97,10 @@ const SING = { on: false, mode: 0, buf: [] as { n: number; t: number; mode: numb
 const songName = (m: { name: string }) => m.name.startsWith("The ") ? `the ${m.name.slice(4)}` : m.name.startsWith("Tiresias") ? m.name : `the ${m.name}`;
 const curInstrument = () => INSTRUMENTS[G.selectedItem?.id ?? ""] ?? INSTRUMENTS.voice;
 
+/** A campfire burns two hours for each fiber fed to it. */
+const CAMP_HOURS_PER_FIBER = 2;
+const campLit = (p: Placed) => (p.fuel ?? 0) > G.absHour;
+
 /** How much a blow is softened: a woolen cloak, if you carry one. (Health gives you more Vitality instead.) */
 const armor = () => (G.count("Cloak") > 0 ? 1 : 0);
 /** A creature's blow in Vitality: its old Fatigue figure scaled to Terata hits (a fox 2, a wolf 4, a boar 6, a lion 8). */
@@ -288,7 +292,7 @@ abstract class PlayScene extends Phaser.Scene {
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
     this.spots = []; inDark = false;
-    this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false; this.fish = undefined;
+    this.placedObjs = []; this.fenceImgs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false; this.fish = undefined;
     this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
@@ -532,6 +536,7 @@ abstract class PlayScene extends Phaser.Scene {
     const cx = p.x * TILE + 8, by = p.y * TILE + 15;
     if (p.id === "Fence") {
       this.objLayer()?.putTileAt(T.FENCE, p.x, p.y).setCollision(true);
+      this.refreshFences();
       this.placedObjs.push({ p }); return;
     }
     if (p.id === "Snare") this.resolveSnare(p);
@@ -547,15 +552,60 @@ abstract class PlayScene extends Phaser.Scene {
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
     else if (p.id === "Boat") o.t = { ...o.t, get label() { return sc.boat ? "" : "Get in the boat"; }, act: () => sc.boardBoat(o) };
     else if (p.id === "Campfire") {
-      o.t = { ...o.t, label: "The campfire: cook, or sleep", act: () => ui(sc).showTalk("The campfire", "Fire under the open sky", "The fire crackles. A pot sits on the stones at its edge.", [{ label: "Cook something", fn: () => { ui(sc).closeTalk(); ui(sc).openCook("campfire"); } }, { label: "Sleep here until dawn", fn: () => { ui(sc).closeTalk(); sc.campSleep(); } }]) };
+      o.t = { ...o.t, get label() { return campLit(p) ? `The campfire (about ${Math.max(1, Math.round(p.fuel! - G.absHour))} h of fuel)` : "The campfire (cold)"; }, act: () => sc.campfireMenu(p) };
       const glow = this.add.image(cx, by - 6, "focusGlow").setDepth(by - 1).setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD);
-      this.tweens.add({ targets: glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 380 + Math.random() * 200 });
-      this.tweens.add({ targets: img, scaleY: 1.06, yoyo: true, repeat: -1, duration: 260 });
+      const t1 = this.tweens.add({ targets: glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 380 + Math.random() * 200 });
+      const t2 = this.tweens.add({ targets: img, scaleY: 1.06, yoyo: true, repeat: -1, duration: 260 });
+      (o as { fire?: { glow: Phaser.GameObjects.Image; tweens: Phaser.Tweens.Tween[]; lit?: boolean } }).fire = { glow, tweens: [t1, t2] };
+      this.showFire(o);
     }
     else if (p.id === "Snare") o.t = { x: o.t.x, y: o.t.y, get label() { return p.caught ? "Something is in the snare" : "Check the snare"; }, act: () => sc.checkSnare(o) };
     this.targets.push(o.t);
     this.placedObjs.push(o);
   }
+  /** Fences join up: each fence tile is drawn as the piece that fits its neighbors (the tile itself stays, unseen, for collision). */
+  fenceImgs: Phaser.GameObjects.Image[] = [];
+  refreshFences() {
+    for (const i of this.fenceImgs) i.destroy();
+    this.fenceImgs = [];
+    const o = this.objLayer(); if (!o) return;
+    const is = (x: number, y: number) => o.getTileAt(x, y)?.index === T.FENCE;
+    o.forEachTile((t) => {
+      if (t.index !== T.FENCE) return;
+      t.setAlpha(0);
+      const m = (is(t.x, t.y - 1) ? 1 : 0) | (is(t.x + 1, t.y) ? 2 : 0) | (is(t.x, t.y + 1) ? 4 : 0) | (is(t.x - 1, t.y) ? 8 : 0);
+      this.fenceImgs.push(this.add.image(t.pixelX, t.pixelY, "fences", m).setOrigin(0, 0).setDepth(t.pixelY + 13));
+    });
+  }
+  /** Show a campfire lit or cold (it goes out when its fuel is spent). */
+  showFire(o: { p: Placed; img?: Phaser.GameObjects.Image }) {
+    const f = (o as { fire?: { glow: Phaser.GameObjects.Image; tweens: Phaser.Tweens.Tween[]; lit?: boolean } }).fire; if (!f || !o.img) return;
+    const lit = campLit(o.p);
+    if (f.lit === lit) return;
+    if (f.lit && !lit && Math.hypot(o.img.x - this.player.x, o.img.y - this.player.y) < 200) G.say("The campfire burns down to embers, and goes out.");
+    f.lit = lit;
+    f.glow.setVisible(lit); for (const t of f.tweens) { if (lit) t.resume(); else t.pause(); }
+    o.img.setScale(1).setTint(lit ? 0xffffff : 0x6a6058);
+  }
+  /** The campfire: feed it, cook on it, sleep by it. */
+  campfireMenu(p: Placed) {
+    const u = ui(this), lit = campLit(p), fiber = G.count("Fiber");
+    const opts: { label: string; fn: () => void }[] = [];
+    const feed = (n: number) => () => {
+      G.removeItem("Fiber", n); p.fuel = Math.max(p.fuel ?? 0, G.absHour) + n * CAMP_HOURS_PER_FIBER; SOUND.sfx("chop");
+      const o = this.placedObjs.find((x) => x.p === p); if (o) this.showFire(o);
+      u.closeTalk(); G.say(`${lit ? "You feed the fire" : "You strike a spark into the fiber, and blow, and the fire catches"}: about ${Math.round(p.fuel - G.absHour)} hours of burning now.`);
+    };
+    if (fiber >= 1) opts.push({ label: lit ? "Feed it a handful of fiber (+2 hours)" : "Relight it with a handful of fiber (2 hours)", fn: feed(1) });
+    if (fiber >= 5) opts.push({ label: `${lit ? "Feed it" : "Relight it with"} 5 fiber (+10 hours)`, fn: feed(5) });
+    if (lit) {
+      opts.push({ label: "Cook something", fn: () => { u.closeTalk(); u.openCook("campfire"); } });
+      opts.push({ label: "Sleep here until dawn", fn: () => { u.closeTalk(); this.campSleep(); } });
+    }
+    const left = lit ? Math.max(1, Math.round(p.fuel! - G.absHour)) : 0;
+    u.showTalk("The campfire", "Fire under the open sky", lit ? `The fire crackles. A pot sits on the stones at its edge. It has fuel for about ${left} hour${left > 1 ? "s" : ""}; each handful of fiber keeps it going two hours more.` : `The campfire is cold: ash and blackened stones. ${fiber ? "Feed it fiber to light it again." : "You'll need fiber to light it again (cut brush or reeds)."}`, opts);
+  }
+
   /** Sleep out by a campfire: half the rest of a bed, but you wake where you lay down. */
   campSleep() {
     const hours = G.sleepHours, rec = Math.min(G.data.fatigue, hours * 12 * 0.5);
@@ -586,7 +636,7 @@ abstract class PlayScene extends Phaser.Scene {
     const p = o.p;
     if (p.store?.some((s) => s)) { G.say("Empty the chest before you move it."); return; }
     if (G.addItem(p.id, 1) > 0) { G.say("Your pack is full."); return; }
-    if (p.id === "Fence") this.objLayer()?.putTileAt(-1, p.x, p.y);
+    if (p.id === "Fence") { this.objLayer()?.putTileAt(-1, p.x, p.y); this.refreshFences(); }
     o.img?.destroy(); o.body?.destroy();
     if (o.t) this.targets = this.targets.filter((t) => t !== o.t);
     this.placedObjs = this.placedObjs.filter((x) => x !== o);
@@ -609,6 +659,7 @@ abstract class PlayScene extends Phaser.Scene {
     const p: Placed = { id: held.id, where: key, x: tx, y: ty };
     if (held.id === "Chest") p.store = Array(CHEST_SIZE).fill(null);
     if (held.id === "Snare") p.set = G.dayNumber;
+    if (held.id === "Campfire") p.fuel = G.absHour + CAMP_HOURS_PER_FIBER; // lit with one fiber's worth
     G.data.placed.push(p); this.spawnPlaced(p); G.note(`place:${held.id}`);
     SOUND.sfx("pickup");
     G.say(held.id === "Boat" ? "You push the boat into the shallows. Get in with E." : held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
@@ -912,6 +963,7 @@ abstract class PlayScene extends Phaser.Scene {
     if ((this.mealT -= dt) <= 0) {
       this.mealT = 1; for (const m of G.mealTick()) G.say(m);
       if (!this.paused) this.maybeHearSong();
+      for (const o of this.placedObjs) if (o.p.id === "Campfire") this.showFire(o);
       // Slow healing while awake (a longer jump in time is sleep, which heals by itself).
       const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo"))); this.lastHealAt = h;
     }
@@ -1185,7 +1237,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** Firelight on this screen: placed campfires, and a torch or lamp in your hand. */
   fireLights(): { x: number; y: number; r: number }[] {
-    const out = this.placedObjs.filter((o) => o.p.id === "Campfire" && o.img).map((o) => ({ x: o.img!.x, y: o.img!.y - 6, r: 60 }));
+    const out = this.placedObjs.filter((o) => o.p.id === "Campfire" && o.img && campLit(o.p)).map((o) => ({ x: o.img!.x, y: o.img!.y - 6, r: 60 }));
     const held = G.selectedItem?.id;
     if (held === "Torch" || held === "Lamp") out.push({ x: this.player.x, y: this.player.y, r: held === "Torch" ? 46 : 38 });
     return out;
@@ -2504,6 +2556,7 @@ class FarmScene extends PlayScene {
       x < MW - 2 && y < MH - 2 && Math.hypot((x - 24) / 1.3, y - 14) > 9 && objs[y][x] === -1 && this.baseGround[y][x] !== T.PATH && !inPen(x, y));
     this.spawnAnimals(r, objs);
     this.drawPlaced();
+    this.refreshFences();
     this.setupTiresias(solids);
     this.cameras.main.fadeIn(250);
   }

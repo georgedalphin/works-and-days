@@ -14,7 +14,7 @@ async def main():
         await pg.evaluate("G.data.screens['1,0']={terrain:3,special:false,feature:'Stone outcrop',cleared:[]}; G.data.wx=1; G.data.wy=0; G.data.entry='W'; G.data.scene='Wild'; game.scene.getScene('House').goTo('Wild')"); await pg.wait_for_timeout(3000)
         # Stand by a campfire at night; a ghost comes for you.
         await pg.evaluate(f"""(()=>{{const w={Wd}; w.animals.forEach(a=>a.sprite.destroy()); w.animals=[]; G.data.clock=G.daylight+1;
-          w.player.setPosition(20*16+8, 15*16+8); const p={{id:'Campfire',where:w.placeKey(),x:21,y:15}}; G.data.placed.push(p); w.spawnPlaced(p);
+          w.player.setPosition(20*16+8, 15*16+8); const p={{id:'Campfire',where:w.placeKey(),x:21,y:15,fuel:G.absHour+10}}; G.data.placed.push(p); w.spawnPlaced(p);
           const A=window._A; }})()""")
         await pg.evaluate(f"""(()=>{{const w={Wd}; const f=game.scene.getScene('Farm'); }})()""")
         # Make a ghost (borrow the Animal class from any scene's goats/birds via summon).

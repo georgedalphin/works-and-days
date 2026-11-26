@@ -29,7 +29,7 @@ const SAVE_KEY = "worksanddays.save.v1";
 export interface Essence { Earth: number; Water: number; Air: number; Fire: number }
 
 /** Something you made and set down: a station, a chest, a fence, a snare. */
-export interface Placed { id: string; where: string; x: number; y: number; store?: (Slot | null)[]; set?: number; caught?: string }
+export interface Placed { id: string; where: string; x: number; y: number; store?: (Slot | null)[]; set?: number; caught?: string; /** A campfire burns until this hour (absolute clock hours). */ fuel?: number }
 export const CHEST_SIZE = 20;
 
 export interface SaveData {

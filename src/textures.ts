@@ -178,6 +178,7 @@ export function makeTextures(scene: Phaser.Scene) {
   makeAmbientTextures(scene);
   makeOmenTextures(scene);
   makeTiresiasTextures(scene);
+  makeFenceTextures(scene);
 
   // The one-room hut: limestone walls, reed thatch, a door.
   canvasTex(scene, "hut", 64, 56, (c) => {
@@ -1256,4 +1257,29 @@ export function paintCreationBg(scene: Phaser.Scene, key: string, theme: number,
     c.drawImage(tmp, 8, 8, 8 * s, 8 * s); // top left, clear of the wheel and the words
     c.globalAlpha = 1;
   });
+}
+
+/**
+ * Fences that join: 16 pieces by which neighbors are fences too (N 1, E 2, S 4, W 8). A post in the middle;
+ * rails run out east and west as two bars, and north and south as a narrow rail seen end-on, with a post where a run ends.
+ */
+export function makeFenceTextures(scene: Phaser.Scene) {
+  if (scene.textures.exists("fences")) return;
+  const rail = "#8a5f35", dark = "#5a3d22", post = "#6b4a2b", top = "#a87443";
+  const tx = canvasTex(scene, "fences", 16 * 16, 16, (c) => {
+    for (let m = 0; m < 16; m++) {
+      const o = m * 16, N = m & 1, E = m & 2, S = m & 4, Wd = m & 8;
+      px(c, o + 5, 14, 6, 1, "rgba(0,0,0,0.18)"); // shadow at the foot
+      if (E) { px(c, o + 8, 5, 8, 2, rail); px(c, o + 8, 10, 8, 2, rail); px(c, o + 8, 7, 8, 1, dark); }
+      if (Wd) { px(c, o, 5, 8, 2, rail); px(c, o, 10, 8, 2, rail); px(c, o, 7, 8, 1, dark); }
+      if (N) { px(c, o + 7, 0, 2, 6, rail); px(c, o + 9, 0, 1, 6, dark); }
+      if (S) { px(c, o + 7, 10, 2, 6, rail); px(c, o + 9, 10, 1, 6, dark); }
+      // The post: taller at corners, ends and joins; a slim one in the middle of a straight run.
+      const straight = (m === 10 || m === 5);
+      if (straight && m === 10) { px(c, o + 7, 3, 2, 11, post); px(c, o + 7, 3, 2, 1, top); }
+      else if (straight) { px(c, o + 6, 5, 4, 6, post); px(c, o + 6, 5, 4, 1, top); }
+      else { px(c, o + 6, 2, 4, 12, post); px(c, o + 6, 2, 4, 1, top); px(c, o + 9, 3, 1, 11, dark); }
+    }
+  });
+  for (let m = 0; m < 16; m++) tx.add(m, 0, m * 16, 0, 16, 16);
 }

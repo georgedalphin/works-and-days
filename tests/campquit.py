@@ -21,7 +21,7 @@ async def main():
         await pg.evaluate(f"""(()=>{{const s={Wd}; for(let y=12;y<19;y++) for(let x=16;x<24;x++){{ s.objects.putTileAt(-1,x,y); s.removeTrunk(x,y); }} s.player.setPosition(20*16+8, 15*16+8); s.mouseIn=false;
            G.data.selected=G.data.slots.findIndex(x=>x&&x.id==='Campfire'); s.facingTile=()=>[21,15]; s.useNow(); delete s.facingTile; }})()""")
         await pg.wait_for_timeout(300); print("place:", await msg(pg))
-        await pg.evaluate("G.data.clock=G.daylight+1; G.data.fatigue=60"); await pg.wait_for_timeout(500)
+        await pg.evaluate("G.data.clock=G.daylight+1; G.data.fatigue=60; G.data.placed.find(p=>p.id==='Campfire').fuel=G.absHour+8"); await pg.wait_for_timeout(1500)
         await pg.screenshot(path="/home/claude/test/camp.png")
         await pg.evaluate(f"(()=>{{const s={Wd}; const o=s.placedObjs.find(o=>o.p.id==='Campfire'); o.t.act(); const b={U}.talkPanel.list.find(o=>o.type==='Text'&&o.text.includes('Sleep here')); b.emit('pointerdown');}})()"); await pg.wait_for_timeout(200)
         print("ask:", await pg.evaluate(f"{U}.dialog ? {U}.dialog.list.filter(o=>o.type==='Text').map(o=>o.text).join(' / ').slice(0,250) : 'none'"))
