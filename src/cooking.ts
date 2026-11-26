@@ -52,14 +52,17 @@ export const PLAIN: Record<string, { name: string; desc: string }> = {
 };
 
 /** A god's own dish. Each entry of `needs` is one ingredient, or a list of which any one will do. */
+/** The fish (see fishing.ts), for the dishes that take any of them. */
+const FISH_IDS = ["Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
+const FINE_FISH = ["Tuna", "Bream", "RedMullet", "Trout", "Eel", "Octopus"];
 export interface Named { key: string; name: string; greek?: string; god: string; needs: (string | string[])[]; desc: string; eaten: string }
 export const NAMED: Named[] = [
   { key: "kykeon", name: "Kykeon", greek: "kykeon", god: "Demeter", needs: [["Millet", "Oats"], "Mint", "Milk"], desc: "Barley-groats, pennyroyal and milk: the drink Demeter took at Eleusis, ending her fast.", eaten: "Demeter's own drink. The grief of the Mother eases in you, and the fields seem nearer." },
   { key: "melikraton", name: "Melikraton", greek: "melikraton", god: "Hades", needs: ["Honey", "Milk"], desc: "Honey mixed with milk, as is poured for the dead.", eaten: "Sweet, and strangely cold. The ones below remember the taste." },
-  { key: "hecate", name: "Hecate's supper", greek: "Hekates deipnon", god: "Hecate", needs: ["Honey", "Mushrooms", ["Milk", "Meat"]], desc: "The supper left at the crossroads at the month's end. Best left at a herm by night.", eaten: "You eat the goddess's supper. The dark seems to lean closer, curious." },
+  { key: "hecate", name: "Hecate's supper", greek: "Hekates deipnon", god: "Hecate", needs: ["Honey", ["Mushrooms", "RedMullet"], ["Milk", "Meat", "RedMullet"]], desc: "The supper left at the crossroads at the month's end: honey, and mushrooms or her red mullet. Best left at a herm by night.", eaten: "You eat the goddess's supper. The dark seems to lean closer, curious." },
   { key: "oulochytai", name: "Sacrificial portion", greek: "thysia", god: "Zeus", needs: ["Meat", "Wine", ["Millet", "Oats"]], desc: "Meat roasted with wine poured over and grain scattered, the sacrificer's share.", eaten: "The share of the sacrifice. The sky feels close, and approving." },
   { key: "heroroast", name: "Hero's portion", god: "Ares", needs: ["Meat", "Thyme", "OliveOil"], desc: "The chine of meat, oiled and thyme-roasted, given to the bravest at the feast.", eaten: "The hero's portion. Your blood runs hot." },
-  { key: "kakavia", name: "Kakavia", greek: "kakavia", god: "Poseidon", needs: ["Meat", "SeaFennel", ["Capers", "OliveOil"]], desc: "A fisherman's stew of the shore.", eaten: "Salt and the sea's bounty. Poseidon smiles on full bellies." },
+  { key: "kakavia", name: "Kakavia", greek: "kakavia", god: "Poseidon", needs: [["Meat", ...FISH_IDS], "SeaFennel", ["Capers", "OliveOil"]], desc: "A fisherman's stew of the shore: fish (or meat), sea fennel, capers or oil.", eaten: "Salt and the sea's bounty. Poseidon smiles on full bellies." },
   { key: "relish", name: "Olive and chickpea relish", god: "Athena", needs: [["Olives", "OliveOil"], "Chickpeas", "Thyme"], desc: "Simple, careful food, the kind wise people eat.", eaten: "Athena's tree, Athena's patience. Your thoughts line up neatly." },
   { key: "venison", name: "Huntress' spit", god: "Artemis", needs: ["Meat", "Cornel", ["Saltbush", "Purslane", "Mushrooms"]], desc: "Game roasted with cornel berries and wild greens, as hunters eat in the hills.", eaten: "The huntress' food. You hear the woods more keenly." },
   { key: "roadbread", name: "Traveler's bread", god: "Hermes", needs: [["Millet", "Oats"], "Capers", "OliveOil"], desc: "Hard bread with capers and oil, that keeps for a long road.", eaten: "Hermes' bread. Your feet feel lighter already." },
@@ -67,6 +70,7 @@ export const NAMED: Named[] = [
   { key: "melon", name: "Honeyed melon", god: "Aphrodite", needs: ["Melon", "Honey", ["Mint", "Plum"]], desc: "Sweet melon with honey and fruit or mint. A gift for a lover.", eaten: "Sweetness on sweetness. Aphrodite laughs somewhere." },
   { key: "plums", name: "Drunken plums", god: "Dionysus", needs: ["Plum", "Wine", "Honey"], desc: "Plums stewed in wine and honey.", eaten: "The god of the vine is in this dish, and now in you." },
   { key: "fennelroast", name: "Prometheus' roast", god: "Hephaestus", needs: ["Meat", "Fennel"], desc: "Meat roasted over fennel stalks, the way fire first came to men.", eaten: "Fire's own food. The smith-god warms to you." },
+  { key: "grilledfish", name: "Fish grilled in fig leaves", god: "Poseidon", needs: [FINE_FISH, "OliveOil", ["Thyme", "Fennel", "Capers"]], desc: "The fisherman's feast: a fine fish, oiled, herbed and grilled.", eaten: "Salt, smoke and the sea. Poseidon knows a fisherman's thanks." },
   { key: "weddingcake", name: "Wedding cake", greek: "plakous", god: "Hera", needs: [["Millet", "Oats"], "Honey", "Milk"], desc: "A honey-cake of grain and milk, as is baked for a wedding.", eaten: "The marriage-cake. Hera, queen of the household, is pleased." },
 ];
 

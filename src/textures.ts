@@ -767,7 +767,7 @@ export function makeTextures(scene: Phaser.Scene) {
 
 export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
-  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos"];
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
 
 const CROP_COL: Record<string, [string, string]> = {
   Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
@@ -837,6 +837,18 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
 const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel" };
 
 function drawIcon(c: Ctx, o: number, id: string) {
+  if (id === "rod") { for (let i = 0; i < 12; i++) px(c, o + 2 + i, 13 - i, 1, 1, "#8a5a2a"); px(c, o + 13, 1, 1, 9, "rgba(230,230,220,0.7)"); px(c, o + 12, 10, 2, 2, "#d8402a"); return; }
+  const FISHC: Record<string, [string, string, number]> = { Chub: ["#8a8a6a", "#c8c8a8", 9], Perch: ["#6a8a3a", "#c8d070", 9], Trout: ["#7a8a7a", "#e0a0a0", 10], Mullet: ["#8a9098", "#d8dce0", 10],
+    Sardine: ["#5a7a9a", "#e0e8f0", 7], Bream: ["#8a9aa8", "#f0d060", 10], RedMullet: ["#c85a50", "#f0b0a0", 9], Tuna: ["#2a3a5a", "#a0b0c8", 12] };
+  if (FISHC[id]) { // a fish, nose right
+    const [back, belly, len] = FISHC[id], x0 = o + Math.floor((14 - len) / 2);
+    px(c, x0 + 2, 6, len - 3, 4, back); px(c, x0 + 2, 9, len - 3, 2, belly); px(c, x0 + 1, 7, 1, 3, back); px(c, x0 - 1, 5, 2, 2, back); px(c, x0 - 1, 10, 2, 2, back);
+    px(c, x0 + len - 3, 7, 1, 1, "#1a1410"); if (id === "Bream") px(c, x0 + len - 4, 6, 2, 1, "#f0d060"); if (id === "Perch") for (const x of [4, 6, 8]) px(c, x0 + x, 6, 1, 3, "#3a5a1a");
+    return;
+  }
+  if (id === "Eel") { for (let i = 0; i < 12; i++) px(c, o + 2 + i, 8 + Math.round(Math.sin(i * 0.9) * 2), 1, 2, "#4a4a2a"); px(c, o + 13, 7, 1, 1, "#1a1410"); return; }
+  if (id === "Octopus") { px(c, o + 5, 3, 6, 6, "#b0605a"); px(c, o + 6, 5, 1, 1, "#1a1410"); px(c, o + 9, 5, 1, 1, "#1a1410"); for (const x of [4, 6, 8, 10]) { px(c, o + x, 9, 1, 4, "#b0605a"); px(c, o + x + 1, 12, 1, 2, "#b0605a"); } return; }
+  if (id === "Cuttlefish") { px(c, o + 3, 6, 9, 5, "#a89880"); px(c, o + 3, 6, 9, 1, "#7a6a58"); px(c, o + 10, 7, 1, 1, "#1a1410"); for (const y of [7, 9]) px(c, o + 12, y, 3, 1, "#a89880"); return; }
   if (id === "Lyre") { // a tortoise-shell sounding box, two antler horns, a crossbar and strings
     px(c, o + 4, 9, 8, 5, "#8a6a3a"); px(c, o + 5, 10, 6, 3, "#a8844a"); px(c, o + 6, 11, 1, 1, "#5a4020"); px(c, o + 9, 11, 1, 1, "#5a4020");
     px(c, o + 4, 3, 1, 7, "#e8dcc0"); px(c, o + 11, 3, 1, 7, "#e8dcc0"); px(c, o + 3, 2, 2, 1, "#e8dcc0"); px(c, o + 11, 2, 2, 1, "#e8dcc0");
@@ -1097,6 +1109,12 @@ export function makeOmenTextures(scene: Phaser.Scene) {
   two("owl", 10, 8, (c, o, f) => { px(c, o + 3, 2, 4, 5, "#8a7a62"); px(c, o + 4, 3, 1, 1, "#f2d040"); px(c, o + 6, 3, 1, 1, "#f2d040");
     if (f) { px(c, o + 0, 4, 3, 2, "#7a6a52"); px(c, o + 7, 4, 3, 2, "#7a6a52"); } else { px(c, o + 0, 1, 3, 2, "#7a6a52"); px(c, o + 7, 1, 3, 2, "#7a6a52"); } });
   canvasTex(scene, "snail", 8, 6, (c) => { px(c, 3, 0, 4, 4, "#a87a4a"); px(c, 4, 1, 2, 2, "#c8a070"); px(c, 0, 3, 6, 2, "#c8b890"); px(c, 0, 1, 1, 2, "#c8b890"); });
+  // A fishing float: riding the water, then dipped under with a ring of ripples.
+  const fl = canvasTex(scene, "bobber", 16, 8, (c) => {
+    px(c, 2, 1, 3, 2, "#d8402a"); px(c, 2, 3, 3, 2, "#f2ecd8"); px(c, 1, 5, 5, 1, "rgba(220,240,250,0.6)");
+    px(c, 9, 4, 6, 1, "rgba(220,240,250,0.8)"); px(c, 8, 5, 1, 1, "rgba(220,240,250,0.8)"); px(c, 15, 5, 1, 1, "rgba(220,240,250,0.8)"); px(c, 9, 6, 6, 1, "rgba(220,240,250,0.8)"); px(c, 11, 4, 2, 1, "#d8402a");
+  });
+  fl.add(0, 0, 0, 0, 8, 8); fl.add(1, 0, 8, 0, 8, 8);
   canvasTex(scene, "glint", 7, 7, (c) => { px(c, 3, 0, 1, 7, "#fffbe0"); px(c, 0, 3, 7, 1, "#fffbe0"); px(c, 2, 2, 3, 3, "#fff4b0"); });
 }
 

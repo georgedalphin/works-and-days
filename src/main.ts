@@ -9,6 +9,7 @@ import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
+import { fishHere, fishDef, type FishDef } from "./fishing";
 import { HARMONIAI, INSTRUMENTS, MELODIES, melody, stepFreq, VILLAGE_SONGS, HUT_SONGS, type Melody } from "./music";
 import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
@@ -270,7 +271,7 @@ abstract class PlayScene extends Phaser.Scene {
   setupInput() {
     // Scenes are reused when they restart: begin each visit with no arrows in the air.
     this.spots = []; inDark = false;
-    this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false;
+    this.placedObjs = []; this.ghost = undefined; this.boat = undefined; this.swimming = false; this.fish = undefined;
     this.spearHold = 0; this.spearBy = ""; this.spearAiming = false; this.spearChecked = false;
     this.arrows = []; this.pickups = []; this.cooldown = 0; this.aiming = false; this.knock = 0; this.invuln = 0;
     this.aimGfx = this.add.graphics().setDepth(100000);
@@ -833,6 +834,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.gesture("act");
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "place") { this.tryPlace(); return; }
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "meal") { eatHeld(); return; }
+    if (G.selectedItem?.id === "rod") { this.fishNow(); return; }
     if (G.selectedItem && INSTRUMENTS[G.selectedItem.id]) { G.say(`To play ${INSTRUMENTS[G.selectedItem.id].name}, hold V and press 1–8. The mouse wheel changes harmonia.`); return; }
     if (G.selectedItem?.id === "axe" || G.selectedItem?.id === "mattock") {
       const [tx, ty] = this.facingTile(), o = this.placedAt(tx, ty);
@@ -875,6 +877,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Per-frame upkeep shared by every play scene. Returns false if paused. */
   common(dt: number): boolean {
     this.ambience?.update(dt, this.paused);
+    if (this.fish) this.fishTick();
     if ((this.mealT -= dt) <= 0) {
       this.mealT = 1; for (const m of G.mealTick()) G.say(m);
       if (!this.paused) this.maybeHearSong();
@@ -976,6 +979,89 @@ abstract class PlayScene extends Phaser.Scene {
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
     if (G.data.vitality <= 0) this.struckDown(a);
+  }
+
+  // ---------------------------------------------------------------- fishing
+  fish?: { tx: number; ty: number; sea: boolean; deep: boolean; bob: Phaser.GameObjects.Image; line: Phaser.GameObjects.Graphics; biteAt: number; biteUntil: number; state: "wait" | "bite" | "reel"; nibbles: number; px: number; py: number };
+  /** Space with the rod: cast into the water ahead, strike when the float dips, or reel in to stop. */
+  fishNow() {
+    if (performance.now() - ui(this).reelClosedAt < 450) return; // the Space that landed the fish is not a new cast
+    const f = this.fish;
+    if (f?.state === "bite") { this.strike(); return; }
+    if (f) { this.endFishing("You reel in your line."); return; }
+    const o = this.objLayer(); if (!o) { G.say("There's no water to fish here."); return; }
+    // The first water within three tiles ahead (aim with the mouse, or face it).
+    const [lx, ly] = this.lookPoint(), d = DV[this.facing];
+    let spot: [number, number] | null = null;
+    const ptx = Math.floor(this.player.x / TILE), pty = Math.floor((this.player.y + 4) / TILE);
+    const aimed = [Math.floor(lx / TILE), Math.floor(ly / TILE)];
+    if (this.cursorMode && waterKind(o.getTileAt(aimed[0], aimed[1])?.index) && Math.hypot(aimed[0] - ptx, aimed[1] - pty) <= 3.5) spot = aimed as [number, number];
+    for (let k = 1; k <= 3 && !spot; k++) if (waterKind(o.getTileAt(ptx + d[0] * k, pty + d[1] * k)?.index)) spot = [ptx + d[0] * k, pty + d[1] * k];
+    if (!spot) { G.say("Cast into water: face the shallows or deep water within three paces."); return; }
+    const w = this as unknown as { hasSpring?: boolean };
+    if (w.hasSpring && Math.hypot(spot[0] - SPRING.x, spot[1] - SPRING.y - 2) < 6) { G.say("This is the Naiad's own pool. You would not dare cast a hook into it."); return; }
+    const b = labor(EFFORT.hand, 1, "Metis"); if (b === null) return;
+    const [tx, ty] = spot, deep = waterKind(o.getTileAt(tx, ty)?.index) === 2, sea = (this.wildRec?.terrain ?? 0) === 7;
+    const bob = this.add.image(tx * TILE + 8, ty * TILE + 8, "bobber", 0).setDepth(ty * TILE + 9);
+    this.tweens.add({ targets: bob, y: bob.y - 1, yoyo: true, repeat: -1, duration: 700 });
+    const line = this.add.graphics().setDepth(99990);
+    this.fish = { tx, ty, sea, deep, bob, line, biteAt: this.time.now + this.biteWait(), biteUntil: 0, state: "wait", nibbles: 0, px: this.player.x, py: this.player.y };
+    this.faceToward(tx * TILE + 8, ty * TILE + 8); this.gesture("act");
+    SOUND.sfx("loose");
+    G.say(`You cast into the ${deep ? "deep water" : "shallows"}${sea ? " of the sea" : ""}. Wait for the float to dip, then strike (Space).${b}`);
+  }
+  /** How long until a bite (ms): dawn, dusk and rain bring fish up; Poseidon and Metis help. */
+  biteWait() {
+    const h = G.data.clock, dl = G.daylight, edge = h < 1.5 || Math.abs(h - dl) < 1.2, rain = G.data.weather === "rain";
+    const metis = G.data.aretai.Metis ?? 3;
+    return (3000 + Math.random() * 7000) * (edge ? 0.65 : 1) * (rain ? 0.8 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Poseidon")) * (1.15 - metis * 0.03) * (G.patron?.aretai === "Metis" ? 0.75 : 1);
+  }
+  fishTick() {
+    const f = this.fish!, now = this.time.now;
+    if (this.paused && f.state !== "reel") return;
+    // The line: from your hands to the float.
+    f.line.clear(); f.line.lineStyle(1, 0xe8e8e0, 0.6).lineBetween(this.player.x + (this.facing === 1 ? -6 : 6), this.player.y - 8, f.bob.x, f.bob.y - 2);
+    if (f.state === "reel") return;
+    if (Math.hypot(this.player.x - f.px, this.player.y - f.py) > 6) { this.endFishing("You walk off, and the line goes slack."); return; }
+    if (f.state === "wait" && now >= f.biteAt) {
+      f.state = "bite"; f.bob.setFrame(1);
+      // Metis gives you a moment longer to strike.
+      f.biteUntil = now + 650 + 70 * (G.data.aretai.Metis ?? 3);
+      SOUND.sfx("pickup"); this.alarm({ sprite: f.bob } as unknown as Animal);
+    } else if (f.state === "bite" && now > f.biteUntil) {
+      f.state = "wait"; f.bob.setFrame(0); f.nibbles++;
+      if (f.nibbles >= 3) { this.endFishing("The fish have stripped your hook clean. Cast again."); return; }
+      f.biteAt = now + this.biteWait();
+      G.say("Too slow: it took the bait and let go. Keep watching the float.");
+    }
+  }
+  /** Strike: something is on the line. Which fish, by the water, the land, the hour and the weather; now bring it in. */
+  strike() {
+    const f = this.fish!; f.state = "reel"; f.bob.setFrame(1);
+    const h = G.data.clock, dl = G.daylight;
+    const pool = fishHere(f.sea, f.deep, this.wildRec?.terrain ?? 3, { dawn: h < 1.5, dusk: Math.abs(h - dl) < 1.2, night: !G.isDay, rain: G.data.weather === "rain" });
+    if (Math.random() < 0.04) { // an old thing on the bottom, not a fish at all
+      this.endFishing(""); rollFind(f.sea ? "shore" : "glint", 1); G.say("Your hook snags something on the bottom, and you haul it up: not a fish at all."); return;
+    }
+    const total = pool.reduce((n, p) => n + p.w, 0); let k = Math.random() * total, fish = pool[0].f;
+    for (const p of pool) if ((k -= p.w) <= 0) { fish = p.f; break; }
+    ui(this).openReel(fish, (landed, perfect) => this.landed(fish, landed, perfect));
+  }
+  landed(fish: FishDef, ok: boolean, perfect: boolean) {
+    if (!ok) { this.endFishing(fish.hits >= 4 ? "Something big tears free and is gone, line and all thrashing. Next time." : "It slips the hook and is gone."); return; }
+    const q = Math.min(3, (perfect ? 2 : 1) + (G.boon("Poseidon") >= 4 ? 1 : 0));
+    const first = !G.data.lore.tier[fish.id.toLowerCase()];
+    G.data.lore.tier[fish.id.toLowerCase()] = Math.max(1, G.data.lore.tier[fish.id.toLowerCase()] ?? 0);
+    G.note("fish"); G.note(`fish:${fish.id}`);
+    this.endFishing("");
+    SOUND.sfx("find");
+    const nm = fish.name.toLowerCase(), art = nm.endsWith("s") ? "some " : fish.hits >= 4 ? "a fine " : /^[aeiou]/.test(nm) ? "an " : "a ";
+    G.say(`You land ${art}${nm}! ${give(fish.id, 1, q)}${first ? `. ${fish.desc}` : ""}${fish.id === "Tuna" && first ? " The first tunny is owed to Poseidon: offer it at an altar." : ""}`);
+  }
+  endFishing(say: string) {
+    const f = this.fish; if (!f) return;
+    f.bob.destroy(); f.line.destroy(); this.fish = undefined;
+    if (say) G.say(say);
   }
 
   // ---------------------------------------------------------------- music in the world
@@ -4920,6 +5006,7 @@ class UIScene extends Phaser.Scene {
       "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
+      "Fishing: make a rod (C). Hold it, Space facing water to cast; strike when the float dips, then press as the mark crosses the green.",
       "",
       "GODS, SIGNS AND PEOPLE",
       "Each of the day's twelve hours belongs to a god of the Cosmic Wheel. Pray and make offerings at altars (E).",
@@ -4957,7 +5044,7 @@ class UIScene extends Phaser.Scene {
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     if (SING.on && this.modal) this.singStop();
-    this.drawSing();
+    this.drawSing(); this.drawReel(dt);
     this.date.setText(`${G.dateLabel()} · ${G.moon} · ${WEATHER_WORD[G.data.weather]}`);
     const play = this.scene.get(G.data.scene) as PlayScene | undefined;
     const terrain = G.data.scene === "Wild" ? (G.data.screens[`${G.data.wx},${G.data.wy}`]?.terrain ?? 3) : G.data.scene === "Cave" ? 99 : 3;
@@ -5191,6 +5278,53 @@ class UIScene extends Phaser.Scene {
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
     this.showTalk(v.name, sub, line, opts, v.id);
+  }
+
+  // ---------------------------------------------------------------- fishing: bringing it in
+  reelClosedAt = 0;
+  reel?: { root: Phaser.GameObjects.Container; gfx: Phaser.GameObjects.Graphics; text: Phaser.GameObjects.Text; fish: FishDef; pos: number; dir: number; zone: number; width: number; hits: number; misses: number; done: (ok: boolean, perfect: boolean) => void; flash: number; flashOk: boolean };
+  /** Bring a fish in: press Space (or click) as the mark crosses the green. Metis and Poseidon widen the green. */
+  openReel(fish: FishDef, done: (ok: boolean, perfect: boolean) => void) {
+    this.modal = true;
+    const x0 = W / 2 - 240, y0 = H / 2 + 40;
+    const root = this.add.container(0, 0).setDepth(25);
+    root.add(this.add.rectangle(x0, y0, 480, 92, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    const text = this.add.text(W / 2, y0 + 8, "", { fontFamily: FONT, fontSize: "13px", color: "#f2e6c9", align: "center" }).setOrigin(0.5, 0);
+    const gfx = this.add.graphics();
+    root.add([gfx, text]);
+    const width = Math.max(0.1, Math.min(0.36, 0.14 + 0.012 * (G.data.aretai.Metis ?? 3) + 0.015 * Math.max(0, G.boon("Poseidon")) - 0.012 * (fish.hits - 2)));
+    this.reel = { root, gfx, text, fish, pos: 0, dir: 1, zone: 0.3 + Math.random() * 0.4, width, hits: 0, misses: 0, done, flash: 0, flashOk: false };
+    const onKey = (e: KeyboardEvent) => { if (!this.reel) { this.input.keyboard!.off("keydown", onKey); return; } if (e.key === " " || e.key === "Enter") this.reelPress(); if (e.key === "Escape") this.closeReel(false); };
+    this.input.keyboard!.on("keydown", onKey);
+    root.add(this.add.rectangle(x0, y0, 480, 92, 0, 0).setOrigin(0, 0).setInteractive().on("pointerdown", () => this.reelPress()));
+  }
+  reelPress() {
+    const r = this.reel; if (!r) return;
+    const inZone = Math.abs(r.pos - r.zone) <= r.width / 2;
+    r.flash = performance.now(); r.flashOk = inZone;
+    if (inZone) { r.hits++; SOUND.sfx("chop"); r.zone = 0.12 + Math.random() * 0.76; }
+    else { r.misses++; SOUND.sfx("hurt"); }
+    if (r.hits >= r.fish.hits) this.closeReel(true);
+    else if (r.misses >= r.fish.misses) this.closeReel(false);
+  }
+  closeReel(ok: boolean) {
+    const r = this.reel; if (!r) return;
+    r.root.destroy(); this.reel = undefined; this.reelClosedAt = performance.now();
+    this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft || !!this.talkPanel;
+    r.done(ok, ok && r.misses === 0);
+  }
+  drawReel(dt: number) {
+    const r = this.reel; if (!r) return;
+    r.pos += r.dir * dt * 0.62 * r.fish.speed;
+    if (r.pos > 1) { r.pos = 1; r.dir = -1; } if (r.pos < 0) { r.pos = 0; r.dir = 1; }
+    const x0 = W / 2 - 200, y = H / 2 + 98, w = 400, g = r.gfx; g.clear();
+    g.fillStyle(0x2a3a4a).fillRect(x0, y, w, 16);
+    g.fillStyle(0x5aa04a).fillRect(x0 + w * (r.zone - r.width / 2), y, w * r.width, 16);
+    const since = performance.now() - r.flash;
+    if (since < 250) g.lineStyle(2, r.flashOk ? 0xf2e6c9 : 0xd8402a, 1 - since / 250).strokeRect(x0 - 2, y - 2, w + 4, 20);
+    g.fillStyle(0xf2c14e).fillRect(x0 + w * r.pos - 2, y - 4, 4, 24);
+    const known = (G.data.lore.tier[r.fish.id.toLowerCase()] ?? 0) >= 1;
+    r.text.setText(`${known ? `A ${r.fish.name.toLowerCase()} is on the line!` : r.fish.hits >= 4 ? "Something heavy is on the line!" : "Something is on the line!"}  Press Space as the mark crosses the green.\nLanded: ${"●".repeat(r.hits)}${"○".repeat(r.fish.hits - r.hits)}    Slips: ${"✕".repeat(r.misses)}${"·".repeat(r.fish.misses - r.misses)}`);
   }
 
   // ---------------------------------------------------------------- music
