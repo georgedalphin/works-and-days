@@ -49,13 +49,13 @@ export interface SaveData {
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
   treeHits: Record<string, number>;
-  scene: "Farm" | "House" | "Wild" | "Village" | "Cave" | "Gym";
+  scene: "Farm" | "House" | "Wild" | "Village" | "Cave" | "Gym" | "Labyrinth";
   /** A festival footrace waiting to be run at the gymnasion (the festival's id). */
   raceFor?: string;
   wx: number; wy: number; // the wilderness screen, in screens from home (0,0)
   /** Where along the side you walk in (tile x for N/S, tile y for E/W), so you arrive at the gap you left by. */
   entryAt?: number | null;
-  entry: "" | "N" | "S" | "E" | "W" | "C" | "U"; // C: out of a cave mouth; U: up from a deeper cave level // the side of the next map the player walks in from
+  entry: "" | "N" | "S" | "E" | "W" | "C" | "U" | "D"; // D: down into the Labyrinth // C: out of a cave mouth; U: up from a deeper cave level // the side of the next map the player walks in from
   lastTerrain: number; // terrain of the screen the player just left
   screens: Record<string, ScreenRec>;
   px: number; py: number;
@@ -97,9 +97,11 @@ export interface SaveData {
   hostedDay: number;
   /** Citadels and isles found: id → what is known of them. */
   sites: Record<string, SiteRec>;
+  /** What the Pythia has foretold: places not yet found ("x,y" of a screen in them, and her words). */
+  foretold?: { key: string; text: string }[];
   /** Rowing on from the open sea: the next new screen is sea too. */
   fromSea?: boolean;
-  anchors: { spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
+  anchors: { delphi?: string; knossos?: string; spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
   caves: Record<string, { type: "common" | "sacred" | "chthonic"; boss: "alive" | "appeased" | "slain"; hoard: boolean; mined: Record<string, string[]> }>;
   cave: { key: string; level: number }; // where you are underground
   torchLit: boolean; // a torch burns for this visit underground
@@ -325,6 +327,7 @@ export class GameState {
     if (this.data.scene === "Farm") return "Your homestead · Cultivated Farmlands";
     if (this.data.scene === "Village") return "The village · 1 screen from home";
     if (this.data.scene === "Gym") return "The gymnasion · east of the village";
+    if (this.data.scene === "Labyrinth") return `The Labyrinth beneath Knossos${this.data.torchLit ? " · torchlit" : " · in darkness"}`;
     if (this.data.scene === "Cave") { const c = this.data.caves[this.data.cave.key]; return `A ${c?.type ?? ""} cave · level ${this.data.cave.level}${this.data.torchLit ? " · torchlit" : " · in darkness"}`; }
     const rec = this.data.screens[`${this.data.wx},${this.data.wy}`];
     const dist = Math.abs(this.data.wx) + Math.abs(this.data.wy);

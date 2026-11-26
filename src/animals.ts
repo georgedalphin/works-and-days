@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 export type Species = "goat" | "hare" | "fox" | "bird" | "deer" | "boar" | "wolf" | "bat" | "myrmex" | "eidolon" | "lampad" | "centaur" | "skeleton" | "empousa"
   | "heron" | "duck" | "gull" | "crab" | "jackal" | "scorpion" | "ibex" | "bear" | "horse" | "bustard" | "eagle" | "pigeon"
-  | "siren" | "sphinx" | "lion" | "stymphalian" | "strix" | "brigand";
+  | "siren" | "sphinx" | "lion" | "stymphalian" | "strix" | "brigand" | "minotaur";
 
 interface SpeciesDef {
   name: string;
@@ -55,6 +55,8 @@ export const SPECIES: Record<Species, SpeciesDef> = {
   lion: { name: "lion", walk: 18, flee: 0, scare: 0, idle: [1.5, 4], body: [12, 5, 2, 10], frameRate: 6, aggression: 8, charge: 118, damage: 20, notice: 110, giveUp: 300 },
   stymphalian: { name: "stymphalian bird", walk: 14, flee: 0, scare: 0, idle: [0.6, 2], body: [8, 4, 4, 10], frameRate: 10, aggression: 7, charge: 80, damage: 9, notice: 130, giveUp: 300 },
   // Mortal trouble on the lonely roads: a man with a club, who wants your purse more than your life.
+  // The bull-headed son of Pasiphae, in the dark of the Labyrinth. Its hunting is done by the Labyrinth itself.
+  minotaur: { name: "minotaur", walk: 24, flee: 0, scare: 0, idle: [1, 3], body: [10, 6, 5, 14], frameRate: 6, aggression: 0, charge: 60, damage: 18, notice: 0, giveUp: 9999 },
   brigand: { name: "brigand", walk: 20, flee: 100, scare: 0, idle: [1.5, 4], body: [8, 5, 4, 10], frameRate: 7, aggression: 0, charge: 84, damage: 10, notice: 110, giveUp: 280 },
   strix: { name: "strix", walk: 20, flee: 0, scare: 0, idle: [0.6, 2], body: [8, 4, 4, 10], frameRate: 10, aggression: 5, charge: 100, damage: 10, notice: 120, giveUp: 260 },
 };

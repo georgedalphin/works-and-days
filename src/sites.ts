@@ -11,7 +11,7 @@ import { rng } from "./state";
 
 export const SW = 40, SH = 30; // a screen, in tiles
 
-export type SiteKind = "fortress" | "isle";
+export type SiteKind = "fortress" | "isle" | "delphi" | "knossos";
 export type Fate = "brigands" | "beast" | "haunted";
 export type IsleType = "nymph" | "sirens" | "goats" | "sacred" | "forge" | "reef";
 export type Side = "N" | "S" | "E" | "W";
@@ -35,6 +35,8 @@ export interface SiteRec {
   treasury?: boolean;
   /** Storage jars and other one-time searches already made: "wx,wy,tx,ty". */
   looted?: string[];
+  /** Knossos: the Minotaur, and Ariadne's thread given. */
+  minotaur?: "alive" | "slain"; clew?: boolean;
   /** Things done once a season or once a day: key → season key or day. */
   marks?: Record<string, string | number>;
 }
@@ -248,4 +250,124 @@ export function partOf(si: { x0: number; y0: number; w: number; h: number }, wx:
   if (!ns && !ew) return "the heart of it";
   if (ns && ew) return `the ${ns}${ew} corner`;
   return `the ${ns || ew} side`;
+}
+
+// ------------------------------------------------------------------ the great sanctuaries: one of each in a world
+/**
+ * Delphi and Knossos are each one place in the world, set (once, when the world is first walked) somewhere no one
+ * has yet been: Delphi at least ten screens out, Knossos at least sixteen. Each is two screens by two.
+ */
+export type UniqueKind = "delphi" | "knossos";
+export function uniqueAt(anchors: Record<string, string | undefined>, wx: number, wy: number): SiteInfo | null {
+  for (const k of ["delphi", "knossos"] as UniqueKind[]) {
+    const a = anchors[k]; if (!a) continue;
+    const [x0, y0] = a.split(",").map(Number);
+    if (wx >= x0 && wy >= y0 && wx < x0 + 2 && wy < y0 + 2) return { id: k === "delphi" ? "Delphi" : "Knossos", kind: k, x0, y0, w: 2, h: 2, seed: (x0 * 7919 + y0 * 104729) >>> 0 };
+  }
+  return null;
+}
+/** A place for a great sanctuary: at the given range from home, clear of everything already walked or settled. */
+export function pickUniqueSpot(seed: number, salt: number, lo: number, hi: number, ok: (x0: number, y0: number) => boolean): string | null {
+  const r = rng(hash(seed, salt, 7, 0xde1f));
+  for (let i = 0; i < 800; i++) {
+    const d = lo + Math.floor(r() * (hi - lo + 1)) + 1, a = r() * Math.PI * 2;
+    const x0 = Math.round(Math.cos(a) * d), y0 = Math.round(Math.sin(a) * d);
+    if (ok(x0, y0)) return `${x0},${y0}`;
+  }
+  return null;
+}
+
+export interface UniqueLayout {
+  cells: (FortCell | undefined)[][];
+  /** Named points, in site tiles. */
+  at: Record<string, [number, number]>;
+  pithoi: [number, number][];
+  /** Treasuries along the Sacred Way: [name, door point]. */
+  treasuries: [string, [number, number]][];
+}
+
+/**
+ * Delphi: a walled precinct on the mountain's shoulder. The Sacred Way climbs in zigzags from the gate past the
+ * cities' treasuries to the temple of Apollo, where the Pythia sits on her tripod in the inner room. The Castalian
+ * spring runs outside the wall, where pilgrims wash before they ask.
+ */
+export function delphiLayout(T: Tiles): UniqueLayout {
+  const W = 80, H = 60;
+  const cells: (FortCell | undefined)[][] = []; for (let y = 0; y < H; y++) cells.push(new Array(W).fill(undefined));
+  const set = (x: number, y: number, c: FortCell) => { if (x >= 0 && y >= 0 && x < W && y < H) cells[y][x] = { ...cells[y][x], ...c }; };
+  const r = rng(0xde1f1);
+  // The precinct and its wall.
+  for (let y = 8; y <= 52; y++) for (let x = 12; x <= 66; x++) {
+    const wall = x === 12 || x === 66 || y === 8 || y === 52, gate = y === 52 && x >= 25 && x <= 27;
+    const k = r();
+    set(x, y, wall && !gate ? { o: T.WALL, g: T.LIMESTONE } : { o: k < 0.03 ? T.OLIVE : k < 0.05 ? T.STONE : -1, g: T.LIMESTONE });
+  }
+  // The Sacred Way.
+  const way = (pts: [number, number][]) => { for (let k = 1; k < pts.length; k++) { let [x, y] = pts[k - 1]; const [tx, ty] = pts[k]; for (let i = 0; i < 100; i++) { for (const d of [0, 1]) set(x + (y === ty ? 0 : d), y + (y === ty ? d : 0), { o: -1, g: T.PATH }); if (x === tx && y === ty) break; if (x !== tx) x += Math.sign(tx - x); else y += Math.sign(ty - y); } } };
+  way([[26, 59], [26, 45], [54, 45], [54, 36], [36, 36], [36, 28], [40, 28], [40, 26]]);
+  // The temple: a ring of columns, the cella within, and at its back the adyton.
+  for (let y = 13; y <= 25; y++) for (let x = 29; x <= 51; x++) {
+    const edge = x === 29 || x === 51 || y === 13 || y === 25;
+    set(x, y, { o: edge && (x + y) % 2 === 0 ? T.COLUMN : -1, g: T.FLAGS });
+  }
+  for (let y = 15; y <= 23; y++) for (let x = 32; x <= 48; x++) {
+    const wall = x === 32 || x === 48 || y === 15 || y === 23, door = y === 23 && x >= 39 && x <= 41;
+    set(x, y, { o: wall && !door ? T.WALL : -1, g: T.FLAGS });
+  }
+  // Treasuries of the cities, small and fine, along the Way.
+  const treasuries: [string, [number, number]][] = [];
+  const box = (x0: number, y0: number, name: string) => {
+    for (let y = y0; y < y0 + 4; y++) for (let x = x0; x < x0 + 5; x++) { const wall = x === x0 || x === x0 + 4 || y === y0 || y === y0 + 3, door = y === y0 + 3 && x === x0 + 2; set(x, y, { o: wall && !door ? T.WALL : -1, g: T.FLAGS }); }
+    treasuries.push([name, [x0 + 2, y0 + 4]]);
+  };
+  box(18, 39, "the Treasury of the Siphnians"); box(30, 39, "the Treasury of the Athenians"); box(58, 39, "the Treasury of the Corinthians"); box(56, 29, "the Treasury of the Thebans");
+  // Laurels round the precinct, Apollo's tree.
+  for (let i = 0; i < 40; i++) { const x = 14 + Math.floor(r() * 50), y = 10 + Math.floor(r() * 40); if (cells[y][x]?.o === -1 && cells[y][x]?.g === T.LIMESTONE && (x < 27 || x > 53 || y > 27)) set(x, y, { o: T.TREE }); }
+  // The Castalian spring, outside the wall to the east, in a rocky cleft.
+  for (let y = 36; y <= 42; y++) for (let x = 69; x <= 76; x++) { const d = Math.hypot(x - 72.5, (y - 39) * 1.3); set(x, y, { o: d < 1.6 ? T.WATER : d < 3 ? -1 : d < 4 && r() < 0.6 ? T.BOULDER : -1, g: T.LIMESTONE }); }
+  return { cells, pithoi: [], treasuries, at: { pythia: [40, 17], tripod: [40, 18], altar: [40, 30], omphalos: [24, 22], spring: [72, 41], gate: [26, 52] } };
+}
+
+/**
+ * Knossos: Minos' palace, many-roomed and unwalled, round a great paved court. Red columns, long storerooms of jars,
+ * the throne room off the court, and in the northwest wing a stair going down into the dark: the Labyrinth.
+ */
+export function knossosLayout(T: Tiles): UniqueLayout {
+  const W = 80, H = 60;
+  const cells: (FortCell | undefined)[][] = []; for (let y = 0; y < H; y++) cells.push(new Array(W).fill(undefined));
+  const set = (x: number, y: number, c: FortCell) => { if (x >= 0 && y >= 0 && x < W && y < H) cells[y][x] = { ...cells[y][x], ...c }; };
+  const r = rng(0x6b05);
+  const X0 = 10, Y0 = 8, X1 = 70, Y1 = 52; // the palace
+  for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) set(x, y, { o: -1, g: T.FLAGS });
+  // Wings of rooms round the court: a grid of rooms whose walls stop short of the seams between screens.
+  const court = { x0: 30, y0: 22, x1: 50, y1: 38 };
+  const inCourt = (x: number, y: number) => x >= court.x0 && x <= court.x1 && y >= court.y0 && y <= court.y1;
+  const pithoi: [number, number][] = [];
+  for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
+    if (inCourt(x, y)) continue;
+    const gx = (x - X0) % 6, gy = (y - Y0) % 5;
+    const outer = x === X0 || x === X1 || y === Y0 || y === Y1;
+    let wall = outer || gx === 0 || gy === 0;
+    // Doors: a gap in the middle of each room's walls, and the seams kept open as corridors.
+    if (gx === 0 && gy === 2) wall = false;
+    if (gy === 0 && gx === 3) wall = false;
+    if (x === 39 || x === 40 || y === 29 || y === 30) wall = false;
+    if (outer && ((x - X0) % 12 === 6 || (y - Y0) % 10 === 5)) wall = false; // many ways in: no walls to keep anyone out
+    if (wall) set(x, y, { o: T.WALL });
+  }
+  // Red columns along the court, and the grand staircase's light-well.
+  for (let x = court.x0; x <= court.x1; x += 3) { set(x, court.y0 - 1, { o: T.COLUMN }); set(x, court.y1 + 1, { o: T.COLUMN }); }
+  for (let y = court.y0 + 2; y <= court.y1 - 2; y += 3) set(court.x1 + 1, y, { o: T.COLUMN });
+  // The west storerooms: long narrow magazines, jars in rows.
+  for (let k = 0; k < 6; k++) { const y = 33 + k * 3; if (y > Y1 - 2) break; for (let x = X0 + 2; x <= X0 + 14; x += 3) if (Math.floor(x / 40) === Math.floor((X0 + 2) / 40)) pithoi.push([x, y]); }
+  // The throne room, on the court's west side: cleared, with its benches.
+  for (let y = 24; y <= 28; y++) for (let x = 22; x <= 28; x++) set(x, y, { o: x === 22 || y === 24 || y === 28 ? T.WALL : -1, g: T.FLAGS });
+  set(28, 26, { o: -1 }); set(28, 25, { o: -1 }); set(28, 27, { o: -1 });
+  // The stair down, in the northwest wing.
+  for (let y = 11; y <= 16; y++) for (let x = 15; x <= 23; x++) set(x, y, { o: x === 15 || x === 23 || y === 11 ? T.WALL : -1, g: T.FLAGS });
+  // Olive groves and fields about the palace, under the hill.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!cells[y][x] && r() < 0.05) set(x, y, { o: T.OLIVE });
+  // A road in from the south.
+  for (let y = Y1; y < H; y++) for (const x of [39, 40]) set(x, y, { o: -1, g: T.PATH });
+  return { cells, pithoi, treasuries: [], at: { throne: [25, 26], ariadne: [33, 26], stair: [19, 13], court: [40, 30], horns: [44, 21] } };
 }

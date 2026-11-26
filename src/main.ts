@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
-import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, type SiteInfo, type FortLayout } from "./sites";
+import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
 import type { SiteRec } from "./sites";
 import { WAYFARERS, rollWayfarers, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
@@ -41,7 +41,7 @@ let inDark = false;
 const darkPen = () => (!inDark || G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber ? 0 : Math.max(0, Math.min(6, 3 - G.boon("Hecate"))));
 
 /** Things that fill a tile: arrows and dropped things are lost in them. */
-const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.SHALLOW, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN, T.CYCLO, T.COLUMN];
+const BLOCKING = [T.BRUSH, T.SAPLING, T.STONE, T.TREE, T.BOULDER, T.EDGE, T.OLIVE, T.FENCE, T.WATER, T.SHALLOW, T.CAVEWALL, T.ORE, T.PINE, T.REEDS, T.THORN, T.CYCLO, T.COLUMN, T.WALL];
 /** Water: 1 for shallows (wade), 2 for deep (swim), 0 for none. */
 const waterKind = (t: number | undefined) => (t === T.SHALLOW ? 1 : t === T.WATER ? 2 : 0);
 /** Bushes slow you as you push through; they do not stop you. */
@@ -117,7 +117,7 @@ const OBJ_SUBJECT: Record<number, string> = {
 const loreName = (id: string) => (G.lore(id) >= 1 ? LORE[id].name : LORE[id].vague);
 /** A creature as you would name it: "wild boar" once you know it, "dark, bristling beast" before. */
 /** Monsters, and men, turn on you when hurt; beasts usually run. */
-const fightsBack = (k: string) => isMonster(k) || k === "brigand";
+const fightsBack = (k: string) => isMonster(k) || k === "brigand" || k === "minotaur";
 const beast = (id: string) => (LORE[id] ? (G.lore(id) >= 1 ? LORE[id].name.toLowerCase() : LORE[id].vague.replace(/^(an?|your) /, "")) : id);
 
 /**
@@ -1066,7 +1066,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setVelocity(Math.cos(ang) * throwV, Math.sin(ang) * throwV); if (a.kind === "centaur") this.knock = 0.35;
     this.cameras.main.shake(140, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    const verb: Record<string, string> = { brigand: "clubs", boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
+    const verb: Record<string, string> = { minotaur: "gores", brigand: "clubs", boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
     if (G.data.vitality <= 0) this.struckDown(a);
@@ -3260,7 +3260,8 @@ function riverSpan(kind: "col" | "row", n: number): [number, number] | null {
   return [from, from + len];
 }
 function edgeRiver(kind: "H" | "V", x: number, y: number): { at: number; w: number } | null {
-  if (fortressAt(G.data.seed, x, y) || (kind === "H" ? fortressAt(G.data.seed, x, y + 1) : fortressAt(G.data.seed, x + 1, y))) return null; // rivers keep clear of citadels
+  const [bx0, by0] = kind === "H" ? [x, y + 1] : [x + 1, y];
+  if (fortressAt(G.data.seed, x, y) || fortressAt(G.data.seed, bx0, by0) || uniqueAt(G.data.anchors, x, y) || uniqueAt(G.data.anchors, bx0, by0)) return null; // rivers keep clear of citadels and sanctuaries
   const span = kind === "H" ? riverSpan("col", x) : riverSpan("row", y);
   if (!span) return null;
   const [a, b] = span, n0 = kind === "H" ? y : x;
@@ -3337,12 +3338,14 @@ class WildScene extends PlayScene {
     const r = rng(screenSeed(wx, wy));
 
     // First visit: roll the terrain from the land just left, and the screen's feature.
+    this.placeSanctuaries();
     let firstVisit = false, foundNow: SiteRec | null = null;
     const fromSea = !!G.data.fromSea; G.data.fromSea = false;
     if (!G.data.screens[this.key]) {
       firstVisit = true;
-      const fort = fortressAt(G.data.seed, wx, wy), isle = fromSea ? isleAt(G.data.seed, wx, wy) : null;
-      if (fort && (foundNow = this.foundSite(fort))) { /* the whole citadel is laid out */ }
+      const uniq = uniqueAt(G.data.anchors, wx, wy), fort = fortressAt(G.data.seed, wx, wy), isle = fromSea ? isleAt(G.data.seed, wx, wy) : null;
+      if (uniq && (foundNow = this.foundSite(uniq))) { /* Delphi, or Knossos */ }
+      else if (fort && (foundNow = this.foundSite(fort))) { /* the whole citadel is laid out */ }
       else if (isle && (foundNow = this.foundSite(isle))) { /* the whole isle */ }
       else if (fromSea) {
         // Rowing on from the open sea: more sea, mostly; now and then a coast, the sea at your back.
@@ -3366,7 +3369,7 @@ class WildScene extends PlayScene {
     this.rec = G.data.screens[this.key];
     this.isSea = this.rec.terrain === 6;
     this.site = this.rec.site ? G.data.sites[this.rec.site] : undefined;
-    this.siteInfo = this.site ? (this.site.kind === "fortress" ? fortressAt(G.data.seed, wx, wy) : isleAt(G.data.seed, wx, wy)) ?? undefined : undefined;
+    this.siteInfo = this.site ? (this.site.kind === "fortress" ? fortressAt(G.data.seed, wx, wy) : this.site.kind === "isle" ? isleAt(G.data.seed, wx, wy) : uniqueAt(G.data.anchors, wx, wy)) ?? undefined : undefined;
     if (this.site && !this.siteInfo) this.site = undefined; // (a world whose seed no longer agrees: treat it as plain land)
     if (this.isSea) for (const sd of ["N", "S", "E", "W"] as Side[]) this.open[sd] = true;
     const p = profile(this.rec.terrain);
@@ -3417,6 +3420,7 @@ class WildScene extends PlayScene {
     this.fort = undefined;
     if (this.isSea) this.stampSea(objs, ground, gen);
     else if (this.site?.kind === "fortress") this.stampFortress(objs, ground);
+    else if (this.site) this.stampSanctuary(objs, ground);
     const plain = !this.isSea && !this.site;
     const cx = 20, cy = 15;
     // The village road runs south from the farm.
@@ -3547,7 +3551,7 @@ class WildScene extends PlayScene {
     if (plain) { this.maybeMonster(); this.setupGlint(); this.setupHut(); this.setupSites(); }
     else { this.siteFolk = []; this.hutFolk = []; this.ghostsRolled = true; } // no huts, shrines or herms in a site or at sea
     this.setupLandmark();
-    if (!this.isSea && !(this.site && partOf(this.site, wx, wy) === "the heart of it")) this.setupWayfarers(); else { this.ways = []; this.chase = new Map(); this.wayT = 9999; }
+    if (!this.isSea && !(this.site?.kind === "fortress" && partOf(this.site, wx, wy) === "the heart of it")) this.setupWayfarers(); else { this.ways = []; this.chase = new Map(); this.wayT = 9999; }
     this.setupSite(foundNow);
     const arrivingByBoat = !!G.data.boatCarry && this.landBoat();
     this.drawPlaced();
@@ -3580,7 +3584,12 @@ class WildScene extends PlayScene {
     for (let y = si.y0; y < si.y0 + si.h; y++) for (let x = si.x0; x < si.x0 + si.w; x++) if (G.data.screens[`${x},${y}`]) return null;
     const used = new Set(Object.values(G.data.sites).map((s) => s.name));
     let rec: SiteRec;
-    if (si.kind === "fortress") {
+    if (si.kind === "delphi" || si.kind === "knossos") {
+      const d = si.kind === "delphi";
+      rec = { kind: si.kind, name: d ? "Delphi" : "Knossos", god: d ? "Apollo" : "Poseidon",
+        line: d ? "Delphi, the navel of the world, where Apollo killed the serpent Python and his priestess speaks his oracles." : "Knossos, Minos' palace, where Daedalus built the Labyrinth to hold the bull-headed son of the queen.",
+        x0: si.x0, y0: si.y0, w: 2, h: 2, seed: si.seed, found: G.dayNumber, terrain: d ? 12 : 3, looted: [], marks: {}, ...(d ? {} : { minotaur: "alive" as const }) };
+    } else if (si.kind === "fortress") {
       const c = CITADELS.find((q) => !used.has(q.name));
       const rolled = rollTerrain(G.data.lastTerrain || HOME_TERRAIN, rng(si.seed)).terrain;
       rec = { kind: "fortress", name: c?.name ?? "a nameless citadel", god: c?.god ?? "Zeus", line: c?.line ?? "A citadel whose name no one remembers.",
@@ -3592,10 +3601,11 @@ class WildScene extends PlayScene {
     }
     G.data.sites[si.id] = rec;
     for (let y = si.y0; y < si.y0 + si.h; y++) for (let x = si.x0; x < si.x0 + si.w; x++) {
-      G.data.screens[`${x},${y}`] = { terrain: rec.terrain, special: false, feature: si.kind === "fortress" ? "Citadel" : "Isle", cleared: [], site: si.id, hut: null, shrine: null, graveyard: null };
+      G.data.screens[`${x},${y}`] = { terrain: rec.terrain, special: false, feature: si.kind === "fortress" ? "Citadel" : si.kind === "isle" ? "Isle" : rec.name, cleared: [], site: si.id, hut: null, shrine: null, graveyard: null };
       for (const ru of G.data.rumors) if (ru.key === `${x},${y}`) { ru.found = true; ru.told = true; }
     }
     G.note("explore"); G.note("site");
+    G.data.foretold = (G.data.foretold ?? []).filter((f) => !G.data.screens[f.key]?.site);
     return rec;
   }
 
@@ -3675,6 +3685,12 @@ class WildScene extends PlayScene {
     const at = ([x, y]: [number, number]): [number, number] => [(x - ox) * TILE + 8, (y - oy) * TILE + 8];
     const prop = (key: string, p: [number, number], solid = true, dy = 6) => { const [x, y] = at(p); const img = this.add.image(x, y + dy, key).setOrigin(0.5, 1).setDepth(y + dy); if (solid) this.solidAt(x, y + dy - 4, Math.min(img.width - 4, 30), 8); return img; };
     s.looted ??= []; s.marks ??= {};
+    if (s.kind === "delphi" || s.kind === "knossos") {
+      this.setupSanctuary();
+      // Pilgrims come and go on the Sacred Way.
+      if (s.kind === "delphi" && G.isDay && !this.ways.length && Math.random() < 0.5) { const want = pick(["pilgrim", "pilgrims", "procession"]), d = this.wayDefs.find((w) => w.id === want)!; if (this.spawnWay(d, false)) this.time.delayedCall(1500, () => G.say("Pilgrims are on the Sacred Way, come to ask the god.")); }
+      return;
+    }
     const heart = partOf(s, wx, wy) === "the heart of it";
     if (s.kind === "fortress" && this.fort) {
       const L = this.fort;
@@ -3755,10 +3771,181 @@ class WildScene extends PlayScene {
     }
   }
 
+  // ---- the great sanctuaries: Delphi and Knossos
+  sanct?: UniqueLayout;
+  /** Set Delphi and Knossos somewhere no one has been yet, once, the first time the wild is walked. */
+  placeSanctuaries() {
+    const a = G.data.anchors;
+    if (a.delphi && a.knossos) return;
+    const taken = new Set([a.spring, a.satyrs, a.cave, a.tirShrine, a.tirGrave, `${G.data.wx},${G.data.wy}`].filter(Boolean) as string[]);
+    const ok = (x0: number, y0: number, other?: string) => {
+      if (x0 <= 0 && x0 + 1 >= 0) return false; // clear of the village road's column
+      if (other) { const [ox, oy] = other.split(",").map(Number); if (Math.abs(ox - x0) < 5 && Math.abs(oy - y0) < 5) return false; }
+      for (let y = y0 - 1; y <= y0 + 2; y++) for (let x = x0 - 1; x <= x0 + 2; x++) {
+        const k = `${x},${y}`;
+        if (G.data.screens[k] || taken.has(k) || fortressAt(G.data.seed, x, y) || (x === 0 && (y === 0 || y === 1))) return false;
+      }
+      return true;
+    };
+    // Far out, so they take finding: no part of Delphi nearer than 10 screens to the homestead, nor of Knossos than 16.
+    const far = (x0: number, y0: number, min: number) => Math.min(...[[x0, y0], [x0 + 1, y0], [x0, y0 + 1], [x0 + 1, y0 + 1]].map(([x, y]) => Math.max(Math.abs(x), Math.abs(y)))) >= min;
+    a.delphi ??= pickUniqueSpot(G.data.seed, 1, DELPHI_FAR, DELPHI_FAR + 4, (x, y) => far(x, y, DELPHI_FAR) && ok(x, y, a.knossos)) ?? undefined;
+    a.knossos ??= pickUniqueSpot(G.data.seed, 2, KNOSSOS_FAR, KNOSSOS_FAR + 6, (x, y) => far(x, y, KNOSSOS_FAR) && ok(x, y, a.delphi)) ?? undefined;
+  }
+  stampSanctuary(objs: number[][], ground: number[][]) {
+    const s = this.site!, si = this.siteInfo!, wx = G.data.wx, wy = G.data.wy;
+    const tiles = { WALL: s.kind === "knossos" ? T.WALL : T.CYCLO, FLAGS: T.FLAGS, COLUMN: T.COLUMN, STONE: T.STONE, BOULDER: T.BOULDER, BRUSH: T.BRUSH, TREE: T.TREE, OLIVE: T.OLIVE, WATER: T.WATER, PATH: T.PATH, DIRT: T.DIRT, LIMESTONE: T.LIMESTONE, FLOWERS: T.FLOWERS };
+    const L = s.kind === "delphi" ? delphiLayout(tiles) : knossosLayout(tiles);
+    this.sanct = L;
+    const ox = (wx - si.x0) * WW, oy = (wy - si.y0) * WH, within = this.siteSides(wx, wy);
+    for (let y = 0; y < WH; y++) for (let x = 0; x < WW; x++) {
+      const b: Side | null = y === 0 ? "N" : y === WH - 1 ? "S" : x === 0 ? "W" : x === WW - 1 ? "E" : null;
+      if (b && within.includes(b) && objs[y][x] === T.EDGE) objs[y][x] = -1;
+      const c = L.cells[oy + y][ox + x]; if (!c) continue;
+      if (c.g !== undefined) ground[y][x] = c.g;
+      if (c.o === undefined) continue;
+      if (b && !within.includes(b) && objs[y][x] === T.EDGE && c.g !== T.PATH) continue;
+      objs[y][x] = c.o;
+    }
+  }
+  setupSanctuary() {
+    const s = this.site!, si = this.siteInfo!, L = this.sanct!, sc = this, wx = G.data.wx, wy = G.data.wy;
+    const ox = (wx - si.x0) * WW, oy = (wy - si.y0) * WH;
+    const here = ([x, y]: [number, number]) => x >= ox && x < ox + WW && y >= oy && y < oy + WH;
+    const at = ([x, y]: [number, number]): [number, number] => [(x - ox) * TILE + 8, (y - oy) * TILE + 8];
+    const prop = (key: string, p: [number, number], solid = true, dy = 6) => { const [x, y] = at(p); const img = this.add.image(x, y + dy, key).setOrigin(0.5, 1).setDepth(y + dy); if (solid) this.solidAt(x, y + dy - 4, Math.min(img.width - 4, 30), 8); return img; };
+    const figure = (p: [number, number], id: string, female: boolean, tunic: string, veil?: string) => {
+      const key = `folk_${id}`;
+      if (!this.textures.exists(key)) makeFigureTexture(this, key, { tunic, hair: "#2a1a12", skin: female ? "#d8a47a" : "#b07850" }, { veil, long: female });
+      const [x, y] = at(p); return this.add.sprite(x, y, key, 0).setDepth(y + 8);
+    };
+    const pure = () => s.marks!.pure === G.dayNumber;
+    s.marks ??= {}; s.looted ??= [];
+    if (s.kind === "delphi") {
+      if (here(L.at.tripod)) { prop("tripod", L.at.tripod, true, 8); figure(L.at.pythia, "pythia", true, "#f0ece0", "#e8e0c8"); this.targets.push({ x: at(L.at.tripod)[0], y: at(L.at.tripod)[1] + 10, label: "Consult the Pythia", act: () => sc.oracle() }); }
+      if (here(L.at.altar)) { prop("altar", L.at.altar); this.targets.push({ x: at(L.at.altar)[0], y: at(L.at.altar)[1] + 4, label: "Make an offering at Apollo's altar", act: () => ui(sc).priestTalk("Apollo", "", "the great altar at Delphi", true, 8) }); }
+      if (here(L.at.omphalos)) { prop("omphalos", L.at.omphalos); this.targets.push({ x: at(L.at.omphalos)[0], y: at(L.at.omphalos)[1] + 4, get label() { return s.marks!.omphalos ? "The omphalos" : "Lay your hand on the omphalos"; }, act: () => sc.omphalos() }); }
+      if (here(L.at.spring)) this.targets.push({ x: at(L.at.spring)[0], y: at(L.at.spring)[1], get label() { return pure() ? "" : "Wash in the Castalian spring"; }, act: () => { s.marks!.pure = G.dayNumber; sc.gesture("act"); G.say("You wash your hands and face and hair in the Castalian spring. The water is so cold it burns. You are clean to ask the god."); } });
+      for (const [name, p] of L.treasuries) if (here(p)) this.targets.push({ x: at(p)[0], y: at(p)[1], label: `Look into ${name}`, act: () => sc.treasuryOf(name) });
+      return;
+    }
+    // Knossos
+    if (here(L.at.throne)) prop("throne", L.at.throne);
+    if (here(L.at.horns)) prop("horns", L.at.horns, false, 4);
+    if (here(L.at.stair)) {
+      const [x, y] = at(L.at.stair); this.add.image(x, y, "hole").setDepth(y - 8);
+      this.targets.push({ x, y, label: "Go down the stair into the Labyrinth", act: () => sc.intoLabyrinth() });
+    }
+    if (here(L.at.ariadne)) {
+      const a = figure(L.at.ariadne, "ariadne", true, "#c0392b");
+      this.targets.push({ x: a.x, y: a.y + 2, label: "Speak with Ariadne", act: () => sc.ariadne() });
+    }
+    L.pithoi.forEach((p) => {
+      if (!here(p)) return;
+      const key = `${p[0]},${p[1]}`, img = prop("pithos", p);
+      if (s.looted!.includes(key)) img.setTint(0x9a9080);
+      this.targets.push({ x: at(p)[0], y: at(p)[1] + 6, get label() { return s.looted!.includes(key) ? "" : "Search the storage jar"; }, act: () => sc.searchJar(key, img) });
+    });
+  }
+  /** The oracle: wash first, pay the fee, and ask; she answers once a month. */
+  oracle(said?: string) {
+    const s = this.site!, u = ui(this), month = `${G.data.year}-${G.data.month}`;
+    const opts: { label: string; fn: () => void }[] = [];
+    const asked = s.marks!.oracle === month, pure = s.marks!.pure === G.dayNumber, fee = 10;
+    const ask = (q: () => string) => () => {
+      if (!pure) { this.oracle("The priest stops you at the door of the inner room. \"Have you washed in Castalia? No? Then the god will not hear you. Go and wash.\""); return; }
+      if (G.data.silver < fee) { this.oracle(`"The pelanos, the sacred cake, costs ${fee} silver. The god does not answer for nothing."`); return; }
+      G.data.silver -= fee; s.marks!.oracle = month;
+      this.oracle(`You pay for the sacred cake, and a goat is sprinkled with water; it shivers, and that means the god is willing. Down in the inner room the Pythia sits on her tripod over the cleft, laurel in her hand, and the sweet vapour rises. She speaks, and the priest gives you her words:\n\n${q()}\n\n(−${fee} silver)`);
+    };
+    if (!asked) {
+      opts.push({ label: "Ask where you should go", fn: ask(() => this.prophecyPlace()) });
+      opts.push({ label: "Ask how the gods regard you", fn: ask(() => this.prophecyGods()) });
+      opts.push({ label: "Ask about your fate", fn: ask(() => {
+        const t = G.data.lifeThread;
+        return t >= 6 ? "\"Long is the thread the Spinner spun for you, and the Cutter's shears are far. Spend it well; it is not endless.\"" : t >= 3 ? "\"The thread runs on, but it is thinner than you think. Do not throw it away on the field of another's quarrel.\"" : "\"The Cutter has her shears open. Walk carefully, and honor the ones below.\"";
+      }) });
+    }
+    u.showTalk("The Pythia", "Delphi · Apollo's priestess", said ?? (asked ? "The Pythia speaks once a month for each who asks. The priest shakes his head: come back next month." : `The Pythia sits in the adyton on her bronze tripod, veiled, a laurel branch in her hand. A priest waits to put your question.${pure ? "" : "\n\n(You have not washed at the Castalian spring today.)"}`), opts);
+  }
+  /** She names a place not yet found: the Labyrinth's palace, or a citadel of the heroes. */
+  prophecyPlace(): string {
+    const wx = G.data.wx, wy = G.data.wy, cands: { key: string; mx: number; my: number; text: string }[] = [];
+    const k = G.data.anchors.knossos;
+    if (k && !G.data.sites.Knossos) { const [x, y] = k.split(",").map(Number); cands.push({ key: k, mx: x, my: y, text: "Where the bull's son is penned in the house of the double axe" }); }
+    for (let r = 2; r <= 16 && cands.length < 3; r++) for (let y = wy - r; y <= wy + r; y++) for (let x = wx - r; x <= wx + r; x++) {
+      if (Math.max(Math.abs(x - wx), Math.abs(y - wy)) !== r) continue;
+      const f = fortressAt(G.data.seed, x, y); if (!f || x !== f.x0 || y !== f.y0 || G.data.screens[`${x},${y}`]) continue;
+      if (!cands.some((c) => c.key === `${x},${y}`)) cands.push({ key: `${x},${y}`, mx: x + 1, my: y + 1, text: "Where the one-eyed builders piled stones too great for men" });
+    }
+    const c = cands[Math.floor(Math.random() * Math.min(2, cands.length))];
+    if (!c) { const v = G.addFavor("Apollo", 1, 8); return `"You have found what there is to find near you. Go home, and plant." (Apollo ${v >= 0 ? "+" : ""}${v})`; }
+    const dir = directions(c.mx, c.my);
+    (G.data.foretold ??= []).push({ key: c.key, text: `${c.text.toLowerCase()}: ${dir}.` });
+    return `"${c.text}, there your road goes: ${dir}."\n\n(Your journal, J, notes the place.)`;
+  }
+  prophecyGods(): string {
+    const gods = TWELVE.map((g) => [g, G.favor(g)] as [string, number]).sort((a, b) => b[1] - a[1]);
+    const [hi, lo] = [gods[0], gods[gods.length - 1]];
+    return `"${hi[0]} holds a hand over you; ${lo[0]} ${lo[1] < 0 ? "remembers a slight" : "has not yet noticed you"}. Honor the one who is cold to you, before you need them."`;
+  }
+  omphalos() {
+    const s = this.site!; this.gesture("look");
+    if (s.marks!.omphalos) { G.say("The omphalos: the stone Zeus' two eagles met above, flying from the ends of the earth."); return; }
+    s.marks!.omphalos = G.dayNumber; const v = G.addFavor("Apollo", 1, 8);
+    G.say(`You lay your hand on the navel of the world. Two eagles, flying from the ends of the earth, met above this stone. You feel the middle of everything under your palm. (Apollo ${v >= 0 ? "+" : ""}${v})`);
+  }
+  /** The cities' treasuries: dedicate something fine to the god, or (sacrilege) take something. */
+  treasuryOf(name: string, said?: string) {
+    const s = this.site!, u = ui(this), key = `t:${name}`, held = G.selectedItem?.id ?? "", find = held && ITEMS[held].kind === "find";
+    const opts: { label: string; fn: () => void }[] = [];
+    if (find) opts.push({ label: `Dedicate your ${ITEMS[held].name.toLowerCase()} to Apollo`, fn: () => {
+      const val = ITEMS[held].value ?? 0; G.removeItem(held, 1);
+      const v = G.addFavor("Apollo", val >= 30 ? 2 : 1, 8);
+      if (val >= 40) G.earn("Kleos", 1, `your gift to Apollo at Delphi`);
+      this.treasuryOf(name, `You set your ${ITEMS[held].name.toLowerCase()} among the offerings, and a priest writes your name on the list of givers. (Apollo ${v >= 0 ? "+" : ""}${v})`);
+    } });
+    if (!s.looted!.includes(key)) opts.push({ label: "Slip something into your pack while no one is looking", fn: () => {
+      s.looted!.push(key); G.data.silver += 30; const v = G.addFavor("Apollo", -4); G.earn("Hubris", 2, "you robbed the god at Delphi");
+      u.closeTalk(); G.say(`A silver bowl, a bronze statuette: 30 silver's worth, gone into your pack. The laurels hiss though there is no wind. (Apollo ${v}; +2 Hubris)`);
+    } });
+    u.showTalk(name[4].toUpperCase() + name.slice(5), "Delphi · the Sacred Way", said ?? `A little marble house built to hold one city's thanks to the god: bowls and tripods of bronze and silver, statuettes, shields taken in battle, a gold crown on a peg. ${find ? "" : "(Hold a fine find to dedicate it here.)"}`, opts);
+  }
+  ariadne(said?: string) {
+    const s = this.site!, u = ui(this), opts: { label: string; fn: () => void }[] = [];
+    if (s.minotaur !== "slain") {
+      if (!G.count("Clew")) opts.push({ label: s.clew ? "Ask her for another thread" : "Say that you will go into the Labyrinth", fn: () => {
+        s.clew = true; this.ariadne(`She looks at you a long while, and then presses a ball of red thread into your hands. "Tie the end at the door, and let it run out behind you. It is the only way back. Daedalus made it so that no one comes out." ${give("Clew", 1)}`);
+      } });
+      opts.push({ label: "Ask about the Minotaur", fn: () => this.ariadne(`"My brother. Asterion, the starry one: my mother's son by the bull Poseidon sent. My father keeps him below, and feeds him the youths of Athens. He is very strong, and he knows the dark. Kill him, if you can. Carry a torch, and do not let him corner you."`) });
+    } else if (!s.marks!.ariadne) opts.push({ label: "Tell her the Minotaur is dead", fn: () => {
+      s.marks!.ariadne = G.dayNumber; const v = G.addFavor("Dionysus", 2, 8);
+      this.ariadne(`She closes her eyes. "Then it's over." When she opens them she is almost smiling. "Take this: wine from my own vines, and my thanks. A god has asked me to be his bride, and I think I will say yes." ${give("Wine", 2)}. (Dionysus ${v >= 0 ? "+" : ""}${v})`);
+    } });
+    const greet = s.minotaur === "slain" ? `Ariadne, daughter of Minos. "The palace is quieter now."` : `A young woman in a flounced red skirt, with gold in her hair: Ariadne, daughter of Minos. "You have the look of someone who has come about the Labyrinth."`;
+    u.showTalk("Ariadne", "Knossos · daughter of Minos", said ?? greet, opts);
+  }
+  intoLabyrinth() {
+    if (this.leaving) return;
+    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || G.data.divine.day.hecateLight === G.dayNumber;
+    if (G.doomed("Hecate") && !G.data.divine.day.hecateLight) { G.data.torchLit = false; G.say("Your light will not catch. Hecate denies you fire in the dark."); }
+    else if (G.count("Lamp") <= 0 && G.data.torchLit && G.data.divine.day.hecateLight !== G.dayNumber) G.removeItem("Torch", 1);
+    G.data.px = this.player.x; G.data.py = this.player.y + 18;
+    G.data.scene = "Labyrinth"; G.data.entry = "D";
+    this.goTo("Labyrinth");
+  }
+
   /** On arriving: the first sight of a site, or where in it you are. */
   siteArrival(found: SiteRec | null) {
     const s = this.site!, part = partOf(s, G.data.wx, G.data.wy), wx = G.data.wx, wy = G.data.wy;
     const cap = (t: string) => t[0].toUpperCase() + t.slice(1);
+    if (s.kind === "delphi" || s.kind === "knossos") {
+      if (found) G.say(s.kind === "delphi"
+        ? `A wall of fitted grey stone climbs the mountain's shoulder; inside it, a temple, treasuries, laurels, smoke from an altar. ${s.line} (Wash at the Castalian spring before you ask the god anything. Your journal, J, marks the place.)`
+        : `A palace with no walls, its roofs crowned with stone horns, its columns painted red: so many rooms it looks like a town. ${s.line} (Your journal, J, marks the place.)`);
+      else G.say(`${s.name}.`);
+      return;
+    }
     if (s.kind === "fortress") {
       if (found) {
         const ix = wx - s.x0, iy = wy - s.y0, run = [iy < 2 ? "south" : "", iy > 0 ? "north" : "", ix < 2 ? "east" : "", ix > 0 ? "west" : ""].filter(Boolean);
@@ -5849,6 +6036,198 @@ class WildScene extends PlayScene {
 
 
 
+
+/** How far out the great sanctuaries lie (in screens from the homestead, the larger of east-west and north-south). */
+const DELPHI_FAR = 10, KNOSSOS_FAR = 16;
+// ------------------------------------------------------------------ the Labyrinth
+/**
+ * Daedalus' Labyrinth, beneath Knossos: a maze of passages two paces wide, walled in great stones, dark but for what
+ * you bring. In its middle the Minotaur's hall, and the bones and gold of the tribute. The Minotaur hears you and
+ * hunts through the passages; Ariadne's thread, if you carry it, runs out behind you to show the way back.
+ */
+const LCX = 32, LCY = 24, LW = LCX * 3 + 1, LH = LCY * 3 + 1;
+class LabyrinthScene extends PlayScene {
+  objects!: Phaser.Tilemaps.TilemapLayer;
+  dark!: Phaser.GameObjects.Image;
+  grid: number[][] = [];
+  mino?: Animal;
+  minoT = 0; minoHit = 0; heard = false;
+  dist: Int32Array = new Int32Array(0); distT = 0;
+  wanderTo: [number, number] | null = null;
+  thread: [number, number][] = []; threadG?: Phaser.GameObjects.Graphics;
+  door = { x: 0, y: 0 };
+  constructor() { super("Labyrinth"); }
+  get site() { return G.data.sites.Knossos; }
+
+  create() {
+    this.leaving = false;
+    const site = this.site, r = rng(((site?.seed ?? 77) ^ 0x1abe) >>> 0);
+    // The maze: a backtracker over cells, then some walls knocked through so there is more than one way round.
+    const g: number[][] = []; for (let y = 0; y < LH; y++) g.push(new Array(LW).fill(1));
+    const seen = new Set<number>(), stack: [number, number][] = [[Math.floor(LCX / 2), 0]];
+    const open = (cx: number, cy: number) => { for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) g[cy * 3 + 1 + y][cx * 3 + 1 + x] = 0; };
+    seen.add(stack[0][1] * LCX + stack[0][0]); open(stack[0][0], stack[0][1]);
+    while (stack.length) {
+      const [cx, cy] = stack[stack.length - 1];
+      const nb = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [number, number][]).map(([dx, dy]) => [cx + dx, cy + dy, dx, dy]).filter(([x, y]) => x >= 0 && y >= 0 && x < LCX && y < LCY && !seen.has(y * LCX + x));
+      if (!nb.length) { stack.pop(); continue; }
+      const [nx, ny, dx, dy] = nb[Math.floor(r() * nb.length)];
+      seen.add(ny * LCX + nx); open(nx, ny);
+      // knock through the wall between
+      for (let k = 0; k < 2; k++) { if (dx) g[cy * 3 + 1 + k][cx * 3 + (dx > 0 ? 3 : 0)] = 0; else g[cy * 3 + (dy > 0 ? 3 : 0)][cx * 3 + 1 + k] = 0; }
+      stack.push([nx, ny]);
+    }
+    for (let i = 0; i < 90; i++) { // loops
+      const cx = 1 + Math.floor(r() * (LCX - 2)), cy = 1 + Math.floor(r() * (LCY - 2)), horiz = r() < 0.5;
+      for (let k = 0; k < 2; k++) { if (horiz) g[cy * 3 + 1 + k][cx * 3] = 0; else g[cy * 3][cx * 3 + 1 + k] = 0; }
+    }
+    // The hall in the middle.
+    const hx0 = 13 * 3 + 1, hy0 = 9 * 3 + 1, hx1 = 19 * 3, hy1 = 15 * 3;
+    for (let y = hy0; y <= hy1; y++) for (let x = hx0; x <= hx1; x++) g[y][x] = 0;
+    this.grid = g;
+    this.door = { x: Math.floor(LCX / 2) * 3 + 1, y: 1 };
+    const objs = g.map((row) => row.map((v) => (v ? T.CYCLO : -1))), ground = g.map((row) => row.map(() => T.FLAGS));
+    const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: LW, height: LH });
+    const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
+    map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0).setTint(0x9a9080);
+    this.objects = map.createBlankLayer("objects", ts)!;
+    this.objects.putTilesAt(objs, 0, 0).setTint(0xa09888);
+    this.objects.setCollision(SOLID).setDepth(1);
+    this.cameras.main.setBackgroundColor("#0a0908");
+    this.physics.world.setBounds(0, 0, LW * TILE, LH * TILE);
+    this.cameras.main.setBounds(0, 0, LW * TILE, LH * TILE);
+    this.setupInput();
+    inDark = !G.data.torchLit;
+    this.targets = [];
+    const dx = this.door.x * TILE + 16, dy = this.door.y * TILE + 8;
+    this.add.image(dx, dy, "ladder").setDepth(TILE * 2);
+    this.targets.push({ x: dx, y: dy + 8, label: "Climb back up into the palace", act: () => this.climbOut() });
+    // Bones of the tribute, here and there; and in the hall, the gold they wore.
+    for (let i = 0; i < 14; i++) { const cx = Math.floor(r() * LCX), cy = Math.floor(r() * LCY); this.add.image(cx * 3 * TILE + 24, cy * 3 * TILE + 26, "lmbones").setDepth(cy * 3 * TILE + 20).setAlpha(0.85); }
+    const hc = { x: ((hx0 + hx1) / 2) * TILE + 8, y: ((hy0 + hy1) / 2) * TILE + 8 };
+    if (site) {
+      const hoard = site.marks?.lab ? null : this.add.image(hc.x, hc.y + 30, "hoard").setDepth(hc.y + 30);
+      const sc = this;
+      this.targets.push({ x: hc.x, y: hc.y + 28, get label() { return site.marks?.lab ? "" : "Search among the bones of the tribute"; }, act: () => sc.searchTribute(hoard) });
+    }
+    let sx = dx, sy = dy + 24;
+    if (G.data.entry === "" && G.data.px > 0 && G.data.scene === "Labyrinth" && G.data.px < LW * TILE) { sx = G.data.px; sy = G.data.py; }
+    G.data.entry = ""; G.data.scene = "Labyrinth";
+    this.makePlayer(sx, sy);
+    this.player.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
+    // The thread, tied at the door.
+    this.thread = G.count("Clew") > 0 ? [[dx, dy + 12]] : [];
+    this.threadG = this.add.graphics().setDepth(5);
+    // Asterion.
+    this.animals = []; this.mino = undefined; this.heard = false; this.minoHit = 0; this.distT = 0;
+    if (site && site.minotaur !== "slain") {
+      const a = new Animal(this, "minotaur", hc.x, hc.y, new Phaser.Geom.Rectangle(hc.x - 60, hc.y - 40, 120, 80));
+      a.decide = () => {}; a.rolled = true; a.hp = QUARRY.minotaur.hp;
+      this.physics.add.collider(a.sprite, this.objects);
+      this.animals.push(a); this.mino = a;
+    }
+    this.dark = this.add.image(sx, sy, inDark ? "dark0" : G.count("Lamp") > 0 ? "dark2" : "dark1").setDepth(99990);
+    this.cameras.main.fadeIn(400);
+    G.say(site?.minotaur === "slain" ? "The Labyrinth. Quiet now, and still the same dark turnings." : `You go down the stair into the Labyrinth. The air is cold and smells of a byre.${this.thread.length ? " You tie the end of Ariadne's thread to the doorpost." : " (Without a thread, you may not find your way back.)"}${inDark ? " (Light a torch: it is utterly dark.)" : ""}`);
+  }
+
+  picked() { return ((G.data as unknown as { labPicked?: Record<string, number> }).labPicked ??= {}); }
+  mapKey() { return "labyrinth"; }
+  openGround(x: number, y: number) { const o = this.objects.getTileAt(Math.floor(x / TILE), Math.floor(y / TILE))?.index ?? -1; return !BLOCKING.includes(o); }
+  clearObject(_x: number, _y: number) { /* Daedalus built well */ }
+  subjectAt(): string | null { return null; }
+  useItem() {
+    const tool = G.selectedItem && ITEMS[G.selectedItem.id].kind === "tool" ? G.selectedItem.id : null;
+    if (this.tryStrike(tool)) return;
+    const [x, y] = this.facingTile();
+    if ((this.objects.getTileAt(x, y)?.index ?? -1) === T.CYCLO) G.say("Stone blocks fitted without a crack. Daedalus built well.");
+  }
+
+  climbOut() {
+    if (this.leaving) return;
+    const k = G.data.sites.Knossos;
+    if (k) { const L = knossosLayout({ WALL: T.WALL, FLAGS: T.FLAGS, COLUMN: T.COLUMN, STONE: T.STONE, BOULDER: T.BOULDER, BRUSH: T.BRUSH, TREE: T.TREE, OLIVE: T.OLIVE, WATER: T.WATER, PATH: T.PATH, DIRT: T.DIRT, LIMESTONE: T.LIMESTONE, FLOWERS: T.FLOWERS }); const [sx, sy] = L.at.stair;
+      G.data.wx = k.x0 + Math.floor(sx / WW); G.data.wy = k.y0 + Math.floor(sy / WH); G.data.px = (sx % WW) * TILE + 8; G.data.py = (sy % WH) * TILE + 26; }
+    G.data.entry = ""; G.data.scene = "Wild"; G.data.torchLit = false;
+    this.goTo("Wild");
+  }
+
+  searchTribute(hoard: Phaser.GameObjects.Image | null) {
+    const s = this.site; if (!s || s.marks?.lab) return;
+    if (this.mino && this.mino.state !== "dead" && Math.hypot(this.mino.sprite.x - this.player.x, this.mino.sprite.y - this.player.y) < 160) { G.say("Not with the Minotaur so near."); return; }
+    (s.marks ??= {}).lab = G.dayNumber; hoard?.destroy(); this.gesture("act");
+    const silver = 50 + Math.floor(Math.random() * 30); G.data.silver += silver;
+    G.say(`Among the bones of Athens' sons and daughters, the gold they were sent in: +${silver} silver, ${give("Labrys", 1)}, ${give("Amber", 2)}.`);
+    G.earn("Kleos", 1, "you came to the heart of the Labyrinth");
+  }
+
+  creatureEvent(a: Animal, what: "slain" | "appeased") {
+    if (a !== this.mino || what !== "slain" || !this.site) return;
+    this.site.minotaur = "slain";
+    G.earn("Kleos", 3, "you killed the Minotaur in the Labyrinth");
+    this.time.delayedCall(800, () => G.say("Asterion, the Minotaur, falls in the dark, and does not rise. Somewhere above, in the palace, Ariadne will want to know."));
+  }
+
+  /** Every so often, how far every passage is from you, walking: the Minotaur follows it down to you. */
+  updateDist() {
+    const W = LW, H = LH, d = new Int32Array(W * H).fill(-1);
+    const px = Math.floor(this.player.x / TILE), py = Math.floor((this.player.y + 4) / TILE);
+    if (px < 0 || py < 0 || px >= W || py >= H) return;
+    const q = [py * W + px]; d[q[0]] = 0;
+    for (let i = 0; i < q.length; i++) {
+      const n = q[i], x = n % W, y = (n / W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H || this.grid[ny][nx]) continue;
+        const m = ny * W + nx; if (d[m] >= 0) continue; d[m] = d[n] + 1; q.push(m);
+      }
+    }
+    this.dist = d;
+  }
+
+  minotaurTick(dt: number) {
+    const a = this.mino; if (!a || a.state === "dead" || !a.sprite.active) return;
+    if ((this.distT -= dt) <= 0) { this.distT = 0.35; this.updateDist(); }
+    const W = LW, tx = Math.floor(a.sprite.x / TILE), ty = Math.floor((a.sprite.y + 4) / TILE), here = this.dist[ty * W + tx] ?? -1;
+    const hunting = here >= 0 && here < (inDark ? 34 : 46); // it hears you, and a torch carries further
+    if (hunting && !this.heard) { this.heard = true; SOUND.sfx("hurt"); this.cameras.main.shake(300, 0.003); G.say("A bellow shakes the stones: something has heard you, and it is coming."); }
+    if (!hunting && this.heard && here > 60) this.heard = false;
+    let goal: [number, number] | null = null;
+    if (hunting) {
+      let best = here;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = this.dist[(ty + dy) * W + tx + dx]; if (v >= 0 && v < best) { best = v; goal = [tx + dx, ty + dy]; } }
+    } else {
+      if (!this.wanderTo || Math.hypot(this.wanderTo[0] * TILE - a.sprite.x, this.wanderTo[1] * TILE - a.sprite.y) < 10) {
+        const opts = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [number, number][]).filter(([dx, dy]) => !this.grid[ty + dy]?.[tx + dx]);
+        const [dx, dy] = opts[Math.floor(Math.random() * opts.length)] ?? [0, 0]; this.wanderTo = [tx + dx * 3, ty + dy * 3];
+        if (this.grid[this.wanderTo[1]]?.[this.wanderTo[0]] !== 0) this.wanderTo = [tx + dx, ty + dy];
+      }
+      goal = this.wanderTo;
+    }
+    const d = Math.hypot(this.player.x - a.sprite.x, this.player.y - a.sprite.y);
+    if (a.state === "recoil" || a.state === "flee") return; // reeling from a blow
+    a.state = "walk"; a.timer = 1;
+    if (d < 20 && hunting) { a.tx = this.player.x; a.ty = this.player.y; const k = 60 / Math.max(1, d); a.sprite.setVelocity((this.player.x - a.sprite.x) * k, (this.player.y - a.sprite.y) * k); }
+    else if (goal) { const gx = goal[0] * TILE + 8, gy = goal[1] * TILE + 4, l = Math.hypot(gx - a.sprite.x, gy - a.sprite.y) || 1, v = hunting ? 58 : 24; a.tx = gx; a.ty = gy; a.sprite.setVelocity(((gx - a.sprite.x) / l) * v, ((gy - a.sprite.y) / l) * v); }
+    if ((this.minoHit -= dt) <= 0 && d < 14) { this.minoHit = 1.3; this.struck(a); }
+  }
+
+  update(_t: number, dms: number) {
+    const dt = dms / 1000;
+    this.updateAnimals(dt);
+    this.minotaurTick(dt);
+    // The thread pays out behind you.
+    if (this.thread.length) {
+      const [lx, ly] = this.thread[this.thread.length - 1];
+      if (Math.hypot(this.player.x - lx, this.player.y + 4 - ly) > 10 && this.thread.length < 6000) this.thread.push([this.player.x, this.player.y + 4]);
+      const g = this.threadG!; g.clear().lineStyle(1.5, 0xc02828, 0.9).beginPath(); g.moveTo(this.thread[0][0], this.thread[0][1]);
+      for (const [x, y] of this.thread) g.lineTo(x, y); g.lineTo(this.player.x, this.player.y + 4); g.strokePath();
+    }
+    this.dark.setPosition(this.player.x, this.player.y);
+    this.common(dt);
+  }
+}
+
 // ------------------------------------------------------------------ the cave
 const CW = 40, CH = 30;
 
@@ -6650,6 +7029,7 @@ class UIScene extends Phaser.Scene {
       "East of the farm lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
       "Far out lie citadels of the heroes' age, three screens by three, walled with Cyclopean stone; and off the coasts, row on into the open sea to find its isles. Both go in your journal's Places.",
+      "Somewhere out there are Delphi, where the Pythia speaks Apollo's oracles to the clean, once a month, and Knossos, Minos' palace, with the Labyrinth beneath it. Take a torch, and Ariadne's thread.",
       "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
@@ -7488,10 +7868,11 @@ class UIScene extends Phaser.Scene {
     const fests = festUpcoming(3).map(({ f, d }) => `• ${f.name} (${f.god}): ${d === 0 ? "today!" : d === 1 ? "tomorrow" : `in ${d} days`}, ${f.day} ${MONTHS[f.month].name}. ${f.feastWord[0].toUpperCase() + f.feastWord.slice(1)} for the feast${f.agon ? `; ${f.agon.name}` : ""}.`);
     const places = Object.values(G.data.sites).map((p) => {
       const mx = p.x0 + Math.floor(p.w / 2), my = p.y0 + Math.floor(p.h / 2);
-      const state = p.kind === "isle" ? ISLES[p.isle!].line.split(".")[0].replace(/^A |^An /, "a ").toLowerCase()
+      const state = p.kind === "delphi" ? "the oracle of Apollo" : p.kind === "knossos" ? (p.minotaur === "slain" ? "Minos' palace; the Minotaur is dead" : "Minos' palace; the Minotaur waits in the Labyrinth") : p.kind === "isle" ? ISLES[p.isle!].line.split(".")[0].replace(/^A |^An /, "a ").toLowerCase()
         : p.fate === "brigands" ? (p.cleared ? "brigands driven out" : "held by brigands") : p.fate === "beast" ? (p.cleared ? `its ${beast(p.beast!)} is dead` : `a ${beast(p.beast!)} lairs there`) : p.cleared ? "its dead at rest" : "haunted";
-      return `• ${p.name[0].toUpperCase() + p.name.slice(1)} (${p.kind === "fortress" ? "citadel" : "isle"}), ${directions(mx, my)}: ${state}${p.treasury ? (p.kind === "fortress" ? "; treasury taken" : "") : ""}.`;
+      return `• ${p.name[0].toUpperCase() + p.name.slice(1)} (${{ fortress: "citadel", isle: "isle", delphi: "sanctuary", knossos: "palace" }[p.kind]}), ${directions(mx, my)}: ${state}${p.treasury ? (p.kind === "fortress" ? "; treasury taken" : "") : ""}.`;
     });
+    for (const f of G.data.foretold ?? []) places.push(`• Foretold by the Pythia: ${f.text}`);
     const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}${places.length ? `\n\nPLACES\n${places.join("\n")}` : ""}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
@@ -8443,7 +8824,7 @@ for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => S
   pixelArt: true,
   physics: { default: "arcade", arcade: { debug: false } },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, TitleScene, CreationScene, FarmScene, HouseScene, WildScene, VillageScene, GymScene, CaveScene, UIScene],
+  scene: [BootScene, TitleScene, CreationScene, FarmScene, HouseScene, WildScene, VillageScene, GymScene, CaveScene, LabyrinthScene, UIScene],
 });
 
 (window as unknown as { WHEEL: typeof WHEEL }).WHEEL = WHEEL;

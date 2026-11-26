@@ -174,6 +174,8 @@ export const ITEMS: Record<string, ItemDef> = {
   OwlFeather: { id: "OwlFeather", value: 6, name: "Owl feather", greek: "pteron glaukos", kind: "find", desc: "Soft and silent. Athena's bird." },
   Pearl: { id: "Pearl", value: 40, name: "Pearl", greek: "margarites", kind: "find", desc: "A sea-pearl, round and moon-pale. Aphrodite's, who rose from the foam." },
   Moly: { id: "Moly", value: 30, name: "Moly", greek: "moly", kind: "find", desc: "Black at the root, milk-white in flower: the herb Hermes gave Odysseus. Carried, no song or spell can bend your will." },
+  Clew: { id: "Clew", value: 5, name: "Ariadne's thread", greek: "klôsma", kind: "find", desc: "A ball of red thread from Ariadne. Carried into the Labyrinth, it pays out behind you, so you can find your way back." },
+  Labrys: { id: "Labrys", value: 60, name: "Golden labrys", greek: "labrys", kind: "find", desc: "A little double axe of gold, the sign of the palace of the Labyrinth. It was offered to a goddess older than the Olympians." },
   Thunderstone: { id: "Thunderstone", value: 60, name: "Thunderstone", greek: "keraunia", kind: "find", desc: "Black iron fallen from the sky where Zeus' bolt struck. Carried, Zeus' favor sits heavier on you." },
   HeliadTear: { id: "HeliadTear", value: 50, name: "Tear of the Heliades", greek: "dakry Heliadon", kind: "find", desc: "Amber that holds a faint light: a sister of Phaethon wept it. Carried, Apollo's aim is yours." },
   SeaFennel: { id: "SeaFennel", value: 3, name: "Sea fennel", greek: "krithmon", kind: "material", desc: "Salty shore greens, good pickled." },
@@ -320,6 +322,7 @@ export const QUARRY: Record<string, { hp: number; size: number; drops: [string, 
   heron: { hp: 1, size: 6, drops: [["Feather", 3]] },
   eagle: { hp: 2, size: 6, drops: [["Feather", 3]] },
   crab: { hp: 1, size: 5, drops: [["Meat", 1]] },
+  minotaur: { hp: 9, size: 9, drops: [] }, // Asterion, the bull of Minos: nine blows, and a hero's arm to land them
   brigand: { hp: 3, size: 7, drops: [] }, // a man: three blows, and at the last he runs
   jackal: { hp: 1, size: 7, drops: [["Hide", 1]] },
   scorpion: { hp: 1, size: 5, drops: [] },

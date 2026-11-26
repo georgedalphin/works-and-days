@@ -774,6 +774,39 @@ export function makeTextures(scene: Phaser.Scene) {
   canvasTex(scene, "spearFly", 20, 3, (c) => { px(c, 0, 1, 16, 1, "#9c7445"); px(c, 16, 0, 3, 3, "#c98a55"); px(c, 19, 1, 1, 1, "#e8c48a"); px(c, 0, 0, 1, 3, "#c98a55"); });
   canvasTex(scene, "spearStuck", 7, 18, (c) => { px(c, 3, 3, 1, 14, "#9c7445"); px(c, 2, 0, 3, 3, "#c98a55"); px(c, 3, 0, 1, 1, "#e8c48a"); px(c, 1, 16, 5, 2, "rgba(0,0,0,0.25)"); });
   canvasTex(scene, "arrowStuck", 5, 8, (c) => { px(c, 2, 0, 1, 7, "#a87443"); px(c, 1, 0, 1, 2, "#e8e2d0"); px(c, 3, 0, 1, 2, "#e8e2d0"); px(c, 1, 7, 3, 1, "rgba(0,0,0,0.25)"); });
+  // The Pythia's tripod: a bronze bowl on three tall legs.
+  canvasTex(scene, "tripod", 16, 18, (c) => {
+    px(c, 2, 3, 12, 3, "#b08a3a"); px(c, 3, 2, 10, 1, "#d0aa5a"); px(c, 3, 6, 10, 1, "#8a6a2a");
+    for (const x of [3, 7, 12]) px(c, x, 7, 1, 10, "#8a6a2a"); px(c, 1, 17, 14, 1, "rgba(0,0,0,0.25)");
+  });
+  // The omphalos: the navel of the world, an egg of stone under a net of woollen fillets.
+  canvasTex(scene, "omphalos", 14, 14, (c) => {
+    px(c, 3, 2, 8, 10, "#c8c0aa"); px(c, 2, 4, 10, 7, "#c8c0aa"); px(c, 4, 1, 6, 1, "#d8d0ba"); px(c, 3, 3, 3, 3, "#e0d8c4");
+    for (let i = 0; i < 4; i++) { px(c, 2 + i * 3, 4, 1, 7, "#9a8a6a"); px(c, 2, 5 + i * 2, 10, 1, "#9a8a6a"); }
+    px(c, 1, 12, 12, 2, "#8e846e");
+  });
+  // Horns of consecration, on the palace's roofs and altars.
+  canvasTex(scene, "horns", 18, 12, (c) => {
+    px(c, 1, 8, 16, 4, "#d8ccb0"); px(c, 1, 2, 3, 6, "#d8ccb0"); px(c, 14, 2, 3, 6, "#d8ccb0"); px(c, 2, 1, 2, 1, "#e8dcc0"); px(c, 14, 1, 2, 1, "#e8dcc0");
+    px(c, 4, 6, 10, 2, "#d8ccb0"); px(c, 1, 11, 16, 1, "#a89c80");
+  });
+  // The Minotaur: a man's body, a bull's head, horns like spear-blades. Two frames, facing right.
+  {
+    const t = canvasTex(scene, "minotaur", 40, 22, (c) => {
+      for (const f of [0, 1]) {
+        const o = f * 20, sk = "#9a6a4a", dk = "#6a4028", hd = "#3a2418";
+        px(c, o + 3, 20, 14, 2, "rgba(0,0,0,0.3)");
+        if (f === 0) { px(c, o + 6, 15, 3, 5, sk); px(c, o + 11, 15, 3, 5, sk); } else { px(c, o + 7, 15, 3, 5, sk); px(c, o + 10, 15, 3, 4, sk); }
+        px(c, o + 6, 13, 8, 3, "#6a2a1e"); // loincloth
+        px(c, o + 5, 6, 10, 7, sk); px(c, o + 6, 7, 3, 3, "#b07a58"); px(c, o + 13, 7, 2, 6, dk); // chest and arm
+        px(c, o + 3, 7, 2, 6, dk); px(c, o + 15, 8, 2, 4, sk);
+        px(c, o + 8, 1, 8, 6, hd); px(c, o + 15, 3, 3, 3, hd); px(c, o + 17, 4, 1, 2, "#1a100a"); // the bull's head and muzzle
+        px(c, o + 12, 2, 1, 1, "#e83a2a"); // its eye
+        px(c, o + 7, 0, 2, 1, "#e8e0c8"); px(c, o + 5, 0, 2, 1, "#e8e0c8"); px(c, o + 13, 0, 2, 1, "#e8e0c8"); px(c, o + 15, 0, 1, 1, "#e8e0c8");
+      }
+    });
+    t.add(0, 0, 0, 0, 20, 22); t.add(1, 0, 20, 0, 20, 22);
+  }
   // A stone throne, high-backed, its arms carved as griffins long worn away.
   canvasTex(scene, "throne", 14, 20, (c) => {
     px(c, 2, 0, 10, 12, "#a89a7c"); px(c, 3, 1, 8, 10, "#bcae8e"); px(c, 0, 9, 14, 4, "#9a8c70"); px(c, 1, 9, 12, 2, "#c4b696");
@@ -784,7 +817,7 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
-export const ITEM_ICON_ORDER = ["Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
+export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
 
@@ -921,6 +954,10 @@ function drawIcon(c: Ctx, o: number, id: string) {
     case "Nest": px(c, o + 2, 8, 12, 5, "#8a6a3a"); px(c, o + 4, 7, 8, 2, "#6b4a2b"); px(c, o + 5, 8, 6, 2, "#4a3420"); for (const [x, y] of [[3, 9], [7, 11], [11, 10], [5, 12], [12, 12]]) px(c, o + x, y, 2, 1, "#b0905a"); break;
     case "Fossil": px(c, o + 3, 5, 10, 7, "#b8b0a0"); for (let i = 0; i < 5; i++) px(c, o + 4 + i * 2, 5, 1, 7, "#9a9282"); px(c, o + 6, 12, 4, 2, "#a8a090"); break;
     case "Obsidian": px(c, o + 5, 3, 3, 10, "#1e1a24"); px(c, o + 8, 5, 3, 7, "#2a2632"); px(c, o + 6, 4, 1, 6, "#5a5468"); px(c, o + 9, 6, 1, 3, "#6a6478"); break;
+    case "Pearl": px(c, o + 5, 5, 6, 6, "#e8e4dc"); px(c, o + 4, 6, 1, 4, "#cfc8bc"); px(c, o + 11, 6, 1, 4, "#cfc8bc"); px(c, o + 5, 11, 6, 1, "#b8b0a4"); px(c, o + 6, 6, 2, 2, "#ffffff"); break;
+    case "Moly": px(c, o + 7, 3, 2, 8, "#5a8a3a"); px(c, o + 4, 5, 3, 2, "#6a9a4a"); px(c, o + 9, 6, 3, 2, "#6a9a4a"); px(c, o + 6, 1, 4, 3, "#f4f2ea"); px(c, o + 7, 2, 2, 1, "#e8d870"); px(c, o + 6, 11, 4, 4, "#1e1a18"); px(c, o + 5, 13, 1, 2, "#1e1a18"); px(c, o + 10, 13, 1, 2, "#1e1a18"); break;
+    case "Clew": px(c, o + 4, 5, 8, 7, "#b8282a"); px(c, o + 5, 4, 6, 1, "#c83a3a"); px(c, o + 5, 12, 6, 1, "#8a1a1c"); px(c, o + 5, 6, 6, 1, "#e05a50"); px(c, o + 5, 9, 6, 1, "#e05a50"); px(c, o + 12, 10, 3, 1, "#b8282a"); px(c, o + 14, 11, 1, 3, "#b8282a"); break;
+    case "Labrys": px(c, o + 7, 2, 2, 12, "#8a6a2a"); px(c, o + 2, 4, 5, 6, "#e8c050"); px(c, o + 9, 4, 5, 6, "#e8c050"); px(c, o + 3, 5, 3, 4, "#f8e080"); px(c, o + 10, 5, 3, 4, "#f8e080"); px(c, o + 2, 9, 5, 1, "#b89030"); px(c, o + 9, 9, 5, 1, "#b89030"); break;
     case "Amber": px(c, o + 5, 5, 6, 6, "#d8902a"); px(c, o + 4, 6, 1, 4, "#c07a1a"); px(c, o + 11, 6, 1, 4, "#c07a1a"); px(c, o + 6, 6, 2, 2, "#f8c860"); break;
     case "OwlFeather": for (let i = 0; i < 10; i++) { px(c, o + 4 + i, 13 - i, 1, 1, "#7a7068"); px(c, o + 3 + i, 11 - i, 2, 2, i % 3 ? "#b8aca0" : "#8a7e72"); } break;
     case "Thunderstone": px(c, o + 4, 5, 8, 7, "#2e2c30"); px(c, o + 3, 7, 1, 3, "#2e2c30"); px(c, o + 6, 4, 4, 1, "#3e3c40"); px(c, o + 6, 6, 2, 1, "#8a8a9a"); px(c, o + 9, 8, 1, 2, "#6a6a7a"); px(c, o + 12, 3, 1, 3, "#f2e070"); px(c, o + 11, 5, 1, 2, "#f2e070"); break;

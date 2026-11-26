@@ -97,4 +97,4 @@ async def main():
             print("swim off:", await pg.evaluate("[G.data.wx, G.data.wy]"), await log(pg,1))
         print("ERRORS:", errs)
         await b.close()
-asyncio.run(main())
+if __name__ == "__main__": asyncio.run(main())
