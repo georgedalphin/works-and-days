@@ -17,6 +17,8 @@ export interface SoundState {
   dusk: boolean;
   weather: string;
   danger: boolean;
+  /** A festival in the village today: music in the square. */
+  festival?: boolean;
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -217,10 +219,30 @@ export class SoundScape {
     else { this.nextBeat = 0; this.beat = 0; }
 
     // The calm lyre: a short phrase, then a long quiet; slower and lower by night; silent in danger.
+    if (st.festival && st.scene === "Village" && st.day && this.dangerLevel < 0.3) { this.festivalMusic(now); return; }
     if (this.dangerLevel < 0.3) tick("phrase", st.day ? [8, 18] : [12, 24], () => this.calmPhrase(now + 0.05, st));
   }
 
   /** A few notes wandering stepwise in the old mode, now and then a held drone note under them. */
+  /** Festival music in the square: a frame drum, a lyre dancing in the Phrygian, now and then the aulos. */
+  festBeat = 0; nextFest = 0; festNote = 4;
+  festivalMusic(now: number) {
+    const ctx = this.ctx!, beat = 0.34, SCALE = [57, 59, 60, 62, 64, 66, 67, 69, 71, 72]; // A Phrygian (the ancients' name for this octave)
+    if (this.nextFest < now) this.nextFest = now + 0.05;
+    while (this.nextFest < now + 0.4) {
+      const t = this.nextFest, b = this.festBeat++ % 8;
+      if (b === 0 || b === 3 || b === 6) { // the tympanon, to the music bus
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.setValueAtTime(b === 0 ? 120 : 180, t); o.frequency.exponentialRampToValueAtTime(b === 0 ? 50 : 85, t + 0.16);
+        g.gain.setValueAtTime(b === 0 ? 0.3 : 0.18, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+        o.connect(g); g.connect(this.music!); o.start(t); o.stop(t + 0.32);
+        this.noiseHit(t, 1800, 0.05, 0.05, this.music!);
+      }
+      if (Math.random() < 0.8) { this.festNote = Math.max(0, Math.min(SCALE.length - 1, this.festNote + pick([-2, -1, 1, 1, 2, 0]))); this.pluck(midi(SCALE[this.festNote]), t + rand(-0.01, 0.01), 0.15, undefined, 1.2); }
+      if (b === 0 && Math.random() < 0.5) this.pluck(midi(45), t, 0.12, undefined, 2);
+      this.nextFest += beat;
+    }
+  }
   calmPhrase(t: number, st: SoundState) {
     const scale = st.day ? CALM : CALM.slice(0, 8);
     let i = Math.floor(rand(2, scale.length - 3));

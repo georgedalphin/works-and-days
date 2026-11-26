@@ -10,6 +10,7 @@ import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
 import { fishHere, fishDef, type FishDef } from "./fishing";
+import { villageFestivals, daysUntil, type FestivalDef } from "./festivals";
 import { HARMONIAI, INSTRUMENTS, MELODIES, melody, stepFreq, VILLAGE_SONGS, HUT_SONGS, type Melody } from "./music";
 import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
@@ -160,6 +161,22 @@ const aretaiCalm = (kind: string): [number, string] => {
   for (const ar of CALMED_BY[kind] ?? []) { const v = (G.data.aretai[ar] ?? 3) - 4; if (v >= 2 && v > best) { best = v; by = ar; } }
   return [best, by];
 };
+/** The festivals your village keeps: the great ones of the year, and those of the gods its households honor. */
+let festCache: { seed: number; list: FestivalDef[] } | null = null;
+function villageFests(): FestivalDef[] {
+  if (festCache?.seed !== G.data.seed) {
+    const patrons = [...Object.values(VILLAGERS).map((v) => v.patron), ...villageHouseholds(G.data.seed).map((h) => h.trade.patron)];
+    festCache = { seed: G.data.seed, list: villageFestivals(patrons) };
+  }
+  return festCache.list;
+}
+/** The festival today, if the village keeps one. */
+const festToday = () => villageFests().find((f) => f.month === G.data.month && f.day === G.data.day) ?? null;
+const festKey = (f: FestivalDef) => `${G.data.year}:${f.id}`;
+const festRec = (f: FestivalDef) => (G.data.fest[festKey(f)] ??= {});
+/** The next festivals, soonest first, with the days until each. */
+const festUpcoming = (n: number) => villageFests().map((f) => ({ f, d: daysUntil(G.data.month, G.data.day, f.month, f.day) })).sort((a, b) => a.d - b.d).slice(0, n);
+
 /** Noumenia: the first day of the month. That night the dead gather at the crossroads, and wander near the living. */
 const noumeniaNight = () => G.data.day === 1 && !G.isDay;
 
@@ -324,9 +341,11 @@ abstract class PlayScene extends Phaser.Scene {
   /** Has tonight's Noumenia visit been rolled here? */
   noumRolled = false;
   /** On the night of Noumenia the dead come near the houses of the living. */
-  noumeniaVisit(spots: [number, number][], chance: number, maxN: number, say: string) {
+  noumeniaVisit(spots: [number, number][], chance: number, maxN: number, say: string) { // (on ghost festivals too)
     if (G.isDay) { this.noumRolled = false; return; }
-    if (this.noumRolled || !noumeniaNight()) return;
+    const fest = festToday();
+    if (this.noumRolled || !(noumeniaNight() || (fest?.ghosts && !G.isDay))) return;
+    if (!noumeniaNight() && fest) say = `It is the night of the ${fest.name}, and the dead are abroad: pale shapes stand at the doors, waiting for what the living owe them.`;
     this.noumRolled = true;
     if (Math.random() >= chance) return;
     const n = 1 + Math.floor(Math.random() * maxN);
@@ -4690,6 +4709,22 @@ class VillageScene extends PlayScene {
       { x: 16 * TILE + 8, y: 15 * TILE, label: "The village well", act: () => G.say("The village well. With your water jar in hand, press Space here to fill it.") },
       { x: 31 * TILE + 8, y: 25 * TILE + 12, label: "The village altar", act: () => ui(this).openAltar("shrine") },
     );
+    // A festival: pennants strung over the altar ground, the sacrificial fire lit, and the village gathered there.
+    const fest = festToday();
+    if (fest && G.isDay) {
+      const g = this.add.graphics().setDepth(30 * TILE);
+      const cols = [0xc4402a, 0xf2c14e, 0x3a6a9a, 0xe9e1cf, 0x6f8a3a];
+      for (const [x0, y0, x1, y1] of [[25, 20.6, 36, 20.6], [25, 27.4, 36, 27.4]] as [number, number, number, number][]) {
+        g.lineStyle(1, 0x6b4a2b).lineBetween(x0 * TILE, y0 * TILE, x1 * TILE, y1 * TILE);
+        for (let i = 0, n = 22; i < n; i++) { const x = (x0 + (x1 - x0) * (i + 0.5) / n) * TILE, y = y0 * TILE + Math.sin(i / 3) * 2; g.fillStyle(cols[i % cols.length]).fillTriangle(x - 3, y, x + 3, y, x, y + 6); }
+      }
+      const fx = 29 * TILE + 8, fy = 24 * TILE + 8;
+      const glow = this.add.image(fx, fy, "focusGlow").setTint(0xffa040).setAlpha(0.5).setScale(2.2).setBlendMode(Phaser.BlendModes.ADD).setDepth(fy);
+      this.tweens.add({ targets: glow, alpha: 0.25, scale: 2, yoyo: true, repeat: -1, duration: 420 });
+      this.add.image(fx, fy + 6, "pl_Campfire").setOrigin(0.5, 1).setDepth(fy);
+      this.targets.push({ x: fx, y: fy + 4, label: `The ${fest.name}: join the festival`, act: () => ui(this).festivalMenu(fest) });
+      this.time.delayedCall(700, () => G.say(`The village keeps the ${fest.name} today. ${fest.rite}`));
+    }
     // A stranger may be resting on the inn's bench.
     this.rollStranger();
     const st = G.data.stranger;
@@ -4788,7 +4823,7 @@ class VillageScene extends PlayScene {
           w.doing = "talk"; o.doing = "talk"; w.talkWith = o; o.talkWith = w;
           w.talkLeft = 8 + Math.random() * 8; w.pair = pickGossip(); w.line = 0; w.bubbleT = 2.5; o.talkLeft = 999;
         } else w.wait = 2;
-      } else if (r < 0.5) w.goTo(Phaser.Math.Between(14, 26) * TILE, Phaser.Math.Between(12, 18) * TILE + 8); // the square
+      } else if (r < (festToday() ? 0.8 : 0.5)) { if (festToday()) w.goTo(Phaser.Math.Between(26, 34) * TILE, Phaser.Math.Between(21, 26) * TILE + 6); else w.goTo(Phaser.Math.Between(14, 26) * TILE, Phaser.Math.Between(12, 18) * TILE + 8); } // the square; on a festival, nearly everyone gathers at the altar
       else if (r < 0.62) w.goTo(16 * TILE + 8 + Phaser.Math.Between(-14, 14), 15 * TILE + 12); // the well
       else if (r < 0.85 || w.folk.age === "elder") { w.goTo(w.home[0] + Phaser.Math.Between(-16, 16), w.home[1] + Phaser.Math.Between(2, 10)); } // by their own door
       else w.wait = 4 + Math.random() * 6; // just stand a while
@@ -5049,7 +5084,7 @@ class UIScene extends Phaser.Scene {
     const play = this.scene.get(G.data.scene) as PlayScene | undefined;
     const terrain = G.data.scene === "Wild" ? (G.data.screens[`${G.data.wx},${G.data.wy}`]?.terrain ?? 3) : G.data.scene === "Cave" ? 99 : 3;
     const danger = !!play?.animals?.some((a) => (a.state === "charge" || a.state === "recoil") && a.sprite.active && Math.hypot(a.sprite.x - play.player.x, a.sprite.y - play.player.y) < 260);
-    SOUND.update(dt, { scene: G.data.scene, terrain, season: G.month.season, day: G.isDay, dusk: G.data.clock >= G.daylight - 1.2 && G.data.clock < G.daylight + 1, weather: G.data.weather, danger });
+    SOUND.update(dt, { scene: G.data.scene, terrain, season: G.month.season, day: G.isDay, dusk: G.data.clock >= G.daylight - 1.2 && G.data.clock < G.daylight + 1, weather: G.data.weather, danger, festival: !!festToday() });
     this.drawRain(dt);
     this.timeText.setText(G.timeLabel());
     this.place.setText(G.locationLabel());
@@ -5278,6 +5313,52 @@ class UIScene extends Phaser.Scene {
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
     this.showTalk(v.name, sub, line, opts, v.id);
+  }
+
+  // ---------------------------------------------------------------- festivals
+  festivalMenu(f: FestivalDef, said?: string) {
+    const rec = festRec(f), held = G.selectedItem, opts: { label: string; fn: () => void }[] = [];
+    if (!rec.rite) opts.push({ label: "Join the rite and the procession", fn: () => {
+      rec.rite = 1; G.addFatigue(-10); const after = G.addFavor(f.god, 1, 6); G.note("festRite");
+      this.festivalMenu(f, `${f.rite} You walk with the village, and sing, and the god is honored. (${f.god} ${after >= 0 ? "+" : ""}${after}; Fatigue −10.)`);
+    } });
+    const edible = held && (INGREDIENTS[held.id] || ITEMS[held.id].kind === "meal" || ["Flowers", "Wine", "Grapes"].includes(held.id));
+    if (!rec.feast) opts.push({ label: edible ? `Bring your ${ITEMS[held!.id].name.toLowerCase()} to the feast` : `Bring something to the feast (best: ${f.feastWord})`, fn: () => {
+      if (!edible) { this.festivalMenu(f, `Hold something to bring to the feast. Best of all would be ${f.feastWord}.`); return; }
+      G.removeItem(held!.id, 1); rec.feast = 1; G.note("festFeast");
+      const ideal = f.feast.includes(held!.id);
+      for (const id of Object.keys(VILLAGERS)) this.changeRel(id, ideal ? 2 : 1);
+      if (ideal) { G.earn("Kleos", 1, `your gift to the ${f.name} feast`); G.addFavor(f.god, 1, 10); }
+      this.festivalMenu(f, ideal ? `"${ITEMS[held!.id].name}! Just what the ${f.name} wants." It goes to the head of the table, and everyone has some. (Everyone in the village +2; ${f.god} +1.)` : `It goes on the table with everything else, and is eaten. The village is glad of it. (Everyone in the village +1.)`);
+    } });
+    if (f.agon && !rec.agon) opts.push({ label: `Enter ${f.agon.name} (${f.agon.aretai}; prize: ${f.agon.prizeName})`, fn: () => { rec.agon = 1; this.closeTalk(); G.note("festAgon"); this.rhythm(`${f.name}: ${f.agon!.name}`, f.agon!.help, 6, (score) => this.agonResult(f, score)); } });
+    opts.push({ label: `Make an offering at the altar (counts double for ${f.god} today)`, fn: () => this.openAltar("shrine") });
+    const done = [rec.rite && "walked in the rite", rec.feast && "given to the feast", rec.agon && (rec.place ? `placed ${["", "first", "second", "third", "last"][rec.place]} in the contest` : "entered the contest")].filter(Boolean).join(", ");
+    this.showTalk(`The ${f.name}`, `${f.god}'s festival · ${G.dateLabel()}`, said ?? `${f.desc}${done ? `\n\nYou have ${done}.` : ""}`, opts);
+  }
+  /** The agon: your rhythm, your Aretai (twice), your hour, and for song your instrument and a song of the god, against three rivals. */
+  agonResult(f: FestivalDef, score: number) {
+    const a = f.agon!, rec = festRec(f), ar = G.data.aretai[a.aretai] ?? 3;
+    let bonus = G.patron?.aretai === a.aretai ? 2 : 0;
+    if (a.kind === "song") { const inst = curInstrument(); bonus += inst.power + (MELODIES.some((m) => m.god === f.god && G.data.songs.includes(m.id)) ? 2 : 0); }
+    if (a.kind === "archery" && G.count("bow")) bonus += 1;
+    const you = score + ar * 2 + bonus;
+    const folk = villageHouseholds(G.data.seed).flatMap((h) => h.members).filter((m) => m.age === "adult").map((m) => m.name);
+    const names = [...folk].sort(() => Math.random() - 0.5).slice(0, 3);
+    const rivals = names.map((n) => ({ n, v: 6 + d12() + Math.floor(Math.random() * 6) }));
+    const place = 1 + rivals.filter((r) => r.v > you).length;
+    rec.place = place;
+    const table = [...rivals.map((r) => ({ n: r.n, v: r.v })), { n: "You", v: you }].sort((x, y) => y.v - x.v).map((r, i) => `${i + 1}. ${r.n} (${r.v})`).join("   ");
+    let prize = "";
+    if (place === 1) {
+      prize = `You win ${a.prizeName}! ${a.prize.map(([id, n]) => give(id, n)).join(", ")}.`;
+      G.earn("Kleos", 2, `victory at the ${f.name}`); G.addFavor(f.god, 1, 10);
+      for (const id of Object.keys(VILLAGERS)) this.changeRel(id, 1);
+      SOUND.sfx("find");
+    } else if (place === 2) { G.data.silver += 10; G.earn("Kleos", 1, `second at the ${f.name}`); prize = "Second place: 10 silver, and the crowd's cheers."; }
+    else if (place === 3) { G.data.silver += 4; prize = "Third place: 4 silver."; }
+    else prize = "Last. The crowd laughs, kindly enough, and someone hands you a cup of wine.";
+    this.festivalMenu(f, `${a.name[0].toUpperCase() + a.name.slice(1)}: your timing ${score} of 18, ${a.aretai} ${ar} (×2)${bonus ? `, +${bonus}` : ""}: ${you}.\n\n${table}\n\n${prize}`);
   }
 
   // ---------------------------------------------------------------- fishing: bringing it in
@@ -5766,7 +5847,8 @@ class UIScene extends Phaser.Scene {
     reqs.push(...gq);
     const ts = G.data.tir, st = TIRESIAS[ts.step];
     if (st && ts.said === ts.step) reqs.unshift(`• Tiresias: ${st.title.toLowerCase()}. ${st.check(this.tirCtx())[0] ? "Done: go and tell him." : `${st.check(this.tirCtx())[1]}.`} ${st.how}`);
-    const text = `REQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
+    const fests = festUpcoming(3).map(({ f, d }) => `• ${f.name} (${f.god}): ${d === 0 ? "today!" : d === 1 ? "tomorrow" : `in ${d} days`}, ${f.day} ${MONTHS[f.month].name}. ${f.feastWord[0].toUpperCase() + f.feastWord.slice(1)} for the feast${f.agon ? `; ${f.agon.name}` : ""}.`);
+    const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, []);
   }
 
@@ -6029,15 +6111,15 @@ class UIScene extends Phaser.Scene {
       this.openAltar(where, `You set aside the ${name} for Artemis, mistress of beasts. Her share is given; she is satisfied.`);
       return;
     }
-    if (G.favor(god) >= cap) {
+    if (G.favor(god) >= (where === "shrine" && festToday()?.god === god ? 10 : cap)) {
       this.openAltar(where, where === "home" ? `${god} already knows your household. To be known by name, bring your offerings to the village altar.` : `${god} knows you well. Greater favor comes from deeds, festivals and the gods' own tests.`);
       return;
     }
     const slot = G.data.slots.find((s) => s && s.id === item && s.q === 3) ?? G.data.slots.find((s) => s && s.id === item);
-    const fine = slot?.q === 3;
+    const fine = slot?.q === 3, ft = festToday(), feast = where === "shrine" && ft?.god === god;
     G.removeItem(item, 1); G.data.offered[god] = today; G.note("offer");
-    const after = G.addFavor(god, fine ? 2 : 1, cap);
-    this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after})`);
+    const after = G.addFavor(god, (fine ? 2 : 1) * (feast ? 2 : 1), feast ? 10 : cap);
+    this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}${feast ? ` at the ${ft!.name}, before the whole village` : ""}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after}${feast ? "; on the god's festival, offerings count double, as high as +10" : ""})`);
   }
 
   hearthMenu(tend: () => void) {
@@ -6639,6 +6721,9 @@ class UIScene extends Phaser.Scene {
     const away = from.scene.key === "Wild" && !camp;
     const { hoursSlept, recovered, healed, notes } = G.sleep(collapsed, camp);
     if (away && !cause) notes.unshift("A passing shepherd finds you and helps you home.");
+    const ft = festToday(), next = festUpcoming(2).find((x) => x.d === 1);
+    if (ft) notes.push(`Today the village keeps the ${ft.name}, for ${ft.god}. Go down to the village altar.`);
+    else if (next) notes.push(`Tomorrow the village keeps the ${next.f.name}, for ${next.f.god}.`);
     // By a campfire you wake where you lay down; otherwise beside your own bed.
     const ps = from as PlayScene;
     const wakeScene = camp ? from.scene.key : "House";
