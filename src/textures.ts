@@ -1126,3 +1126,134 @@ export function makeGlowTexture(scene: Phaser.Scene) {
   g.addColorStop(0, "rgba(255,236,170,0.9)"); g.addColorStop(0.45, "rgba(255,220,140,0.45)"); g.addColorStop(1, "rgba(255,210,120,0)");
   c.fillStyle = g; c.fillRect(0, 0, 48, 48); t.refresh();
 }
+
+// ------------------------------------------------------------------ the character sheet portrait
+/** God colors and emblems (8×8), for the halo of the god who favors you most. */
+const GOD_HUE: Record<string, string> = { Zeus: "#d63a2a", Hera: "#4f7fd1", Poseidon: "#3fa9a0", Demeter: "#6fae52", Athena: "#4b4fa8", Apollo: "#e8b84a", Artemis: "#b9c4d8", Ares: "#b02a3a", Aphrodite: "#f2a6c4", Hephaestus: "#e6874a", Hermes: "#c9479a", Dionysus: "#7a3f96", Hades: "#3a2a4a", Hecate: "#5a3a7a" };
+function emblem(c: Ctx, x: number, y: number, god: string, col: string) {
+  const p = (dx: number, dy: number, w = 1, h = 1) => px(c, x + dx, y + dy, w, h, col);
+  switch (god) {
+    case "Zeus": p(4, 0, 2); p(3, 1, 2); p(2, 2, 3); p(3, 3, 3); p(4, 4, 2); p(3, 5, 2); p(2, 6); p(1, 7); break; // a thunderbolt
+    case "Hera": p(2, 1, 4, 5); px(c, x + 3, y + 2, 2, 3, "#2a5a8a"); px(c, x + 3, y + 3, 1, 1, "#f2d040"); break; // a peacock's eye
+    case "Poseidon": p(0, 1, 1, 2); p(3, 0, 1, 3); p(6, 1, 1, 2); p(0, 3, 7); p(3, 3, 1, 5); break; // a trident
+    case "Demeter": p(3, 0, 1, 8); p(2, 1); p(4, 1); p(2, 3); p(4, 3); p(1, 2); p(5, 2); p(1, 4); p(5, 4); break; // an ear of grain
+    case "Athena": p(1, 1, 6, 6); px(c, x + 2, y + 2, 2, 2, "#f2e6c9"); px(c, x + 5, y + 2, 2, 2, "#f2e6c9"); px(c, x + 2, y + 2, 1, 1, "#1a1410"); px(c, x + 5, y + 2, 1, 1, "#1a1410"); p(3, 5, 2); break; // an owl
+    case "Apollo": p(3, 3, 2, 2); for (const [a, b] of [[3, 0], [3, 6], [0, 3], [6, 3], [1, 1], [5, 1], [1, 5], [5, 5]]) p(a, b, 1, 1); break; // the sun
+    case "Artemis": p(2, 0, 2); p(1, 1, 2); p(1, 2, 1, 4); p(1, 6, 2); p(2, 7, 2); break; // a crescent moon
+    case "Ares": p(1, 1, 6, 6); px(c, x + 2, y + 2, 4, 4, "#1f1712"); p(3, 3, 2, 2); break; // a round shield
+    case "Aphrodite": p(1, 1, 2, 2); p(4, 1, 2, 2); p(1, 2, 5, 2); p(2, 4, 3); p(3, 5); break; // a heart (her dove would not fit)
+    case "Hephaestus": p(0, 3, 7, 2); p(2, 5, 3, 2); p(1, 7, 5); p(5, 1, 1, 2); break; // an anvil
+    case "Hermes": p(3, 0, 1, 8); p(1, 1, 2); p(4, 1, 2); p(2, 3); p(4, 3); p(2, 5); p(4, 5); break; // a caduceus
+    case "Dionysus": for (const [a, b] of [[2, 1], [4, 1], [1, 3], [3, 3], [5, 3], [2, 5], [4, 5], [3, 7]]) p(a, b, 2, 2); break; // grapes
+    case "Hades": p(2, 0, 1, 3); p(5, 0, 1, 3); p(2, 3, 4); p(3, 3, 2, 5); break; // a bident
+    case "Hecate": p(2, 0, 3, 3); px(c, x + 3, y + 1, 1, 1, "#1f1712"); p(3, 3, 1, 5); p(4, 5, 2); p(4, 7, 2); break; // a key
+  }
+}
+/** Things in hand (from the highest Aretai) and on the head (from the second), drawn on a 64×64 portrait. */
+function handItem(c: Ctx, ar: string) {
+  const p = (x: number, y: number, w: number, h: number, col: string) => px(c, x, y, w, h, col);
+  switch (ar) {
+    case "Kratos": p(46, 20, 5, 30, "#6b4a2b"); p(44, 16, 9, 9, "#5a3d22"); p(45, 18, 2, 2, "#3a2810"); break; // a club
+    case "Thymos": p(47, 4, 2, 52, "#7a5a33"); p(45, 2, 6, 6, "#c4a060"); p(46, 1, 4, 1, "#e0c080"); break; // a spear
+    case "Aiolos": p(47, 12, 2, 44, "#c9a35a"); p(44, 12, 8, 2, "#e8dcc0"); p(43, 9, 3, 3, "#e8dcc0"); p(50, 9, 3, 3, "#e8dcc0"); break; // a herald's staff, winged
+    case "Pneuma": p(47, 14, 2, 42, "#8a6a3a"); p(44, 8, 8, 9, "#5a7a2a"); p(45, 9, 2, 2, "#7a9a3a"); p(48, 12, 2, 2, "#7a9a3a"); break; // the thyrsus
+    case "Ourania": p(42, 28, 12, 10, "#a8844a"); p(42, 14, 2, 15, "#e8dcc0"); p(52, 14, 2, 15, "#e8dcc0"); p(42, 14, 12, 2, "#6b4a2b"); for (const x of [45, 48, 51]) p(x, 16, 1, 13, "#f2ecd8"); break; // a lyre
+    case "Logos": p(42, 30, 14, 9, "#e8dcc0"); p(41, 29, 2, 11, "#a8844a"); p(55, 29, 2, 11, "#a8844a"); for (const y of [32, 34, 36]) p(44, y, 10, 1, "#8a7a62"); break; // a scroll
+    case "Gnosis": p(47, 16, 1, 34, "#6a8a6a"); p(44, 8, 7, 10, "#3a7a8a"); p(46, 10, 3, 5, "#2a5a8a"); p(47, 12, 1, 1, "#f2d040"); break; // a peacock feather
+    case "Metis": p(47, 8, 2, 48, "#7a5a33"); p(42, 4, 2, 7, "#a8a8a0"); p(47, 2, 2, 8, "#a8a8a0"); p(52, 4, 2, 7, "#a8a8a0"); p(42, 10, 12, 2, "#a8a8a0"); break; // a trident
+    case "Techne": p(47, 22, 2, 30, "#6b4a2b"); p(42, 18, 12, 6, "#7a7a80"); p(42, 18, 12, 1, "#a8a8b0"); break; // a hammer
+    case "Oikos": p(47, 24, 2, 30, "#6b4a2b"); p(40, 14, 3, 3, "#b8b8b0"); p(42, 12, 6, 2, "#b8b8b0"); p(47, 14, 3, 10, "#b8b8b0"); p(38, 16, 3, 6, "#e0c060"); break; // a sickle and grain
+    case "Kardia": p(48, 8, 2, 46, "#6b4a2b"); p(46, 6, 2, 4, "#6b4a2b"); p(46, 52, 2, 4, "#6b4a2b"); p(44, 9, 1, 44, "#e8e8e0"); break; // a bow
+    case "Phoenix": p(42, 18, 10, 12, "#c9a35a"); p(44, 20, 6, 8, "#e8f0f0"); p(46, 30, 2, 18, "#c9a35a"); break; // a bronze mirror
+  }
+}
+function headItem(c: Ctx, ar: string, hair: string) {
+  const p = (x: number, y: number, w: number, h: number, col: string) => px(c, x, y, w, h, col);
+  switch (ar) {
+    case "Kratos": p(20, 8, 24, 10, "#c8a050"); p(18, 14, 4, 22, "#b89040"); p(42, 14, 4, 22, "#b89040"); p(24, 6, 4, 4, "#c8a050"); p(36, 6, 4, 4, "#c8a050"); break; // a lion-skin hood
+    case "Thymos": p(21, 8, 22, 12, "#b8883a"); p(21, 18, 4, 10, "#b8883a"); p(39, 18, 4, 10, "#b8883a"); p(28, 1, 8, 9, "#b02a3a"); p(30, 0, 4, 2, "#d04050"); break; // a crested helmet
+    case "Aiolos": p(14, 12, 36, 4, "#8a6a3a"); p(22, 6, 20, 7, "#9a7a4a"); p(20, 9, 2, 3, "#e8dcc0"); p(42, 9, 2, 3, "#e8dcc0"); break; // a petasos, winged
+    case "Pneuma": for (let x = 20; x < 44; x += 4) { p(x, 11, 4, 3, "#4a7a2a"); p(x + 1, 10, 2, 1, "#6a9a3a"); } p(22, 13, 3, 3, "#5a2a6a"); p(38, 13, 3, 3, "#5a2a6a"); break; // ivy and grapes
+    case "Ourania": for (let x = 20; x < 44; x += 3) p(x, 11 + (x % 2), 3, 2, "#5a8a3a"); break; // a laurel wreath
+    case "Logos": for (let x = 20; x < 44; x += 3) p(x, 11, 3, 2, "#7a8a5a"); p(31, 9, 2, 2, "#7a8a5a"); break; // an olive wreath
+    case "Gnosis": p(22, 9, 20, 3, "#c9a35a"); p(30, 6, 4, 4, "#c9a35a"); p(31, 7, 2, 2, "#4f7fd1"); break; // a diadem
+    case "Metis": p(21, 9, 22, 6, "#3a6a7a"); p(23, 7, 18, 3, "#3a6a7a"); break; // a fisher's cap
+    case "Techne": p(22, 4, 20, 10, "#8a6a4a"); p(24, 2, 16, 3, "#8a6a4a"); break; // a craftsman's pilos
+    case "Oikos": p(14, 12, 36, 3, "#d8c070"); p(22, 6, 20, 7, "#e0c880"); break; // a straw hat
+    case "Kardia": p(20, 11, 24, 3, "#8a5a3a"); p(42, 8, 3, 5, "#e8e8e0"); break; // a headband and a feather
+    case "Phoenix": for (let x = 20; x < 44; x += 4) { p(x, 10, 3, 3, ["#f2a6c4", "#f2e6c9", "#e85f7a"][(x / 4) % 3]); } break; // a flower crown
+  }
+  void hair;
+}
+/**
+ * A portrait for the character sheet: your own colors; in hand, the mark of your highest Aretai; on your head, your second's;
+ * behind you, the halo of the god who favors you most (brighter with higher favor); and a shadow if a god is angry with you.
+ */
+export function makePortrait(scene: Phaser.Scene, key: string, look: { tunic: string; hair: string; skin: string }, first: string, second: string, god: string | null, tier: number, wrath: string | null) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  canvasTex(scene, key, 64, 64, (c) => {
+    // The ground behind: a god's color, or plain earth.
+    px(c, 0, 0, 64, 64, "#2a2018");
+    if (god) {
+      const col = GOD_HUE[god] ?? "#c9a35a", rings = Math.min(5, 1 + Math.floor(tier));
+      for (let r = 30; r > 0; r -= 2) { c.globalAlpha = Math.min(0.75, (0.05 + (rings * 0.04)) * (1 - r / 34) * 2.2); c.fillStyle = col; c.beginPath(); c.arc(32, 22, r, 0, Math.PI * 2); c.fill(); }
+      c.globalAlpha = 1;
+      if (tier >= 2) for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; px(c, 32 + Math.round(Math.cos(a) * (24 + tier)), 22 + Math.round(Math.sin(a) * (24 + tier)), 1, 1, col); }
+      emblem(c, 3, 3, god, col);
+    }
+    if (wrath) { c.globalAlpha = 0.55; for (let i = 0; i < 64; i += 2) { px(c, 0, i, 4 + ((i * 7) % 5), 2, "#0a0610"); px(c, 60 - ((i * 5) % 5), i, 6, 2, "#0a0610"); } c.globalAlpha = 1; emblem(c, 53, 53, wrath, "#7a5a8a"); }
+    // The figure: shoulders and tunic, neck, head, hair, face.
+    const { tunic, hair, skin } = look;
+    px(c, 14, 40, 36, 24, tunic); px(c, 12, 44, 4, 20, tunic); px(c, 48, 44, 4, 20, tunic);
+    px(c, 14, 46, 36, 2, "rgba(0,0,0,0.15)"); px(c, 30, 40, 4, 10, "rgba(0,0,0,0.12)");
+    px(c, 28, 34, 8, 7, skin);
+    px(c, 22, 12, 20, 24, skin); px(c, 20, 18, 2, 8, skin); px(c, 42, 18, 2, 8, skin);
+    px(c, 21, 9, 22, 7, hair); px(c, 20, 12, 3, 12, hair); px(c, 41, 12, 3, 12, hair);
+    px(c, 26, 22, 3, 2, "#1a1410"); px(c, 35, 22, 3, 2, "#1a1410"); px(c, 26, 20, 3, 1, hair); px(c, 35, 20, 3, 1, hair);
+    px(c, 31, 24, 2, 5, "rgba(0,0,0,0.12)"); px(c, 28, 30, 8, 1, "#8a4a3a");
+    px(c, 46, 44, 5, 8, skin); // the hand that holds
+    headItem(c, second, hair);
+    handItem(c, first);
+  });
+}
+
+// ------------------------------------------------------------------ the creation backdrop
+/**
+ * A landscape behind the wheel at creation: the step's place on the wheel sets the scene (Artemis' forest under the moon,
+ * Zeus' storm over Olympus...); the choice within it lends the sky its god's color and emblem. Painted small and scaled up.
+ */
+const WHEEL_GOD = ["Aphrodite", "Artemis", "Demeter", "Hephaestus", "Poseidon", "Hera", "Athena", "Apollo", "Dionysus", "Hermes", "Ares", "Zeus"];
+export function paintCreationBg(scene: Phaser.Scene, key: string, theme: number, accent: number) {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const W = 320, H = 214, tg = WHEEL_GOD[theme], ag = WHEEL_GOD[accent];
+  canvasTex(scene, key, W, H, (c) => {
+    const mix = (a: string, b: string, t: number) => { const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16); const ch = (s: number) => Math.round(((pa >> s) & 255) * (1 - t) + ((pb >> s) & 255) * t); return `rgb(${ch(16)},${ch(8)},${ch(0)})`; };
+    const sky = c.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, mix("#0d1220", GOD_HUE[ag], 0.5)); sky.addColorStop(0.55, mix("#1f2a3a", GOD_HUE[tg], 0.45)); sky.addColorStop(1, "#0d0a08");
+    c.fillStyle = sky; c.fillRect(0, 0, W, H);
+    let seed = (theme * 131 + accent * 17 + 7) >>> 0; const r = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const hill = (y0: number, amp: number, col: string, f = 0.03) => { c.fillStyle = col; c.beginPath(); c.moveTo(0, H); for (let x = 0; x <= W; x += 4) c.lineTo(x, y0 + Math.sin(x * f + theme) * amp + Math.sin(x * f * 2.3 + accent) * amp * 0.4); c.lineTo(W, H); c.fill(); };
+    const dark = (t: number) => mix("#0d0a08", GOD_HUE[tg], t);
+    // The scene.
+    switch (tg) {
+      case "Aphrodite": hill(150, 6, dark(0.25), 0.05); c.fillStyle = "rgba(255,230,240,0.5)"; for (let x = 0; x < W; x += 9) c.fillRect(x, 148 + Math.sin(x) * 2, 5, 1); for (let i = 0; i < 18; i++) px(c, r() * W, r() * 140, 2, 1, "#f2a6c4"); c.fillStyle = "#e8d8c8"; c.beginPath(); c.arc(250, 165, 14, Math.PI, 0); c.fill(); break; // the foam, petals, a shell
+      case "Artemis": hill(130, 10, dark(0.2)); for (let i = 0; i < 26; i++) { const x = r() * W, h = 30 + r() * 40, y = 150 - h; c.fillStyle = dark(0.12); c.beginPath(); c.moveTo(x, y); c.lineTo(x - 9, y + h); c.lineTo(x + 9, y + h); c.fill(); } hill(175, 5, dark(0.08)); break; // pines
+      case "Demeter": hill(120, 8, dark(0.3)); hill(150, 6, dark(0.45)); c.fillStyle = mix("#c8a040", GOD_HUE[tg], 0.2); for (let x = 2; x < W; x += 4) c.fillRect(x, 168 + (x % 3), 1, 14); hill(185, 3, dark(0.2)); break; // fields of grain
+      case "Hephaestus": c.fillStyle = dark(0.15); c.beginPath(); c.moveTo(60, H); c.lineTo(160, 70); c.lineTo(185, 70); c.lineTo(290, H); c.fill(); c.fillStyle = "#e6874a"; c.fillRect(162, 68, 22, 4); for (let i = 0; i < 20; i++) px(c, 165 + r() * 18, 30 + r() * 38, 1, 1, "#f2c14e"); hill(180, 4, dark(0.05)); break; // the smoking mountain
+      case "Poseidon": for (let row = 0; row < 6; row++) hill(130 + row * 14, 4 + row, mix(dark(0.3), "#3fa9a0", row * 0.08), 0.06 + row * 0.01); break; // waves
+      case "Hera": for (let i = 0; i < 60; i++) px(c, r() * W, r() * 120, 1, 1, "#e8e8f8"); hill(160, 4, dark(0.2)); for (let x = 90; x <= 230; x += 20) { c.fillStyle = "#cfc6b4"; c.fillRect(x, 120, 6, 42); } c.fillRect(84, 114, 154, 7); break; // stars over a colonnade
+      case "Athena": hill(150, 6, dark(0.25)); c.fillStyle = "#cfc6b4"; for (let x = 200; x <= 280; x += 12) c.fillRect(x, 96, 5, 40); c.beginPath(); c.moveTo(194, 96); c.lineTo(240, 78); c.lineTo(290, 96); c.fill(); for (const x of [40, 90, 140]) { c.fillStyle = dark(0.15); c.fillRect(x, 130, 4, 24); c.beginPath(); c.arc(x + 2, 126, 16, 0, Math.PI * 2); c.fillStyle = "#5a6a3a"; c.fill(); } break; // olives and a temple
+      case "Apollo": { const g = c.createRadialGradient(160, 60, 4, 160, 60, 70); g.addColorStop(0, "rgba(255,230,150,0.9)"); g.addColorStop(1, "rgba(255,200,100,0)"); c.fillStyle = g; c.fillRect(0, 0, W, H); c.strokeStyle = "rgba(255,220,140,0.35)"; for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; c.beginPath(); c.moveTo(160, 60); c.lineTo(160 + Math.cos(a) * 200, 60 + Math.sin(a) * 200); c.stroke(); } hill(160, 8, dark(0.25)); break; } // the sun
+      case "Dionysus": hill(160, 6, dark(0.2)); for (let x = 0; x < W; x += 22) { c.strokeStyle = "#4a6a2a"; c.beginPath(); c.moveTo(x, 0); c.quadraticCurveTo(x + 11, 30 + (x % 3) * 8, x + 22, 0); c.stroke(); for (let k = 0; k < 4; k++) px(c, x + 6 + k * 3, 18 + (x % 3) * 6 + (k % 2) * 3, 3, 3, "#6a3a86"); } break; // vines
+      case "Hermes": hill(140, 10, dark(0.25)); c.strokeStyle = "#a8987a"; c.lineWidth = 3; c.beginPath(); c.moveTo(0, 200); c.bezierCurveTo(100, 150, 200, 190, 320, 140); c.stroke(); c.lineWidth = 1; c.fillStyle = "rgba(240,240,250,0.25)"; for (let i = 0; i < 8; i++) c.fillRect(r() * W, 20 + r() * 80, 30 + r() * 40, 2); c.fillStyle = "#cfc6b4"; c.fillRect(240, 150, 6, 18); c.fillRect(239, 146, 8, 6); break; // a road, wind, a herm
+      case "Ares": hill(140, 12, dark(0.25)); for (let x = 20; x < W; x += 9) { c.fillStyle = "#3a2a1a"; c.fillRect(x, 120 + (x % 5), 1, 50); px(c, x - 1, 117 + (x % 5), 3, 4, "#a89060"); } hill(175, 4, dark(0.1)); break; // a line of spears
+      case "Zeus": c.fillStyle = "rgba(30,34,48,0.8)"; for (let i = 0; i < 14; i++) { c.beginPath(); c.arc(r() * W, 20 + r() * 40, 20 + r() * 20, 0, Math.PI * 2); c.fill(); } c.fillStyle = dark(0.2); c.beginPath(); c.moveTo(40, H); c.lineTo(170, 80); c.lineTo(300, H); c.fill(); c.strokeStyle = "#fff6c8"; c.lineWidth = 2; c.beginPath(); c.moveTo(120, 30); c.lineTo(110, 60); c.lineTo(125, 60); c.lineTo(108, 100); c.stroke(); c.lineWidth = 1; break; // storm over Olympus
+    }
+    // The choice's god: an emblem in the sky, large.
+    c.globalAlpha = 0.6;
+    const s = 3; const tmp = document.createElement("canvas"); tmp.width = 8; tmp.height = 8; const tc = tmp.getContext("2d")!;
+    emblem(tc, 0, 0, ag, GOD_HUE[ag]);
+    c.drawImage(tmp, 8, 8, 8 * s, 8 * s); // top left, clear of the wheel and the words
+    c.globalAlpha = 1;
+  });
+}

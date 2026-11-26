@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
-import { makeTextures, makePlayerTexture, T, TILE, POSES, POSE } from "./textures";
+import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, T, TILE, POSES, POSE } from "./textures";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
@@ -2063,7 +2063,7 @@ class CreationScene extends Phaser.Scene {
   constructor() { super("Creation"); }
 
   create() {
-    this.done = false; this.naming = false; this.note = ""; this.sel = 0; this.mode = "four";
+    this.done = false; this.naming = false; this.note = ""; this.sel = 0; this.mode = "four"; this.bg = undefined; this.bgKey = "";
     this.name = NAMES[d12i() % NAMES.length];
     this.rollAll();
     this.cameras.main.setBackgroundColor("#1f2a3a");
@@ -2123,8 +2123,30 @@ class CreationScene extends Phaser.Scene {
     this.picks[step] = i; this.chosen.add(step); this.note = ""; this.draw();
   }
 
+  bg?: Phaser.GameObjects.Image; bgKey = "";
+  /** The backdrop: the selected step's place on the wheel sets the scene; the choice within it, the sky's god. */
+  drawBackdrop() {
+    const s = this.sel;
+    let accent = s;
+    if (TABLES[s] && s !== 11) accent = this.picks[s] ?? s;
+    else if (s === 5) accent = ARETAI_ORDER.reduce((best, a, i) => (this.aretai[a] + this.bonus(a) > this.aretai[ARETAI_ORDER[best]] + this.bonus(ARETAI_ORDER[best]) ? i : best), 0);
+    else if (s === 8) { const top = Object.entries(this.favor).sort((a, b) => b[1] - a[1])[0]; const i = top && top[1] > 0 ? WHEEL.findIndex((w) => w.god === top[0]) : -1; accent = i >= 0 ? i : s; }
+    else if (s === 9) accent = this.res.Health >= this.res.Wealth && this.res.Health >= this.res.Stealth ? 10 : this.res.Wealth >= this.res.Stealth ? 9 : 1;
+    const key = `${s}:${accent}`;
+    if (key === this.bgKey && this.bg) return;
+    this.bgKey = key;
+    paintCreationBg(this, "creationBg", s, accent);
+    if (!this.bg) {
+      this.bg = this.add.image(0, 0, "creationBg").setOrigin(0, 0).setScale(3).setDepth(-10);
+      this.add.rectangle(0, 0, W, H, 0x0d1018, 0.12).setOrigin(0, 0).setDepth(-9); // a veil, so the words stand out
+      this.add.rectangle(484, 44, W - 500, H - 150, 0x0d1018, 0.55).setOrigin(0, 0).setDepth(-9); // behind the step's text
+      this.add.rectangle(24, H - 104, W - 48, 92, 0x0d1018, 0.55).setOrigin(0, 0).setDepth(-9); // behind the modes and the way forward
+    } else this.bg.setTexture("creationBg");
+  }
+
   draw() {
     this.root?.destroy();
+    this.drawBackdrop();
     const root = this.add.container(0, 0); this.root = root;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     const txt = (x: number, y: number, t: string, size = 14, color = "#f2e6c9", extra: object = {}) => { const o = this.add.text(x, y, t, { ...font, fontSize: `${size}px`, color, ...extra }); root.add(o); return o; };
@@ -6390,7 +6412,7 @@ class UIScene extends Phaser.Scene {
     const w = 820, x0 = (W - w) / 2, y0 = (H - h) / 2 - 10;
     const root = this.add.container(0, 0).setDepth(23);
     this.sheetPanel = root;
-    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 1).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
     root.add(this.add.text(W / 2, y0 + 12, title, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
     root.add(this.add.text(W / 2, y0 + 38, sub, { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
     return { root, font, w, h, x0, y0 };
@@ -6436,16 +6458,45 @@ class UIScene extends Phaser.Scene {
 
   buildSelf() {
     const b = G.data.birth;
-    const { root, font, x0, y0, h } = this.sheetFrame(`${G.data.name || "You"}  ·  Young Adult  ·  Life Thread ${G.data.lifeThread}`, b ? `${b.sign} · born to ${b.birthright} · trained in ${b.training}.  Spend Ambrosia to raise your Aretai.` : "Twelve excellences, in the order of the Cosmic Wheel. Spend Ambrosia to raise them.", 600);
+    // Who you are, as the world would see you: your two strongest Aretai and the gods who stand closest.
+    const ranked = [...WHEEL].sort((x, y) => (G.data.aretai[y.aretai] ?? 0) - (G.data.aretai[x.aretai] ?? 0));
+    const first = ranked[0].aretai, second = ranked[1].aretai;
+    const favors = [...TWELVE, ...CHTHONIC].map((g) => [g, G.favor(g)] as [string, number]);
+    const best = favors.filter(([, f]) => f >= 1).sort((x, y) => y[1] - x[1])[0] ?? null;
+    const worst = favors.filter(([, f]) => f <= -4).sort((x, y) => x[1] - y[1])[0] ?? null;
+    const tier = best ? (best[1] >= 10 ? 4 : best[1] >= 8 ? 3 : best[1] >= 4 ? 2 : 1) : 0;
+    makePortrait(this, "portrait", G.data.look, first, second, best?.[0] ?? null, tier, worst?.[0] ?? null);
+    const EPITHET: Record<string, string> = { Phoenix: "the Charming", Kardia: "the Hunter", Oikos: "of the Hearth", Techne: "the Skilled", Metis: "the Cunning", Gnosis: "the Knowing", Logos: "the Well-spoken", Ourania: "the Sweet-voiced", Pneuma: "the Inspired", Aiolos: "the Swift-footed", Thymos: "the Bold", Kratos: "the Strong" };
+    const favorWord = best ? `${best[1] >= 10 ? "chosen of" : best[1] >= 8 ? "dear to" : best[1] >= 4 ? "beloved of" : "noticed by"} ${best[0]}` : "";
+    const title = `${G.data.name || "You"} ${EPITHET[first]}${favorWord ? `, ${favorWord}` : ""}`;
+    const { root, font, x0, y0, h } = this.sheetFrame(title, b ? `${b.sign} · born to ${b.birthright} · trained in ${b.training} · Young Adult` : "Young Adult", 586);
+    // The portrait and the body.
+    root.add(this.add.rectangle(x0 + 22, y0 + 62, 198, 198, 0x0d0a08).setOrigin(0, 0).setStrokeStyle(2, 0x8a6a4a));
+    root.add(this.add.image(x0 + 25, y0 + 65, "portrait").setOrigin(0, 0).setScale(3));
+    const stat = (y: number, label: string, val: string, color = "#f2e6c9") => { root.add(this.add.text(x0 + 24, y, label, { ...font, fontSize: "12px", color: "#c9b48f" })); root.add(this.add.text(x0 + 218, y, val, { ...font, fontSize: "13px", color }).setOrigin(1, 0)); };
+    let sy = y0 + 270;
+    stat(sy, "Vitality", `${Math.ceil(G.data.vitality)} / ${G.vitalityMax}`, "#e8a090"); sy += 18;
+    stat(sy, "Fatigue", `${Math.round(G.data.fatigue)} / 100`); sy += 18;
+    stat(sy, "Life Thread", `${G.data.lifeThread} of ${START_LIFE_THREAD}`, "#e8c0b0"); sy += 18;
+    stat(sy, "Health · Stealth", `${G.data.health} · ${G.data.stealth}`); sy += 18;
+    stat(sy, "Essence (E W A F)", (["Earth", "Water", "Air", "Fire"] as const).map((k) => Math.round(G.essenceMax[k])).join(" · ")); sy += 18;
+    stat(sy, "Purse", money(G.data.silver), "#fbe39a"); sy += 18;
+    const ml = G.data.meal;
+    if (ml.aretai && ml.aretai.until > G.absHour) { stat(sy, "Fed", `${ml.aretai.ar} +${ml.aretai.n}`); sy += 18; }
+    sy += 6;
+    const looks = [`In hand: the mark of ${first}`, `On the head: the mark of ${second}`, best ? `Behind: ${best[0]}'s light (${TIER_WORDS[tierOf(best[1])]})` : "No god stands behind you yet", worst ? `A shadow: ${worst[0]} (${TIER_WORDS[tierOf(worst[1])]})` : ""].filter(Boolean);
+    root.add(this.add.text(x0 + 24, sy, looks.join("\n"), { ...font, fontSize: "10.5px", color: "#a89a80", lineSpacing: 1, wordWrap: { width: 196 } }));
+    // The Aretai, in the order of the Wheel, with the cost to raise each.
+    const ax = x0 + 246;
+    root.add(this.add.text(ax, y0 + 60, "ARETAI  (spend Ambrosia to raise)", { ...font, fontSize: "12px", color: "#c9b48f" }));
     WHEEL.forEach((w, i) => {
-      const col = i < 6 ? 0 : 1, row = i % 6;
-      const x = x0 + 24 + col * 400, y = y0 + 66 + row * 40;
-      const v = G.data.aretai[w.aretai] ?? 0, cost = raiseCost(v);
-      root.add(this.add.rectangle(x, y + 4, 10, 10, Phaser.Display.Color.HexStringToColor(w.color).color).setOrigin(0, 0));
-      root.add(this.add.text(x + 18, y, `${w.aretai}  ${v}`, { ...font, fontSize: "16px" }));
-      root.add(this.add.text(x + 18, y + 19, `${w.god} · ${w.benefit}`, { ...font, fontSize: "10px", color: "#c9b48f", wordWrap: { width: 230 } }));
+      const y = y0 + 80 + i * 22, v = G.data.aretai[w.aretai] ?? 0, cost = raiseCost(v);
+      root.add(this.add.rectangle(ax, y + 4, 10, 10, Phaser.Display.Color.HexStringToColor(w.color).color).setOrigin(0, 0));
+      root.add(this.add.text(ax + 16, y, `${w.aretai}`, { ...font, fontSize: "14px", color: w.aretai === first || w.aretai === second ? "#fbe39a" : "#f2e6c9" }));
+      root.add(this.add.text(ax + 112, y, `${v}`, { ...font, fontSize: "14px" }).setOrigin(1, 0));
+      root.add(this.add.text(ax + 124, y + 2, `${w.god} · ${w.benefit}`, { ...font, fontSize: "10px", color: "#a89a80" }));
       const ok = G.data.currencies.Ambrosia >= cost && v < 12;
-      const t = this.add.text(x + 260, y + 2, v >= 12 ? "at its peak" : `raise: ${cost} Ambrosia`, { ...font, fontSize: "13px", color: ok ? "#f2e6c9" : "#8d877b" });
+      const t = this.add.text(ax + 548, y + 1, v >= 12 ? "at its peak" : `+1: ${cost} Ambrosia`, { ...font, fontSize: "11px", color: ok ? "#f2e6c9" : "#6d675b" }).setOrigin(1, 0);
       if (ok) t.setInteractive({ useHandCursor: true }).on("pointerover", () => t.setColor("#f2c14e")).on("pointerout", () => t.setColor("#f2e6c9")).on("pointerdown", () => {
         G.data.currencies.Ambrosia -= cost; G.data.aretai[w.aretai] = v + 1;
         G.essenceMax = essencePools(G.data.aretai);
@@ -6454,16 +6505,13 @@ class UIScene extends Phaser.Scene {
       });
       root.add(t);
     });
-    let y = y0 + 66 + 6 * 40 + 10;
-    for (const c of CURRENCIES) {
-      root.add(this.add.text(x0 + 24, y, `${c}  ${G.data.currencies[c]}`, { ...font, fontSize: "15px", color: c === "Hubris" ? "#e09080" : "#fbe39a" }));
-      root.add(this.add.text(x0 + 160, y + 2, CURRENCY_DESC[c], { ...font, fontSize: "12px", color: "#c9b48f" }));
-      y += 24;
-    }
+    // The cosmic currencies, and where you stand with the gods.
+    let y = y0 + 80 + 12 * 22 + 8;
+    root.add(this.add.text(ax, y, CURRENCIES.map((c) => `${c} ${G.data.currencies[c]}`).join("     "), { ...font, fontSize: "14px", color: "#fbe39a" })); y += 22;
+    const top = favors.filter(([, f]) => f !== 0).sort((p, q) => Math.abs(q[1]) - Math.abs(p[1])).slice(0, 6);
+    root.add(this.add.text(ax, y, top.length ? `The gods: ${top.map(([g, f]) => `${g} ${f > 0 ? "+" : ""}${f}`).join(" · ")}  (F for more)` : "No god knows you yet. (F for the gods)", { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 548 } })); y += 22;
     if (b) {
-      y += 6;
-      root.add(this.add.text(x0 + 24, y, `Hamartia: ${b.hamartia[0]}. ${b.hamartia[1]}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } })); y += 20;
-      root.add(this.add.text(x0 + 24, y, `Astheneia: ${b.astheneia[0]}. ${b.astheneia[1]}   ·   Moros: hidden by the Fates.   ·   Health ${G.data.health} (Vitality ${Math.ceil(G.data.vitality)}/${G.vitalityMax}) · Stealth ${G.data.stealth}`, { ...font, fontSize: "12px", color: "#e0d2b4", wordWrap: { width: 770 } }));
+      root.add(this.add.text(ax, y, `Hamartia: ${b.hamartia[0]}. ${b.hamartia[1]}\nAstheneia: ${b.astheneia[0]}. ${b.astheneia[1]}\nMoros: hidden by the Fates.`, { ...font, fontSize: "11px", color: "#c9b48f", wordWrap: { width: 548 }, lineSpacing: 1 }));
     }
     root.add(this.add.text(x0 + 820 / 2, y0 + h - 22, "P or Esc to close   ·   F for the gods", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
   }

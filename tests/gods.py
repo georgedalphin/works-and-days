@@ -35,7 +35,7 @@ async def main():
         # 5. self sheet: raise Gnosis
         await pg.evaluate("G.data.currencies.Ambrosia=5")
         await pg.keyboard.press("p"); await pg.wait_for_timeout(300)
-        await pg.evaluate(f"{U}.sheetPanel.list.find(o=>o.input&&o.text&&o.text.startsWith('raise')&&o.y>{U}.sheetPanel.list.find(t=>t.text&&t.text.startsWith('Gnosis')).y-5&&o.y<{U}.sheetPanel.list.find(t=>t.text&&t.text.startsWith('Gnosis')).y+5).emit('pointerdown')")
+        await pg.evaluate(f"{U}.sheetPanel.list.find(o=>o.input&&o.text&&o.text.startsWith('+1:')&&o.y>{U}.sheetPanel.list.find(t=>t.text&&t.text.startsWith('Gnosis')).y-5&&o.y<{U}.sheetPanel.list.find(t=>t.text&&t.text.startsWith('Gnosis')).y+5).emit('pointerdown')")
         await pg.wait_for_timeout(100); await pg.screenshot(path="/home/claude/test/e1_self.png")
         print("Gnosis", await pg.evaluate("G.data.aretai.Gnosis"), "Water max", await pg.evaluate("G.essenceMax.Water"), "Ambrosia", await pg.evaluate("G.data.currencies.Ambrosia"))
         await pg.keyboard.press("Escape"); await pg.wait_for_timeout(100)
