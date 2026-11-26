@@ -61,9 +61,9 @@ async def main():
             await pg.evaluate(f"{U}.closeTalk()")
         if "isle" in which:
             for want in ["nymph", "sirens", "goats", "sacred", "forge", "reef"]:
-                f = await pg.evaluate(f"(()=>{{const s={Wd}; for(let r=2;r<60;r++) for(let y=-r;y<=r;y++) for(let x=-r;x<=r;x++){{ const f=s.siteFns.isleAt(G.data.seed,x,y); if(f && f.isle==='{want}' && f.x0===x && f.y0===y && !G.data.screens[x+','+y]) return f; }} return null; }})()")
+                f = await pg.evaluate(f"(()=>{{const s={Wd}; for(let r=2;r<60;r++) for(let y=-r;y<=r;y++) for(let x=-r;x<=r;x++){{ const f=s.siteFns.isleAt(G.data.seed,x,y); if(f && f.isle==='{want}' && f.x0===x && f.y0===y && !G.data.screens[x+','+y] && !G.data.screens[(x-1)+','+y] && s.isleFits(f)) return f; }} return null; }})()")
                 if not f: print(want, "none found"); continue
-                await go(pg, f["x0"], f["y0"], "G.data.fromSea=true; G.data.boatCarry=true;")
+                await go(pg, f["x0"], f["y0"], f"G.data.screens['{f['x0']-1},{f['y0']}']={{terrain:6,special:false,feature:'Open sea',cleared:[]}}; G.data.boatCarry=true;")
                 print(want, f["w"], "x", f["h"], ":", await log(pg,1))
                 grids = {}
                 for iy in range(f["h"]):
@@ -87,7 +87,7 @@ async def main():
         if "sea" in which:
             # open sea: row in from a coast; can't walk off without a boat
             k = await pg.evaluate(f"(()=>{{for(let x=8;x<40;x++){{ const s={Wd}; if(!s.siteFns.isleAt(G.data.seed,x,9) && !s.siteFns.fortressAt(G.data.seed,x,9) && !G.data.screens[x+',9']) return x; }} }})()")
-            await go(pg, k, 9, "G.data.fromSea=true; G.data.boatCarry=true;")
+            await go(pg, k, 9, f"G.data.screens['{k-1},9']={{terrain:6,special:false,feature:'Open sea',cleared:[]}}; G.data.boatCarry=true;")
             print("sea:", await log(pg,1), "| terrain", await pg.evaluate(f"{Wd}.rec.terrain"), "boat", await pg.evaluate(f"!!{Wd}.boat"), "gates", await pg.evaluate(f"{Wd}.gates.N.length"))
             await pg.screenshot(path=SHOT+"site_sea.png")
             await pg.evaluate(f"(()=>{{const s={Wd}; s.player.setPosition(4, 200); }})()"); await pg.wait_for_timeout(600)

@@ -13,7 +13,7 @@ export const SW = 40, SH = 30; // a screen, in tiles
 
 export type SiteKind = "fortress" | "isle" | "delphi" | "knossos";
 export type Fate = "brigands" | "beast" | "haunted";
-export type IsleType = "nymph" | "sirens" | "goats" | "sacred" | "forge" | "reef";
+export type IsleType = "nymph" | "sirens" | "goats" | "sacred" | "forge" | "reef" | "crete";
 export type Side = "N" | "S" | "E" | "W";
 
 /** What the seed says is at a place: pure, the same every time it is asked. */
@@ -228,14 +228,16 @@ export const ISLES: Record<IsleType, { names: string[]; god: string; land: numbe
   sacred: { names: ["Ortygia"], god: "Apollo", land: 12, line: "Ortygia, the quail isle, where Leto bore Artemis. A single palm stands over an old altar." },
   forge: { names: ["Lemnos"], god: "Hephaestus", land: 11, line: "Lemnos, where Hephaestus fell from heaven and kept his forge. The ground is warm, and smoke rises from cracks in it." },
   reef: { names: ["a nameless reef"], god: "Poseidon", land: 7, line: "A low reef of sand and rock, a ship's ribs bleaching on it." },
+  crete: { names: ["Crete"], god: "Zeus", land: 3, line: "Crete of the hundred cities, out in the wine-dark sea: Minos' island, where Zeus was born in a cave on Ida. Somewhere on it stands Knossos." },
 };
 
 /** Is a tile of the isle (site coordinates) dry land? A wandering blob in the middle, smaller for a reef. */
 export function isleLand(si: SiteInfo) {
   const W = si.w * SW, H = si.h * SH, r = rng(si.seed ^ 0x1a7d);
-  const cx = W / 2, cy = H / 2, scale = si.isle === "reef" ? 0.32 : 0.82;
+  const cx = W / 2, cy = H / 2, scale = si.isle === "reef" ? 0.32 : si.isle === "crete" ? 0.94 : 0.82;
   const A = (W / 2 - 6) * scale, B = (H / 2 - 5) * scale, p = [r() * 6.28, r() * 6.28, r() * 6.28];
   return (x: number, y: number) => {
+    if (x < 4 || y < 4 || x > W - 5 || y > H - 5) return 9; // open water all round the isle's edges
     const u = (x + 0.5 - cx) / A, v = (y + 0.5 - cy) / B, t = Math.atan2(v, u);
     const R = 1 + 0.12 * Math.sin(2 * t + p[0]) + 0.08 * Math.sin(3 * t + p[1]) + 0.05 * Math.sin(5 * t + p[2]);
     return Math.hypot(u, v) / R; // < 1 is land; near 1 is the beach
@@ -275,6 +277,25 @@ export function pickUniqueSpot(seed: number, salt: number, lo: number, hi: numbe
     if (ok(x0, y0)) return `${x0},${y0}`;
   }
   return null;
+}
+
+/** Crete: one great isle in each world, six screens wide and three high, far out at sea; Knossos stands on one of its screens. */
+export function creteAt(anchors: Record<string, string | undefined>, wx: number, wy: number): SiteInfo | null {
+  const a = anchors.crete; if (!a) return null;
+  const [x0, y0] = a.split(",").map(Number);
+  if (wx < x0 || wy < y0 || wx >= x0 + 6 || wy >= y0 + 3) return null;
+  return { id: "Crete", kind: "isle", isle: "crete", x0, y0, w: 6, h: 3, seed: (x0 * 92821 + y0 * 68917 + 0xc4e7) >>> 0 };
+}
+/** Which of Crete's screens Knossos is on: one of those wholly dry in the middle, chosen by the world's seed. */
+export function pickKnossosScreen(si: SiteInfo, seed: number): string {
+  const land = isleLand(si), r = rng(hash(seed, si.x0, si.y0, 0x6b05)), good: [number, number][] = [];
+  for (let iy = 0; iy < si.h; iy++) for (let ix = 0; ix < si.w; ix++) {
+    let ok = true;
+    for (let y = 2; y <= 27 && ok; y += 5) for (let x = 2; x <= 37 && ok; x += 5) if (land(ix * SW + x, iy * SH + y) > 0.75) ok = false;
+    if (ok) good.push([ix, iy]);
+  }
+  const [ix, iy] = good.length ? good[Math.floor(r() * good.length)] : [2, 1];
+  return `${si.x0 + ix},${si.y0 + iy}`;
 }
 
 export interface UniqueLayout {
@@ -332,7 +353,7 @@ export function delphiLayout(T: Tiles): UniqueLayout {
  * Knossos: Minos' palace, many-roomed and unwalled, round a great paved court. Red columns, long storerooms of jars,
  * the throne room off the court, and in the northwest wing a stair going down into the dark: the Labyrinth.
  */
-export function knossosLayout(T: Tiles): UniqueLayout {
+export function knossosLayoutGrand(T: Tiles): UniqueLayout {
   const W = 80, H = 60;
   const cells: (FortCell | undefined)[][] = []; for (let y = 0; y < H; y++) cells.push(new Array(W).fill(undefined));
   const set = (x: number, y: number, c: FortCell) => { if (x >= 0 && y >= 0 && x < W && y < H) cells[y][x] = { ...cells[y][x], ...c }; };
@@ -370,4 +391,46 @@ export function knossosLayout(T: Tiles): UniqueLayout {
   // A road in from the south.
   for (let y = Y1; y < H; y++) for (const x of [39, 40]) set(x, y, { o: -1, g: T.PATH });
   return { cells, pithoi, treasuries: [], at: { throne: [25, 26], ariadne: [33, 26], stair: [19, 13], court: [40, 30], horns: [44, 21] } };
+}
+
+/**
+ * Knossos on Crete, on one screen: Minos' palace, unwalled, round its paved court. Plastered rooms with many ways
+ * in, red columns along the court, the throne room off its west side, storerooms of great jars, stone horns, and in
+ * the northwest wing a stair going down into the Labyrinth. Olive groves round about.
+ */
+export function knossosLayout(T: Tiles): UniqueLayout {
+  const W = 40, H = 30;
+  const cells: (FortCell | undefined)[][] = []; for (let y = 0; y < H; y++) cells.push(new Array(W).fill(undefined));
+  const set = (x: number, y: number, c: FortCell) => { if (x >= 0 && y >= 0 && x < W && y < H) cells[y][x] = { ...cells[y][x], ...c }; };
+  const r = rng(0x6b06);
+  const X0 = 4, Y0 = 3, X1 = 35, Y1 = 26;
+  const court = { x0: 15, y0: 10, x1: 25, y1: 18 };
+  const inCourt = (x: number, y: number) => x >= court.x0 && x <= court.x1 && y >= court.y0 && y <= court.y1;
+  for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
+    set(x, y, { o: -1, g: T.FLAGS });
+    if (inCourt(x, y)) continue;
+    const gx = (x - X0) % 5, gy = (y - Y0) % 4, outer = x === X0 || x === X1 || y === Y0 || y === Y1;
+    let wall = outer || gx === 0 || gy === 0;
+    if (gx === 0 && gy === 2) wall = false; // doors through every room
+    if (gy === 0 && gx === 2) wall = false;
+    if (x === 20 || y === 14) wall = false; // corridors out from the court, north, south, east and west
+    if (outer && ((x - X0) % 10 === 5 || (y - Y0) % 8 === 4)) wall = false; // and many ways in: no walls to keep anyone out
+    if (wall) set(x, y, { o: T.WALL });
+  }
+  for (let x = court.x0; x <= court.x1; x += 2) { set(x, court.y0 - 1, { o: T.COLUMN }); set(x, court.y1 + 1, { o: T.COLUMN }); }
+  set(20, court.y0 - 1, { o: -1 }); set(20, court.y1 + 1, { o: -1 });
+  // The throne room, on the court's west side.
+  for (let y = 11; y <= 16; y++) for (let x = 9; x <= 14; x++) set(x, y, { o: x === 9 || y === 11 || y === 16 ? T.WALL : -1, g: T.FLAGS });
+  set(9, 14, { o: -1 });
+  // Storerooms of jars, southwest.
+  const pithoi: [number, number][] = [];
+  for (const y of [21, 24]) for (let x = 6; x <= 13; x += 2) pithoi.push([x, y]);
+  for (let y = 20; y <= 25; y++) for (let x = 5; x <= 14; x++) if (cells[y][x]?.o === T.WALL && !(x === 5 || y === 20 || y === 25 || x === 14)) set(x, y, { o: -1 });
+  // The stair down, in the northwest wing.
+  for (let y = 4; y <= 8; y++) for (let x = 5; x <= 12; x++) set(x, y, { o: x === 12 || y === 8 ? T.WALL : -1, g: T.FLAGS });
+  set(12, 6, { o: -1 });
+  // Olives about the palace, and a road in from the south.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!cells[y][x] && r() < 0.06) set(x, y, { o: T.OLIVE });
+  for (let y = Y1; y < H; y++) for (const x of [20, 21]) set(x, y, { o: -1, g: T.PATH });
+  return { cells, pithoi, treasuries: [], at: { throne: [12, 13], ariadne: [17, 12], stair: [8, 6], court: [20, 14], horns: [23, 9] } };
 }

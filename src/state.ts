@@ -25,6 +25,8 @@ export interface ScreenRec { terrain: number; special: boolean; feature: string;
   river?: boolean; ford?: [number, number] | null;
   /** Part of a citadel or an isle (its id in G.data.sites); for a coast reached from the sea, the corner the sea fills. */
   site?: string; corner?: [number, number];
+  /** A coast's sea along each side, tile by tile ("0" land, "1" sea; one character for a whole side), so neighbours join up. */
+  shore?: Record<"N" | "S" | "E" | "W", string>;
   roads?: string[]; crossroads?: boolean; hecateNight?: number; met?: boolean; graveyard?: [number, number] | null; shrine?: { tx: number; ty: number; god: string; seed: number } | null }
 
 const SAVE_KEY = "worksanddays.save.v1";
@@ -101,7 +103,7 @@ export interface SaveData {
   foretold?: { key: string; text: string }[];
   /** Rowing on from the open sea: the next new screen is sea too. */
   fromSea?: boolean;
-  anchors: { delphi?: string; knossos?: string; spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
+  anchors: { delphi?: string; knossos?: string; crete?: string; knossosAt?: string; spring?: string; satyrs?: string; cave?: string; tirShrine?: string; tirGrave?: string };
   caves: Record<string, { type: "common" | "sacred" | "chthonic"; boss: "alive" | "appeased" | "slain"; hoard: boolean; mined: Record<string, string[]> }>;
   cave: { key: string; level: number }; // where you are underground
   torchLit: boolean; // a torch burns for this visit underground
