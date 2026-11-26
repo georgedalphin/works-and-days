@@ -227,7 +227,7 @@ export const TIR_CALLS = {
     "The bees are busy. Good.", "Zeus sees everything. So do I, in my way.", "Mind the hour. Every hour has its god.", "Mm.", "...",
   ],
   night: ["The dark is the same to me.", "Go to bed. The dead walk.", "Owls. Athena's birds."],
-  rain: ["Wet as a frog.", "Zeus is weeping again."],
+  rain: ["Wet as a frog.", "Zeus is weeping again.", "Athena's olive keeps an old man dry. Mostly.", "Good for your fields, this."],
   done: ["Seven lifetimes, and this is the best seat I've had.", "You see more than you did.", "Listen to the bees.", "Sow in your season."],
 };
 

@@ -964,6 +964,7 @@ abstract class PlayScene extends Phaser.Scene {
       this.mealT = 1; for (const m of G.mealTick()) G.say(m);
       if (!this.paused) this.maybeHearSong();
       for (const o of this.placedObjs) if (o.p.id === "Campfire") this.showFire(o);
+      if (G.data.weather === "rain" && this.scene.key === "Farm") { const f = this as unknown as FarmScene; for (const [k, v] of Object.entries(G.data.ground)) if (v === "tilled") { const [x, y] = k.split(",").map(Number); f.setGround(x, y, "wet"); } } // rain soaks the tilled soil
       // Slow healing while awake (a longer jump in time is sleep, which heals by itself).
       const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo"))); this.lastHealAt = h;
     }
@@ -2375,8 +2376,10 @@ const PEN = { x0: 14, y0: 15, x1: 20, y1: 20, gateY: 17 }; // fence on the borde
 const HIVE = { tx: 36, ty: 10 };
 const inPen = (x: number, y: number) => x >= PEN.x0 && x <= PEN.x1 && y >= PEN.y0 && y <= PEN.y1;
 /** Where Tiresias likes to sit (tiles): the olive's shade, the doorstep (at night and in the rain), the well, the hive, the pen fence, beside the vat. */
-const TIR_SPOTS: [number, number, string][] = [[17, 10, "under the olive tree"], [22, 11, "on the doorstep"], [31, 11, "by the well"], [37, 12, "by the beehive"], [21, 19, "against the goat pen"], [22, 13, "beside the treading vat"]];
+const TIR_SPOTS: [number, number, string][] = [[17, 10, "under the olive tree"], [22, 11, "on the doorstep"], [31, 11, "by the well"], [37, 12, "by the beehive"], [21, 19, "against the goat pen"], [22, 13, "beside the treading vat"], [18, 12, "at the foot of the other olive"]];
 const TIR_DOOR = 1;
+/** Where he keeps out of the rain: under either olive, or on your doorstep. */
+const TIR_RAIN = [0, 6, TIR_DOOR];
 /** He goes everywhere by the path in front of the hut: he knows it, and it keeps him off the fences. */
 const TIR_HUB: [number, number] = [24, 12];
 const d12 = () => 1 + Math.floor(Math.random() * 12);
@@ -2565,7 +2568,8 @@ class FarmScene extends PlayScene {
   tir!: { s: Phaser.Physics.Arcade.Sprite; goal: number | null; via: boolean; walkT: number; nodT: number; moveIn: number; callAt: number; facing: number };
   setupTiresias(_solids: Phaser.Physics.Arcade.StaticGroup) {
     const t = G.data.tir;
-    if (!G.isDay || G.data.weather === "rain") t.spot = TIR_DOOR;
+    if (!G.isDay) t.spot = TIR_DOOR;
+    else if (G.data.weather === "rain" && !TIR_RAIN.includes(t.spot)) t.spot = TIR_RAIN[Math.floor(Math.random() * TIR_RAIN.length)];
     const [tx, ty] = TIR_SPOTS[t.spot] ?? TIR_SPOTS[0];
     const s = this.physics.add.sprite(tx * TILE + 8, ty * TILE + 8, "tiresiasSit", 0);
     s.setSize(10, 6).setOffset(3, 9).setImmovable(true).setDepth(ty * TILE + 8);
@@ -2587,16 +2591,20 @@ class FarmScene extends PlayScene {
   tiresiasTick(dt: number) {
     const T0 = this.tir, s = T0.s, t = G.data.tir;
     // Night and rain send him to the doorstep; by day, now and then, he gets up and shuffles to another seat.
-    const shelter = !G.isDay || G.data.weather === "rain";
+    const night = !G.isDay, rain = G.data.weather === "rain", shelter = night || rain;
     const near = Math.hypot(this.player.x - s.x, this.player.y - s.y);
     if (T0.goal === null) {
       T0.moveIn -= dt;
-      if (shelter && t.spot !== TIR_DOOR) T0.goal = TIR_DOOR;
+      if (night && t.spot !== TIR_DOOR) T0.goal = TIR_DOOR;
+      else if (rain && !night && !TIR_RAIN.includes(t.spot)) { // the nearest dry seat: the olives' shade or the eaves
+        const d = (i: number) => Math.hypot(TIR_SPOTS[i][0] * TILE - s.x, TIR_SPOTS[i][1] * TILE - s.y);
+        T0.goal = [...TIR_RAIN].sort((a, b) => d(a) - d(b))[0];
+      }
       else if (!shelter && T0.moveIn <= 0 && near > 40) {
         let g = t.spot; while (g === t.spot || g === TIR_DOOR) g = Math.floor(Math.random() * TIR_SPOTS.length);
         T0.goal = g;
       }
-      if (T0.goal !== null) { T0.via = true; s.setTexture("tiresias", 0); if (near < 90) this.tirBubble(T0.goal === TIR_DOOR ? "Time I was indoors... near enough." : "My old bones want another seat."); }
+      if (T0.goal !== null) { T0.via = true; s.setTexture("tiresias", 0); if (near < 90) this.tirBubble(rain && !night ? (T0.goal === TIR_DOOR ? "Rain! To your eaves, old man." : "Rain! Under the olive, quick as I can.") : T0.goal === TIR_DOOR ? "Time I was indoors... near enough." : "My old bones want another seat."); }
     }
     if (T0.goal !== null) {
       const [gx, gy] = T0.via ? TIR_HUB : TIR_SPOTS[T0.goal], x = gx * TILE + 8, y = gy * TILE + 8, dx = x - s.x, dy = y - s.y, d = Math.hypot(dx, dy);
