@@ -4,7 +4,7 @@ import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, T, TILE
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
-import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, type Station } from "./data";
+import { WEATHER_WORD, DAYLIGHT_REAL_SECONDS, MONTHS, rollWeather, STATION_NAME, ELEMENT_OF, EFFORT, ESSENCE, skillCost, SLEEP_RECOVERY_PER_HOUR, type Station } from "./data";
 import { MOROS_DREAMS, SIGNS as SIGN_TABLE } from "./omens";
 import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
@@ -400,6 +400,7 @@ abstract class PlayScene extends Phaser.Scene {
     speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     this.swim(dt, w);
+    this.rest(dt, moving, w);
     if (moving) {
       if (Math.abs(vx) > Math.abs(vy)) this.facing = vx < 0 ? 1 : 2; else this.facing = vy < 0 ? 3 : 0;
     }
@@ -774,6 +775,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Harm from no creature (lightning, fever, falling rocks): Fatigue, and if spent, you fall. */
   harm(dmg: number, what: string, cause: string, body = false) {
     if (this.leaving) return;
+    this.stillT = 0; // no catching your breath while something is biting you
     SOUND.sfx("hurt");
     this.cameras.main.shake(160, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(220, () => this.player.clearTint());
@@ -1618,6 +1620,43 @@ abstract class PlayScene extends Phaser.Scene {
     return waterKind(o.getTileAtWorldXY(this.player.x, this.player.y + 5)?.index);
   }
   swimming = false; drownT = 0;
+  /** Seconds you've stood still; the clock-hour of your last splash in the shallows; whether you've been told about resting. */
+  stillT = 0; splashHour = -99; restTold = false;
+  /**
+   * Catching your breath: stand still a couple of seconds and your weariness eases, at about two
+   * thirds the pace of sleep (faster by a lit campfire, or standing cool in the shallows).
+   * Wading into shallow water also refreshes you once an hour.
+   */
+  rest(dt: number, moving: boolean, w: number) {
+    if (this.paused) return;
+    if (w === 1 && G.absHour - this.splashHour >= 1) {
+      this.splashHour = G.absHour;
+      if (G.data.fatigue > 1) {
+        const cold = G.month.season === "Winter", n = Math.min(G.data.fatigue, cold ? 4 : 8);
+        G.addFatigue(-n);
+        G.say(cold ? "The water is bitter cold, but it wakes you up." : "You splash cool water on your face and neck. Refreshing.");
+        this.splashFx();
+      }
+    }
+    if (moving || w === 2 || G.data.fatigue <= 0) { this.stillT = 0; return; }
+    this.stillT += dt;
+    if (this.stillT < 2) return;
+    if (!this.restTold && G.data.fatigue >= 5) { this.restTold = true; G.say("You stand and catch your breath. Keeping still slowly eases your weariness."); }
+    const fire = this.fireLights().some((l) => l.r >= 60 && Math.hypot(l.x - this.player.x, l.y - this.player.y) < l.r);
+    const perHour = SLEEP_RECOVERY_PER_HOUR * (2 / 3) * (fire ? 1.5 : 1) * (w === 1 ? 1.25 : 1) * (G.signActive("rest") ? 1.25 : 1);
+    G.addFatigue(-perHour * dt / G.secondsPerClockHour);
+    if (Math.floor(this.stillT) !== Math.floor(this.stillT - dt) && Math.floor(this.stillT) % 3 === 0) this.restFx();
+  }
+  splashFx() {
+    for (let i = 0; i < 6; i++) {
+      const d = this.add.circle(this.player.x + (Math.random() - 0.5) * 10, this.player.y + 2, 1.2, 0xbfe6f5).setDepth(this.player.y + 2);
+      this.tweens.add({ targets: d, y: d.y - 8 - Math.random() * 6, alpha: 0, duration: 420 + Math.random() * 200, ease: "Quad.easeOut", onComplete: () => d.destroy() });
+    }
+  }
+  restFx() { // a slow breath rising
+    const b = this.add.text(this.player.x + 5, this.player.y - 12, "~", { fontFamily: "Georgia, serif", fontSize: "10px", color: "#e8e0c8" }).setOrigin(0.5).setDepth(this.player.y + 50).setAlpha(0.8);
+    this.tweens.add({ targets: b, y: b.y - 10, alpha: 0, duration: 1400, onComplete: () => b.destroy() });
+  }
   /** In deep water every stroke costs breath (Air); with none left, you start to drown. */
   swim(dt: number, w: number) {
     this.player.setCrop(w === 2 ? new Phaser.Geom.Rectangle(0, 0, 16, 9) : w === 1 ? new Phaser.Geom.Rectangle(0, 0, 16, 13) : undefined);
