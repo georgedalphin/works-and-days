@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
 import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, knossosLayoutGrand, creteAt, pickKnossosScreen, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
+import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
 import type { SiteRec } from "./sites";
 import { WAYFARERS, rollWayfarers, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
@@ -327,6 +328,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
     this.ambience = undefined;
+    this.seat = undefined; this.seatFree = undefined;
     this.poseT = 0; this.poseKind = ""; this.walkT = 0; this.trunks = undefined; this.trunkAt.clear(); this.rustleT = 0; this.thornSaid = false;
     this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
     this.focusMarks = this.add.graphics().setDepth(99981);
@@ -375,7 +377,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   movePlayer(dt: number) {
     if (this.invuln > 0) { this.invuln -= dt; this.player.setAlpha(this.invuln > 0 && Math.floor(this.invuln * 12) % 2 ? 0.4 : 1); }
-    if (this.knock > 0) { this.knock -= dt; return; }
+    if (this.knock > 0) { this.knock -= dt; if (this.seat) this.standUp(); return; }
     const k = this.keys, c = this.cursors;
     let vx = 0, vy = 0;
     if (!this.paused && !this.hold) {
@@ -400,6 +402,11 @@ abstract class PlayScene extends Phaser.Scene {
     speed *= 1 + 0.85 * this.dashLvl;
     if (G.exhausted) speed *= 0.6;
     const len = Math.hypot(vx, vy) || 1;
+    this.freeSeat();
+    if (this.seat) {
+      if (moving && !this.paused) this.standUp();
+      else { this.player.setVelocity(0, 0); this.rest(dt, false, 0); this.animatePlayer(dt, false, 0); this.player.setDepth((this.seat.o.img?.depth ?? this.player.y) + 1); return; }
+    }
     if (this.boat) { this.row(dt, moving ? vx / len : 0, moving ? vy / len : 0); this.animatePlayer(dt, false, 0); this.player.setDepth(this.player.y); return; }
     const w = this.underfoot();
     if (w) { speed = Math.min(speed, 70); this.dashLvl = 0; } // no running in water
@@ -529,28 +536,50 @@ abstract class PlayScene extends Phaser.Scene {
   /** Where placed things are kept for this map ("" if nothing can be set down here). */
   placeKey(): string { return ""; }
   /** Why a thing can't be set down on this tile, or null if it can. */
-  placeBlocked(_tx: number, _ty: number): string | null { return "There's nowhere to set that down here."; }
+  placeBlocked(_tx: number, _ty: number, _id?: string): string | null { return "There's nowhere to set that down here."; }
   /** The objects layer, for fences (the farm and the wild have one). */
   objLayer(): Phaser.Tilemaps.TilemapLayer | undefined { return (this as unknown as { objects?: Phaser.Tilemaps.TilemapLayer }).objects; }
 
-  placedAt(tx: number, ty: number) { return this.placedObjs.find((o) => o.p.x === tx && o.p.y === ty); }
+  /** What stands on this tile: furniture first, then what hangs on the wall, then what lies on the floor. */
+  placedAt(tx: number, ty: number) {
+    const on = (o: { p: Placed }) => footprint(o.p.id, o.p.x, o.p.y).some(([x, y]) => x === tx && y === ty);
+    return this.placedObjs.find((o) => !furn(o.p.id).flat && !furn(o.p.id).wall && on(o)) ?? this.placedObjs.find((o) => furn(o.p.id).wall && on(o)) ?? this.placedObjs.find(on);
+  }
+  /** Why the thing can't be set down facing this tile (every tile it would cover), or null if it can. */
+  placeProblem(id: string, tx: number, ty: number): string | null {
+    const key = this.placeKey(), name = ITEMS[id].name.toLowerCase(), f = furn(id);
+    if (!key) return `There's nowhere to set the ${name} down here.`;
+    const anywhere = id === "Snare" || id === "Campfire" || id === "Boat";
+    if (key === "house" && !f.indoor) return `The ${name} belongs outside, on your land.`;
+    if (key !== "farm" && key !== "house" && !anywhere) return `The ${name} belongs on your own homestead.`;
+    if (key !== "house" && f.wall) return `Hang the ${name} on a wall of your house.`;
+    if (id === "Boat") return this.boatSpot(tx, ty);
+    const layer = (q: string) => (furn(q).flat ? 0 : furn(q).wall ? 2 : 1), mine = layer(id), [ptx, pty] = this.playerTile();
+    for (const [x, y] of footprint(id, tx, ty)) {
+      const why = this.placeBlocked(x, y, id); if (why) return why;
+      if (this.placedObjs.some((o) => layer(o.p.id) === mine && footprint(o.p.id, o.p.x, o.p.y).some(([a, b]) => a === x && b === y))) return "Something is already there.";
+      if (mine === 1 && x === ptx && y === pty) return "Step aside first.";
+    }
+    return null;
+  }
   /** Draw everything already set down on this map. Call once the map and its targets exist. */
   drawPlaced() {
     const key = this.placeKey(); if (!key) return;
     for (const p of G.data.placed) if (p.where === key) this.spawnPlaced(p);
   }
   spawnPlaced(p: Placed) {
-    const cx = p.x * TILE + 8, by = p.y * TILE + 15;
+    const f = furn(p.id), [cx, by] = footAnchor(p.id, p.x, p.y);
     if (p.id === "Fence") {
       this.objLayer()?.putTileAt(T.FENCE, p.x, p.y).setCollision(true);
       this.refreshFences();
       this.placedObjs.push({ p }); return;
     }
     if (p.id === "Snare") this.resolveSnare(p);
-    const img = this.add.image(cx, by, `pl_${p.id}`, p.id === "Snare" ? (p.caught ? 1 : 0) : undefined).setOrigin(0.5, 1).setDepth(by);
-    const o: { p: Placed; img: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t: Target } = { p, img, t: { x: cx, y: p.y * TILE + 10, label: "", act: () => {} } };
-    if (p.id !== "Snare" && p.id !== "Boat") {
-      const body = this.add.zone(cx, p.y * TILE + 11, 14, 8); this.physics.add.existing(body, true);
+    const frame = p.id === "Snare" ? (p.caught ? 1 : 0) : f.frames ? Math.abs(p.x * 7 + p.y * 3) % f.frames : undefined;
+    const img = this.add.image(cx, by, `pl_${p.id}`, frame).setOrigin(0.5, 1).setDepth(f.flat ? 2 + by / 1000 : f.wall ? 3 : by);
+    const o: { p: Placed; img: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone; t: Target; glow?: Phaser.GameObjects.Image } = { p, img, t: { x: cx, y: by - 5, label: "", act: () => {} } };
+    if (p.id !== "Snare" && p.id !== "Boat" && !f.flat && !f.wall) {
+      const body = this.add.zone(cx, by - 4, f.w * TILE - 2, 8); this.physics.add.existing(body, true);
       this.physics.add.collider(this.player, body); o.body = body;
     }
     const sc = this;
@@ -567,9 +596,41 @@ abstract class PlayScene extends Phaser.Scene {
       this.showFire(o);
     }
     else if (p.id === "Snare") o.t = { x: o.t.x, y: o.t.y, get label() { return p.caught ? "Something is in the snare" : "Check the snare"; }, act: () => sc.checkSnare(o) };
+    else if (f.seat) o.t = { ...o.t, get label() { return sc.seat ? "" : f.sitWord!; }, act: () => sc.sit(o) };
+    else if (f.wall) o.t = { ...o.t, y: (p.y + 1) * TILE + 6, label: "" };
+    if (f.light) o.glow = this.add.image(cx + 3, by - 26, "focusGlow").setDepth(99901).setTint(0xffb050).setAlpha(0).setScale(1.2).setBlendMode(Phaser.BlendModes.ADD);
     this.targets.push(o.t);
     this.placedObjs.push(o);
   }
+  /** Sitting (or lying back) on a seat you made: you rest faster there, until you move off it. */
+  seat?: { o: { p: Placed; img?: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone }; mult: number };
+  /** The seat you just got up from: its body comes back once you're clear of it. */
+  seatFree?: { p: Placed; img?: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone };
+  sitTold = false;
+  sit(o: { p: Placed; img?: Phaser.GameObjects.Image; body?: Phaser.GameObjects.Zone }) {
+    if (this.seat || !o.img || this.boat) return;
+    const f = furn(o.p.id);
+    if (o.body?.body) (o.body.body as Phaser.Physics.Arcade.StaticBody).enable = false;
+    this.player.setVelocity(0, 0).setPosition(o.img.x - (f.w > 1 ? 8 : 0), o.img.y - (o.p.id === "Couch" ? 13 : 12));
+    this.player.setCrop(0, 0, 16, 12); this.facing = 0;
+    this.seat = { o, mult: f.seat ?? 1.5 }; this.stillT = 2;
+    if (!this.sitTold) { this.sitTold = true; G.say(o.p.id === "Couch" ? "You lie back on the couch. Rest here eases your weariness faster than anywhere but your bed." : "You sit down. Resting in a seat eases your weariness faster than standing. (Move to get up.)"); }
+  }
+  standUp() {
+    const s = this.seat; if (!s) return;
+    this.player.setCrop(); this.seat = undefined;
+    if (s.o.img) this.player.setPosition(this.player.x, s.o.img.y + 7);
+    this.seatFree = s.o;
+  }
+  /** Give a seat its body back once you've stepped clear of it. */
+  freeSeat() {
+    const o = this.seatFree; if (!o) return;
+    if (!o.body?.body) { this.seatFree = undefined; return; }
+    const b = o.body.body as Phaser.Physics.Arcade.StaticBody, pb = this.player.body as Phaser.Physics.Arcade.Body;
+    const clear = pb.right <= b.left || pb.left >= b.right || pb.bottom <= b.top || pb.top >= b.bottom;
+    if (clear) { b.enable = true; this.seatFree = undefined; }
+  }
+
   /** Fences join up: each fence tile is drawn as the piece that fits its neighbors (the tile itself stays, unseen, for collision). */
   fenceImgs: Phaser.GameObjects.Image[] = [];
   refreshFences() {
@@ -644,7 +705,9 @@ abstract class PlayScene extends Phaser.Scene {
     if (p.store?.some((s) => s)) { G.say("Empty the chest before you move it."); return; }
     if (G.addItem(p.id, 1) > 0) { G.say("Your pack is full."); return; }
     if (p.id === "Fence") { this.objLayer()?.putTileAt(-1, p.x, p.y); this.refreshFences(); }
-    o.img?.destroy(); o.body?.destroy();
+    if (this.seat?.o === o) this.standUp();
+    if (this.seatFree === o) this.seatFree = undefined;
+    o.img?.destroy(); o.body?.destroy(); (o as { glow?: Phaser.GameObjects.Image }).glow?.destroy();
     if (o.t) this.targets = this.targets.filter((t) => t !== o.t);
     this.placedObjs = this.placedObjs.filter((x) => x !== o);
     G.data.placed = G.data.placed.filter((x) => x !== p);
@@ -654,13 +717,9 @@ abstract class PlayScene extends Phaser.Scene {
   tryPlace() {
     const held = G.selectedItem!; const name = ITEMS[held.id].name.toLowerCase();
     const key = this.placeKey();
-    if (!key) { G.say(`There's nowhere to set the ${name} down here.`); return; }
-    if (key !== "farm" && held.id !== "Snare" && held.id !== "Campfire" && held.id !== "Boat") { G.say(`The ${name} belongs on your own homestead.`); return; }
-    const [tx, ty] = this.facingTile(); if (tx < 0) return;
-    const why = (held.id === "Boat" ? this.boatSpot(tx, ty) : this.placeBlocked(tx, ty)) ?? (this.placedAt(tx, ty) ? "Something is already there." : null);
+    const [tx, ty] = key ? this.facingTile() : [0, 0]; if (tx < 0) return;
+    const why = this.placeProblem(held.id, tx, ty);
     if (why) { G.say(why); return; }
-    const [px, py] = this.playerTile();
-    if (px === tx && py === ty) { G.say("Step aside first."); return; }
     if (held.id === "Snare" && G.data.placed.filter((p) => p.id === "Snare" && p.where === key).length >= 3) { G.say("Three snares on one stretch of ground is plenty."); return; }
     G.removeItem(held.id, 1);
     const p: Placed = { id: held.id, where: key, x: tx, y: ty };
@@ -669,7 +728,8 @@ abstract class PlayScene extends Phaser.Scene {
     if (held.id === "Campfire") p.fuel = G.absHour + CAMP_HOURS_PER_FIBER; // lit with one fiber's worth
     G.data.placed.push(p); this.spawnPlaced(p); G.note(`place:${held.id}`);
     SOUND.sfx("pickup");
-    G.say(held.id === "Boat" ? "You push the boat into the shallows. Get in with E." : held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : `You set down the ${name}. (Strike it with the axe or mattock to move it again.)`);
+    const fd = furn(held.id);
+    G.say(held.id === "Boat" ? "You push the boat into the shallows. Get in with E." : held.id === "Snare" ? "You set the snare along a run in the grass. Check it after a night." : held.id === "Fence" ? "You drive in a length of fence." : fd.wall ? `You hang the ${name} on the wall. (Strike it with the axe or mattock to take it down.)` : fd.flat ? `You lay the ${name} on the floor. (Strike it with the axe or mattock to roll it up again.)` : `You set down the ${name}.${fd.seat ? " Sit in it (E) to rest." : ""} (Strike it with the axe or mattock to move it again.)`);
   }
   /** The ghost of what you're about to set down. */
   updateGhost() {
@@ -681,9 +741,9 @@ abstract class PlayScene extends Phaser.Scene {
     const tex = held.id === "Fence" ? "items" : `pl_${held.id}`;
     if (!this.ghost || !this.ghost.active) this.ghost = this.add.image(0, 0, tex).setOrigin(0.5, 1).setAlpha(0.55).setDepth(99980);
     if (this.ghost.texture.key !== tex) this.ghost.setTexture(tex);
-    if (held.id === "Fence") this.ghost.setFrame("Fence"); else if (held.id === "Snare") this.ghost.setFrame(0);
-    const ok = this.placeKey() && !(held.id === "Boat" ? this.boatSpot(tx, ty) : this.placeBlocked(tx, ty)) && !this.placedAt(tx, ty) && (this.placeKey() === "farm" || held.id === "Snare" || held.id === "Campfire" || held.id === "Boat");
-    this.ghost.setPosition(tx * TILE + 8, ty * TILE + 15).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
+    if (held.id === "Fence") this.ghost.setFrame("Fence"); else if (held.id === "Snare" || furn(held.id).frames) this.ghost.setFrame(0);
+    const ok = !this.placeProblem(held.id, tx, ty), [gx, gy] = footAnchor(held.id, tx, ty);
+    this.ghost.setPosition(gx, gy).setTint(ok ? 0xffffff : 0xff6a5a).setVisible(true);
   }
 
   // ---------------------------------------------------------------- the gods at work (divine.ts)
@@ -1647,9 +1707,9 @@ abstract class PlayScene extends Phaser.Scene {
     if (moving || w === 2 || G.data.fatigue <= 0) { this.stillT = 0; return; }
     this.stillT += dt;
     if (this.stillT < 2) return;
-    if (!this.restTold && G.data.fatigue >= 5) { this.restTold = true; G.say("You stand and catch your breath. Keeping still slowly eases your weariness."); }
+    if (!this.restTold && !this.seat && G.data.fatigue >= 5) { this.restTold = true; G.say("You stand and catch your breath. Keeping still slowly eases your weariness."); }
     const fire = this.fireLights().some((l) => l.r >= 60 && Math.hypot(l.x - this.player.x, l.y - this.player.y) < l.r);
-    const perHour = SLEEP_RECOVERY_PER_HOUR * (2 / 3) * (fire ? 1.5 : 1) * (w === 1 ? 1.25 : 1) * (G.signActive("rest") ? 1.25 : 1);
+    const perHour = SLEEP_RECOVERY_PER_HOUR * (2 / 3) * (fire ? 1.5 : 1) * (this.seat ? this.seat.mult : 1) * (w === 1 ? 1.25 : 1) * (G.signActive("rest") ? 1.25 : 1);
     G.addFatigue(-perHour * dt / G.secondsPerClockHour);
     if (Math.floor(this.stillT) !== Math.floor(this.stillT - dt) && Math.floor(this.stillT) % 3 === 0) this.restFx();
   }
@@ -3089,57 +3149,167 @@ class FarmScene extends PlayScene {
 }
 
 // ------------------------------------------------------------------ inside the hut
-const RW = 12, RH = 9;
+const RW = HOME.W, RH = HOME.H, HDOOR = HOME.DOOR;
+/** Where you wake: on the reed mat beside the bed. */
+const HOUSE_WAKE = { x: 3.5 * TILE, y: 5 * TILE + 6 };
+const HEARTH = { x: 9.5 * TILE, y: 60 };
 class HouseScene extends PlayScene {
   constructor() { super("House"); }
+  dark!: Phaser.GameObjects.RenderTexture;
+  sky!: Phaser.GameObjects.Rectangle;
+  stars: Phaser.GameObjects.Rectangle[] = [];
+  shaft!: Phaser.GameObjects.Image;
+  hearthGlow!: Phaser.GameObjects.Image;
+  flame!: Phaser.GameObjects.Image;
+  motes: { r: Phaser.GameObjects.Rectangle; t: number; v: number }[] = [];
+  lightT = 0; fxT = 0; clock = 0;
 
   create() {
     this.leaving = false;
+    this.placedObjs = []; this.ghost = undefined; this.motes = []; this.stars = [];
     const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: RW, height: RH });
     const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
     const floor = map.createBlankLayer("floor", ts)!;
     const data: number[][] = [];
-    for (let y = 0; y < RH; y++) { data.push([]); for (let x = 0; x < RW; x++) data[y].push(y < 2 || x === 0 || x === RW - 1 || (y === RH - 1 && x !== 6) ? T.WALL : T.FLOOR); }
+    for (let y = 0; y < RH; y++) { data.push([]); for (let x = 0; x < RW; x++) data[y].push(y < 3 || x === 0 || x === RW - 1 || (y === RH - 1 && x !== HDOOR) ? T.WALL : T.FLOOR); }
     floor.putTilesAt(data, 0, 0);
-    floor.setCollision([T.WALL]);
-    this.cameras.main.setBackgroundColor("#2a1d14");
+    floor.setCollision([T.WALL]); floor.setVisible(false);
+    this.cameras.main.setBackgroundColor("#170f0a");
 
-    this.add.image(6 * TILE, 4 * TILE, "hearth").setDepth(3.5 * TILE);
-    this.add.image(1.5 * TILE, 3 * TILE, "bed").setOrigin(0.5, 0).setDepth(4.5 * TILE);
-    this.add.image(10.5 * TILE, 1.5 * TILE, "niche").setDepth(1);
-    this.add.image(9.5 * TILE, 6.5 * TILE, "pithos").setDepth(7 * TILE);
+    // The sky through the window, behind the room; the room itself; the fixed things.
+    const Wn = HOME_WINDOW;
+    this.sky = this.add.rectangle(Wn.x, Wn.y, Wn.w, Wn.h, 0x9cc8e0).setOrigin(0, 0).setDepth(-2);
+    for (const [x, y] of [[4, 3], [17, 5], [9, 12], [20, 11], [14, 2]]) this.stars.push(this.add.rectangle(Wn.x + x, Wn.y + y, 1, 1, 0xf2ecd8).setOrigin(0, 0).setDepth(-1));
+    this.add.image(0, 0, "home_room").setOrigin(0, 0).setDepth(0);
+    this.add.image(49, 62, "home_mat").setOrigin(0, 0).setDepth(1);
+    for (const [k, x, y] of [["home_pegs", 17, 16], ["home_shelf", 96, 14], ["home_herbs", 192, 12], ["home_altar", 225, 13]] as [string, number, number][]) this.add.image(x, y, k).setOrigin(0, 0).setDepth(3);
+    this.shaft = this.add.image(Wn.x, Wn.y + Wn.h + 1, "home_shaft").setOrigin(0, 0).setDepth(4).setBlendMode(Phaser.BlendModes.ADD).setTint(0xfff0c8);
+    this.add.image(HEARTH.x, 5 * TILE, "home_hearth").setOrigin(0.5, 1).setDepth(5 * TILE);
+    this.flame = this.add.image(HEARTH.x, 66, "home_flame", 0).setOrigin(0.5, 1).setDepth(5 * TILE + 0.2);
+    this.add.image(HEARTH.x, 49, "home_pot").setOrigin(0.5, 0).setDepth(5 * TILE + 0.4);
+    this.hearthGlow = this.add.image(HEARTH.x, HEARTH.y, "focusGlow").setTint(0xff9040).setAlpha(0.4).setScale(2.8).setBlendMode(Phaser.BlendModes.ADD).setDepth(99902);
+    this.add.image(17, 48, "home_bed").setOrigin(0, 0).setDepth(94);
+    this.add.image(176, 46, "home_wood").setOrigin(0, 0).setDepth(66);
+    this.add.image(243, 38, "home_broom").setOrigin(0, 0).setDepth(66);
+    this.add.image(256, 44, "home_pithoi").setOrigin(0, 0).setDepth(82);
+    this.time.addEvent({ delay: 130, loop: true, callback: () => this.flame.setFrame(Math.floor(Math.random() * 3)) });
+    // Motes of dust turning in the window's light.
+    for (let i = 0; i < 9; i++) this.motes.push({ r: this.add.rectangle(0, 0, 1, 1, 0xfff4d0).setDepth(99905).setBlendMode(Phaser.BlendModes.ADD), t: Math.random(), v: 0.03 + Math.random() * 0.04 });
 
     const blocks = this.physics.add.staticGroup();
     const block = (x: number, y: number, w: number, h: number) => {
       const b = blocks.create(x, y, "") as Phaser.Physics.Arcade.Sprite;
       b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(w, h);
     };
-    block(6 * TILE, 4 * TILE + 4, 30, 14);
-    block(1.5 * TILE, 4.7 * TILE, 14, 26);
-    block(9.5 * TILE, 6.7 * TILE, 10, 8);
+    block(HEARTH.x, 66, 48, 26); block(31, 70, 28, 44); block(184, 58, 16, 12); block(248, 60, 8, 8); block(274, 66, 34, 28);
 
     this.targets = [
-      { x: 1.5 * TILE + 8, y: 4.5 * TILE, label: "Sleep", act: () => this.askSleep() },
-      { x: 6 * TILE, y: 4.6 * TILE, label: "The hearth: tend it, or cook", act: () => ui(this).hearthMenu(() => this.tendHearth()) },
-      { x: 10.5 * TILE, y: 2.4 * TILE, label: "The household altar", act: () => ui(this).openAltar("home") },
-      { x: 9.5 * TILE, y: 7 * TILE, label: "Look in the storage jar", act: () => G.say("A pithos for grain and oil. Empty, for now.") },
+      { x: 47, y: 78, label: "Sleep", act: () => this.askSleep() },
+      { x: HEARTH.x, y: 5 * TILE + 4, label: "The hearth: tend it, or cook", act: () => ui(this).hearthMenu(() => this.tendHearth()) },
+      { x: 236, y: 3 * TILE + 4, label: "The household altar", act: () => ui(this).openAltar("home") },
+      { x: 272, y: 5 * TILE + 6, label: "Look in the storage jars", act: () => G.say("Pithoi for grain and oil, an amphora, a little jug. Empty, for now: what you'd store, you keep in a chest.") },
+      { x: Wn.x + Wn.w / 2, y: 3 * TILE + 4, label: "Look out of the window", act: () => this.lookOut() },
     ];
 
     this.physics.world.setBounds(0, 0, RW * TILE, RH * TILE);
-    this.cameras.main.setBounds(-TILE * 4, -TILE * 2, (RW + 8) * TILE, (RH + 4) * TILE);
+    const vw = W / ZOOM, vh = H / ZOOM;
+    this.cameras.main.setBounds((RW * TILE - vw) / 2, RH * TILE - vh + 4, vw, vh); // the room sits low, so the panels above hide less of the back wall
     this.setupInput();
-    const inside = G.data.px > 0 && G.data.px < RW * TILE && G.data.py > 0 && G.data.py < RH * TILE;
+    const inside = G.data.px > 0 && G.data.px < RW * TILE && G.data.py > 3 * TILE && G.data.py < RH * TILE;
     G.data.scene = "House";
-    this.makePlayer(inside ? G.data.px : 6 * TILE + 8, inside ? G.data.py : 7 * TILE + 8);
+    this.makePlayer(inside ? G.data.px : HDOOR * TILE + 8, inside ? G.data.py : (RH - 2) * TILE + 8);
     this.physics.add.collider(this.player, floor);
     this.physics.add.collider(this.player, blocks);
+    this.drawPlaced();
+    this.dark = this.add.renderTexture(0, 0, RW * TILE, RH * TILE).setOrigin(0, 0).setDepth(99900);
+    this.light(0);
     this.cameras.main.fadeIn(250);
+  }
+
+  placeKey() { return "house"; }
+  placeBlocked(tx: number, ty: number, id?: string) {
+    if (id && furn(id).wall) {
+      if (ty < 1 || ty > 2 || tx < 1 || tx > RW - 2) return "Face the back wall to hang it.";
+      if (HOME_WALL_BUSY.has(tx)) return "Something already hangs there.";
+      return null;
+    }
+    if (tx < 1 || tx > RW - 2 || ty < 3 || ty > RH - 2) return ty < 3 ? "That goes on the floor." : "Not in the wall.";
+    if (HOME_FIXED.has(`${tx},${ty}`)) return tx === HDOOR && ty === RH - 2 ? "Leave the doorway clear." : "There's no room there.";
+    return null;
+  }
+  /** The hearth's fire, and the lamps on their stands at night, count as firelight (for resting). */
+  fireLights() {
+    const out = super.fireLights();
+    out.push({ x: HEARTH.x, y: HEARTH.y, r: 84 });
+    if (this.dayness() < 0.6) for (const o of this.placedObjs) if (furn(o.p.id).light && o.img) out.push({ x: o.img.x, y: o.img.y - 24, r: furn(o.p.id).light! });
+    return out;
+  }
+
+  /** How much daylight comes in: 1 by day, fading at dusk, 0 at night. */
+  dayness() {
+    const day = G.daylight, c = G.data.clock;
+    if (c >= day) return 0;
+    if (c < 0.8) return 0.35 + 0.65 * (c / 0.8);
+    if (c > day - 1.2) return Math.max(0, (day - c) / 1.2);
+    return 1;
+  }
+  /**
+   * The room's light: a warm dark over everything, cut away where the light falls (the hearth always,
+   * the window and the door by day, lamps on their stands and in your hand by night).
+   */
+  light(dt: number) {
+    this.clock += dt;
+    const dn = this.dayness(), grey = G.data.weather === "rain" ? 0.12 : G.data.weather === "cloudy" ? 0.06 : 0, t = this.clock;
+    const rt = this.dark;
+    rt.clear(); rt.fill(0x120904, Math.min(0.84, 0.16 + (1 - dn) * 0.66 + grey * dn));
+    const cut = (x: number, y: number, r: number, a: number) => { if (a > 0.02) rt.stamp("softLight", undefined, x, y, { scale: r / 64, alpha: Math.min(1, a), erase: true }); };
+    const fl = 1 + 0.05 * Math.sin(t * 7.3) + 0.03 * Math.sin(t * 13.1) + 0.03 * (Math.random() - 0.5);
+    cut(HEARTH.x, HEARTH.y + 6, 104 * fl, 0.9); cut(HEARTH.x, HEARTH.y + 4, 56 * fl, 1);
+    cut(236, 32, 22, 0.8); // the altar lamp
+    const Wn = HOME_WINDOW, sun = dn * (1 - grey * 2.5);
+    cut(Wn.x + 40, 104, 62, sun * 0.9); cut(Wn.x + Wn.w / 2, Wn.y + 10, 40, dn * 0.8);
+    cut(HDOOR * TILE + 8, RH * TILE - 4, 40, dn * 0.75);
+    const night = Math.max(0, 1 - dn / 0.6);
+    for (const o of this.placedObjs) {
+      const f = furn(o.p.id), g = (o as { glow?: Phaser.GameObjects.Image }).glow;
+      if (!f.light || !o.img) continue;
+      const fl2 = 1 + 0.04 * Math.sin(t * 9 + o.p.x);
+      cut(o.img.x + 3, o.img.y - 24, f.light * fl2, night); cut(o.img.x + 3, o.img.y - 8, f.light * 0.6, night * 0.7);
+      g?.setAlpha(0.32 * night * fl2);
+    }
+    for (const L of super.fireLights()) cut(L.x, L.y, L.r * 1.2, 0.9);
+    this.hearthGlow.setAlpha((0.22 + 0.3 * (1 - dn)) * fl).setScale(2.8 * fl);
+    this.shaft.setAlpha(0.55 * sun).setVisible(sun > 0.02);
+    // The sky: dawn, day, dusk, night; grey under cloud.
+    const c = G.data.clock, day = G.daylight;
+    const sky = c >= day ? 0x16203a : c < 0.8 ? 0xe8b0b8 : c > day - 1.2 ? 0xe09058 : grey > 0.1 ? 0x8a929a : grey > 0 ? 0xa8b8c4 : 0x9cc8e0;
+    this.sky.setFillStyle(sky);
+    for (const [i, s] of this.stars.entries()) s.setVisible(c >= day && G.data.weather !== "rain" && G.data.weather !== "cloudy").setAlpha(0.5 + 0.5 * Math.sin(t * 2 + i * 1.7));
+    // Dust in the window's light.
+    for (const m of this.motes) {
+      m.t = (m.t + m.v * dt) % 1;
+      const y = Wn.y + Wn.h + 4 + m.t * 64, x = Wn.x + 2 + (y - Wn.y - Wn.h) * 0.42 + 11 + Math.sin(t * 0.7 + m.v * 90) * 9;
+      m.r.setPosition(x, y).setAlpha(sun * 0.7 * Math.sin(m.t * Math.PI));
+    }
   }
 
   update(_t: number, dms: number) {
     const dt = dms / 1000;
+    this.lightT += dt;
+    if (this.lightT >= 0.05) { this.light(this.lightT); this.lightT = 0; }
+    // Sparks and smoke from the fire, rising into the hood.
+    if ((this.fxT -= dt) <= 0) {
+      this.fxT = 0.18 + Math.random() * 0.3;
+      if (Math.random() < 0.45) {
+        const s = this.add.rectangle(HEARTH.x + (Math.random() - 0.5) * 14, 58, 1, 1, Math.random() < 0.5 ? 0xf2a03a : 0xfbe39a).setDepth(99903).setBlendMode(Phaser.BlendModes.ADD);
+        this.tweens.add({ targets: s, y: 34 + Math.random() * 8, x: s.x + (Math.random() - 0.5) * 8, alpha: 0, duration: 700 + Math.random() * 500, onComplete: () => s.destroy() });
+      } else {
+        const p = this.add.image(HEARTH.x + (Math.random() - 0.5) * 8, 50, "puff").setDepth(5 * TILE + 0.1).setAlpha(0.22).setScale(0.35).setTint(0x8a8078);
+        this.tweens.add({ targets: p, y: 26, scale: 0.7, alpha: 0, duration: 1600, onComplete: () => p.destroy() });
+      }
+    }
     if (!this.common(dt)) return;
-    if (this.player.y > (RH - 1) * TILE - 4 && Math.floor(this.player.x / TILE) === 6) {
+    if (this.player.y > (RH - 1) * TILE - 4 && Math.floor(this.player.x / TILE) === HDOOR) {
       G.data.scene = "House"; // FarmScene places us at the door
       this.goTo("Farm");
     }
@@ -3147,6 +3317,16 @@ class HouseScene extends PlayScene {
 
   useItem() { G.say("Not indoors."); }
   get canHunt() { return false; }
+
+  lookOut() {
+    const c = G.data.clock, day = G.daylight, w = G.data.weather, s = G.month.season;
+    const now = c >= day ? (w === "rain" ? "Rain in the dark, dripping from the eaves." : "Night. The stars are out over the hills, and somewhere a dog is barking.")
+      : c < 0.8 ? "Dawn, pink over the hills. The first birds are up."
+      : c > day - 1.2 ? "The sun is going down, and the fields are gold."
+      : w === "rain" ? "Rain, steady on the thatch and on the fields." : w === "mist" ? "Mist lies over the fields." : w === "wind" ? "Wind, bending the grass and tossing the olive branches."
+      : s === "Winter" ? "A cold, clear day over your land." : s === "Summer" ? "Your land in the hard light of summer, and the cicadas going." : "Your land, the olives, the hills beyond.";
+    G.say(`Through the window: ${now}`);
+  }
 
   askSleep() {
     const hours = G.sleepHours;
@@ -7253,6 +7433,7 @@ class UIScene extends Phaser.Scene {
     // A grey day: overcast and rain dim the daylight a little.
     const outdoor = ["Farm", "Wild", "Village", "Gym"].includes(G.data.scene);
     if (outdoor && c < day && (G.data.weather === "rain" || G.data.weather === "cloudy")) { const g = G.data.weather === "rain" ? 0.2 : 0.08; if (a < g) { col = 0x3a4250; a = g; } }
+    if (G.data.scene === "House") a = 0; // the house has its own light (HouseScene.light)
     this.shade.setFillStyle(col, a);
 
     this.drawBars();
@@ -8911,7 +9092,7 @@ class UIScene extends Phaser.Scene {
     // By a campfire you wake where you lay down; otherwise beside your own bed.
     const ps = from as PlayScene;
     const wakeScene = camp ? from.scene.key : "House";
-    const wakeX = camp ? ps.player.x : 3 * TILE, wakeY = camp ? ps.player.y : 5 * TILE + 8;
+    const wakeX = camp ? ps.player.x : HOUSE_WAKE.x, wakeY = camp ? ps.player.y : HOUSE_WAKE.y;
     G.data.scene = wakeScene as SaveData["scene"]; G.data.px = wakeX; G.data.py = wakeY; if (camp) G.data.entry = "";
     const saved = G.save();
     const cover = this.add.rectangle(0, 0, W, H, 0x0b1630, 0).setOrigin(0, 0).setDepth(30);

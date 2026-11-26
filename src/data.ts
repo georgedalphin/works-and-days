@@ -157,6 +157,16 @@ export const ITEMS: Record<string, ItemDef> = {
   Cloth: { id: "Cloth", value: 6, name: "Linen cloth", greek: "othone", kind: "material", desc: "A bolt of plain linen from your loom." },
   Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "material", desc: "A thick cloak pinned at the shoulder. Carried, it turns a little of every blow (Health +1)." },
   Press: { id: "Press", value: 35, name: "Press", greek: "lenos", kind: "place", desc: "A beam press over a stone bed, for olives and grapes. Place it on your homestead." },
+  Table: { id: "Table", value: 14, name: "Table", greek: "trapeza", kind: "place", desc: "A low wooden table, for meals and for setting things on. Furniture: set it down in your house." },
+  Stool: { id: "Stool", value: 6, name: "Stool", greek: "diphros", kind: "place", desc: "A four-legged stool. Sit on it to rest a while." },
+  Chair: { id: "Chair", value: 14, name: "Chair", greek: "klismos", kind: "place", desc: "A chair with a curved back and splayed legs, its seat of stretched hide. Sit in it to rest." },
+  Couch: { id: "Couch", value: 30, name: "Couch", greek: "kline", kind: "place", desc: "A couch to recline on, at meals or after a long day. Lying back on it rests you best of all, short of sleep." },
+  Rug: { id: "Rug", value: 24, name: "Woven rug", greek: "tapis", kind: "place", desc: "A woolen rug, red with an ochre center and a meander border. Lay it on the floor; other things can stand on it." },
+  Pelt: { id: "Pelt", value: 10, name: "Fleece rug", greek: "kodion", kind: "place", desc: "A soft fleece to lay on the floor, by the bed or the hearth." },
+  LampStand: { id: "LampStand", value: 18, name: "Lamp stand", greek: "lychnouchos", kind: "place", desc: "A tall stand with a clay lamp on it. At night it lights the room around it." },
+  Basket: { id: "Basket", value: 4, name: "Wool basket", greek: "kalathos", kind: "place", desc: "A woven basket of wool, with a spindle stuck in it." },
+  Vase: { id: "Vase", value: 8, name: "Jug of flowers", greek: "olpe", kind: "place", desc: "A painted jug with wildflowers in it, to brighten a room." },
+  Tapestry: { id: "Tapestry", value: 26, name: "Wall hanging", greek: "parapetasma", kind: "place", desc: "A woven hanging in red, blue and ochre. Face the back wall of your house to hang it." },
   Forge: { id: "Forge", value: 45, name: "Forge", greek: "eschara", kind: "place", desc: "A clay hearth with leather bellows, for working bronze. Place it on your homestead." },
   Olives: { id: "Olives", value: 2, name: "Olives", greek: "elaiai", kind: "crop", desc: "Black and bitter from the tree. Pressed, they give oil." },
   OliveOil: { id: "OliveOil", value: 22, name: "Olive oil", greek: "elaion", kind: "material", desc: "Athena's gift, golden-green: for lamps, for the body, for the table and the altar." },
@@ -363,6 +373,14 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Loom", qty: 1, needs: [["Wood", 10], ["Fiber", 4]], desc: "For weaving linen and wool.", at: "workbench" },
   { out: "Press", qty: 1, needs: [["Wood", 12], ["Stone", 8]], desc: "For olive oil, and must without treading.", at: "workbench" },
   { out: "Forge", qty: 1, needs: [["Stone", 10], ["Clay", 6], ["Hide", 1]], desc: "For bronze: arrowheads, pins, and your own tool work.", at: "workbench" },
+  // Furniture, for the house (see home.ts).
+  { out: "Table", qty: 1, needs: [["Wood", 6]], desc: "A low table, for meals.", at: "workbench" },
+  { out: "Stool", qty: 1, needs: [["Wood", 3]], desc: "A stool to sit and rest on.", at: "workbench" },
+  { out: "Chair", qty: 1, needs: [["Wood", 5], ["Hide", 1]], desc: "A curved-backed chair: a better rest.", at: "workbench" },
+  { out: "Couch", qty: 1, needs: [["Wood", 8], ["Cloth", 2]], desc: "A couch to recline on: the best rest short of sleep.", at: "workbench" },
+  { out: "LampStand", qty: 1, needs: [["Wood", 3], ["Lamp", 1]], desc: "A clay lamp on a tall stand, to light the house at night.", at: "workbench" },
+  { out: "Pelt", qty: 1, needs: [["Hide", 3]], desc: "A fleece rug for the floor." },
+  { out: "Basket", qty: 1, needs: [["Fiber", 4]], desc: "A wool basket for the corner." },
   // At the press.
   { out: "OliveOil", qty: 1, needs: [["Olives", 4]], desc: "Crush and press the olives, and let the oil settle.", at: "press", quality: true },
   { out: "Must", qty: 2, needs: [["Grapes", 5]], desc: "Press grapes to must, for the vat to ferment.", at: "press" },
@@ -375,10 +393,13 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   // At the kiln.
   { out: "Amphora", qty: 1, needs: [["Clay", 3]], desc: "A two-handled jar for wine.", at: "kiln", quality: true },
   { out: "Lamp", qty: 1, needs: [["Clay", 1], ["Wax", 1]], desc: "A wax lamp: lights caves wide, and never burns out.", at: "kiln", quality: true },
+  { out: "Vase", qty: 1, needs: [["Clay", 2], ["Flowers", 2]], desc: "A painted jug, filled with wildflowers.", at: "kiln" },
   { out: "Figurine", qty: 1, needs: [["Clay", 2], ["Ochre", 1]], desc: "A votive, painted with ochre: an excellent offering.", at: "kiln", quality: true },
   // At the loom.
   { out: "Cloth", qty: 1, needs: [["Fiber", 3]], desc: "A bolt of linen.", at: "loom", quality: true },
   { out: "Cloak", qty: 1, needs: [["Cloth", 2], ["Hide", 1]], desc: "Turns a little of every blow (Health +1 while carried).", at: "loom", quality: true },
+  { out: "Rug", qty: 1, needs: [["Cloth", 2], ["Ochre", 1]], desc: "A woolen rug, dyed with ochre.", at: "loom" },
+  { out: "Tapestry", qty: 1, needs: [["Cloth", 3], ["Ochre", 1]], desc: "A woven hanging for the wall.", at: "loom" },
 ];
 
 // ---- danger ----

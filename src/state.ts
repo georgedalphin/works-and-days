@@ -1,3 +1,4 @@
+import { COMFORT_KIND } from "./home";
 import type { SiteRec } from "./sites";
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
@@ -304,7 +305,7 @@ export class GameState {
       cleared: [],
       ground: {},
       treeHits: {},
-      scene: "House", px: 6 * 16 + 8, py: 5 * 16 + 8,
+      scene: "House", px: 9 * 16 + 8, py: 7 * 16 + 8,
       tendedHearthDay: "",
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
@@ -496,15 +497,23 @@ export class GameState {
   get sleepHours() { return Math.max(0, 24 - Math.max(this.data.clock, this.daylight - 2)); }
 
   /** Sleep until dawn. Returns hours slept and fatigue recovered. */
+  /** How comfortable the house is: one for each kind of furnishing in it (a table, a seat, a couch, a rug, a lamp...). */
+  get homeComfort() {
+    const kinds = new Set<string>();
+    for (const p of this.data.placed) if (p.where === "house" && COMFORT_KIND[p.id]) kinds.add(COMFORT_KIND[p.id]);
+    return kinds.size;
+  }
   sleep(collapsed = false, rough = false) {
     const hoursSlept = this.sleepHours;
     const credit = collapsed || rough ? 0.5 : 1; // a collapse, or the hard ground by a campfire: half the rest
     // Hera keeps the house: at +12 sleep there restores you wholly; at -12 it gives you half the rest.
     const hera = !collapsed && !rough && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
-    const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1));
+    // A comfortable home (each kind of furnishing you've made for it) rests you a little better.
+    const comfort = !collapsed && !rough && this.data.scene === "House" ? this.homeComfort : 0;
+    const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1) * (1 + 0.03 * comfort));
     this.data.fatigue -= recovered;
     const v0 = this.data.vitality;
-    this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")));
+    this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")) * (1 + 0.05 * comfort));
     const healed = this.data.vitality - v0;
     this.data.clock = 0;
     this.data.day += 1;
@@ -515,6 +524,7 @@ export class GameState {
     }
     this.essence = { ...this.essenceMax };
     const notes: string[] = [];
+    if (comfort >= 3) notes.push(comfort >= 8 ? "Your home is warm and full of good things, and you wake deeply rested." : comfort >= 5 ? "Your home is snug, and you wake well rested." : "Your home is getting cozy, and you sleep a little better for it.");
     // Requests not met in time lapse, and the asker is a little let down.
     for (const q of [...this.data.requests]) if (this.dayNumber > q.due) {
       this.data.requests.splice(this.data.requests.indexOf(q), 1);
