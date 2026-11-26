@@ -84,7 +84,7 @@ export const ELEMENT_OF: Record<string, "Earth" | "Water" | "Air" | "Fire"> = {
  * Your pool (the sum of the element's three Aretai) holds a few actions; it refills from empty in
  * ESSENCE.refillSeconds, more slowly as Fatigue mounts.
  */
-export const ESSENCE = { refillSeconds: 12, tiredSlowdown: 0.4, runPerSecond: 2 };
+export const ESSENCE = { refillSeconds: 12, tiredSlowdown: 0.4, runPerSecond: 2, runPerTap: 0.8 };
 export const EFFORT = {
   // Fire: Thymos (fighting) and Kratos (heavy labor).
   strike: 3, shove: 2, throwSpear: 4, chop: 4, sapling: 3, stone: 4, boulder: 6, mine: 5,

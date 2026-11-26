@@ -181,7 +181,7 @@ export class SoundScape {
   update(dt: number, st: SoundState) {
     if (!this.ctx || this.ctx.state !== "running") return;
     this.st = st;
-    const now = this.ctx.currentTime, out = ["Farm", "Wild", "Village"].includes(st.scene), rain = st.weather === "rain";
+    const now = this.ctx.currentTime, out = ["Farm", "Wild", "Village", "Gym"].includes(st.scene), rain = st.weather === "rain";
     const windy = st.weather === "wind" || [7, 10, 12, 9].includes(st.terrain);
     // Beds.
     this.fade("wind", out ? (windy ? 0.22 : 0.07) : st.scene === "House" ? 0.02 : 0);

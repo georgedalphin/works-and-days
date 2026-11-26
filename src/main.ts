@@ -10,7 +10,7 @@ import { LANDMARKS, seasonKey, type LandmarkDef } from "./landmarks";
 import { DIVINE, ALL_GODS, tierOf, TIER_WORDS, wrathChance, powerRecharge } from "./divine";
 import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
 import { fishHere, fishDef, type FishDef } from "./fishing";
-import { villageFestivals, daysUntil, type FestivalDef } from "./festivals";
+import { villageFestivals, daysUntil, festival, type FestivalDef } from "./festivals";
 import { HARMONIAI, INSTRUMENTS, MELODIES, melody, stepFreq, VILLAGE_SONGS, HUT_SONGS, type Melody } from "./music";
 import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
@@ -337,6 +337,10 @@ abstract class PlayScene extends Phaser.Scene {
   knock = 0; // seconds of being thrown back by a blow
   invuln = 0; // seconds before another blow can land
   mealT = 0;
+  /** Held still (at the start line, before the race begins). */
+  hold = false;
+  /** The dash: how built-up your sprint is (0–1), and how long the last burst lasts. */
+  dashLvl = 0; dashT = 0;
   lastHealAt = -1;
   /** Has tonight's Noumenia visit been rolled here? */
   noumRolled = false;
@@ -364,7 +368,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.knock > 0) { this.knock -= dt; return; }
     const k = this.keys, c = this.cursors;
     let vx = 0, vy = 0;
-    if (!this.paused) {
+    if (!this.paused && !this.hold) {
       if (k.A.isDown || c.left.isDown) vx -= 1;
       if (k.D.isDown || c.right.isDown) vx += 1;
       if (k.W.isDown || c.up.isDown) vy -= 1;
@@ -372,15 +376,23 @@ abstract class PlayScene extends Phaser.Scene {
     }
     let speed = 70;
     const moving = vx !== 0 || vy !== 0;
-    if (moving && k.SHIFT.isDown) {
-      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerSecond, G.data.aretai.Aiolos ?? 3) * dt * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1);
-      if (G.essence.Air >= cost) { G.essence.Air -= cost; speed = 115; }
+    // Running: each tap of Shift is a quick burst of speed, paid in Air; tap fast and they build into a sprint.
+    if (Phaser.Input.Keyboard.JustDown(k.SHIFT) && moving && !this.paused) {
+      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerTap, G.data.aretai.Aiolos ?? 3) * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1);
+      if (G.essence.Air >= cost) {
+        G.essence.Air -= cost; this.dashLvl = Math.min(1, this.dashLvl + 0.34); this.dashT = 0.42;
+        const puff = this.add.image(this.player.x, this.player.y + 6, "puff").setDepth(this.player.y - 1).setAlpha(0.55).setScale(0.5);
+        this.tweens.add({ targets: puff, alpha: 0, scale: 0.9, duration: 380, onComplete: () => puff.destroy() });
+      } else { G.spentFlash = { el: "Air", at: performance.now() }; }
     }
+    if ((this.dashT -= dt) <= 0) this.dashLvl = Math.max(0, this.dashLvl - dt * 2.6);
+    if (!moving) this.dashLvl = Math.max(0, this.dashLvl - dt * 5);
+    speed *= 1 + 0.85 * this.dashLvl;
     if (G.exhausted) speed *= 0.6;
     const len = Math.hypot(vx, vy) || 1;
     if (this.boat) { this.row(dt, moving ? vx / len : 0, moving ? vy / len : 0); this.animatePlayer(dt, false, 0); this.player.setDepth(this.player.y); return; }
     const w = this.underfoot();
-    if (w) speed = Math.min(speed, 70); // no running in water
+    if (w) { speed = Math.min(speed, 70); this.dashLvl = 0; } // no running in water
     speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     this.swim(dt, w);
@@ -1203,12 +1215,22 @@ abstract class PlayScene extends Phaser.Scene {
     if (a.kind === "skeleton" && a.state === "dead") return false;
     const b = labor(tool ? EFFORT.strike : EFFORT.shove, 1, "Thymos"); if (b === null) return true;
     const name = beast(a.kind);
-    if (!tool) { // a shove
-      a.bolt(this.player);
-      G.say(`You shove the ${name} away.`);
+    const thymos = G.data.aretai.Thymos ?? 3;
+    if (!tool) { // bare fists: a light blow that knocks the creature back
+      const target = thymos + 2 + (G.data.divine.day.fury === G.dayNumber ? 2 : 0) + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
+      const roll = d12(); this.gesture("act");
+      if (roll > target) { G.say(`You swing your fist at the ${name} and miss (d12 ${roll}, needed 1–${target}).${b}`); return true; }
+      const q = QUARRY[a.kind]; if (a.hp < 0) a.hp = q.hp;
+      a.hp -= 0.5; SOUND.sfx("hit");
+      if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return true; }
+      const ang = Math.atan2(a.sprite.y - this.player.y, a.sprite.x - this.player.x), push = 150;
+      a.sprite.setVelocity(Math.cos(ang) * push, Math.sin(ang) * push);
+      a.sprite.setTint(0xff8080); this.time.delayedCall(220, () => a.sprite.clearTint());
+      if (a.state === "charge" || a.state === "recoil") { a.state = "recoil"; a.timer = 0.6; } // knocked back, it gathers itself
+      else if (!this.aggressionRoll(a, 2)) { if (isMonster(a.kind)) a.charge(6); else a.bolt(this.player); }
+      G.say(`You punch the ${name} and knock it back! (d12 ${roll}, needed 1–${target})${b}`);
       return true;
     }
-    const thymos = G.data.aretai.Thymos ?? 3;
     const target = thymos + 3 + (weapon ? 1 : 0) + (G.data.divine.day.fury === G.dayNumber ? 2 : 0) + (G.patron?.aretai === "Thymos" ? 2 : 0) + G.boon("Ares") - darkPen();
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > target) { G.say(`You swing at the ${name} and miss (d12 ${roll}, needed 1–${target}).`); if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) a.bolt(this.player); return true; }
@@ -1921,7 +1943,7 @@ abstract class PlayScene extends Phaser.Scene {
 
   /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
   updateAnimals(dt: number) {
-    const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
+    const running = this.dashLvl > 0.3 && this.player.body!.velocity.length() > 80;
     const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.data.stealth - 4));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     if (!this.paused) for (const a of this.animals) {
@@ -3660,7 +3682,7 @@ class WildScene extends PlayScene {
       const rec = mythRec("naiad");
       this.naiad.setVisible(G.isDay && rec.gone !== today);
       // Shy: running at her sends her under the water for the day.
-      const running = this.keys.SHIFT.isDown && this.player.body!.velocity.length() > 80;
+      const running = this.dashLvl > 0.3 && this.player.body!.velocity.length() > 80;
       if (this.naiad.visible && rungOf(rec.days) === 0 && running && Math.hypot(this.naiad.x - this.player.x, this.naiad.y - this.player.y) < 64) {
         rec.gone = today; G.say("The Naiad starts at your rush and slips beneath the water. Gone, for today.");
       }
@@ -4642,16 +4664,17 @@ class VillageScene extends PlayScene {
       for (let x = 0; x < VW; x++) {
         ground[y].push(r() < 0.3 ? T.GRASS2 : T.GRASS);
         const edge = x < 1 || y < 1 || x >= VW - 1 || y >= VH - 1;
-        objs[y].push(edge && !(x >= 19 && x <= 21) ? T.EDGE : -1);
+        objs[y].push(edge && !(x >= 19 && x <= 21) && !(x === VW - 1 && y >= 14 && y <= 16) ? T.EDGE : -1); // gaps: the road north and south, and east to the gymnasion
       }
     }
     // The road through, and the square where it widens.
     for (let y = 0; y < VH; y++) ground[y][20] = T.PATH;
     for (let y = 12; y <= 18; y++) for (let x = 13; x <= 27; x++) ground[y][x] = T.PATH;
+    for (let x = 27; x < VW; x++) { ground[15][x] = T.PATH; } // the track east to the gymnasion
     for (const b of BUILDINGS) for (let y = b.ty + 3; y <= 12; y++) ground[y][b.tx + Math.floor(b.w / 32)] = T.PATH;
     for (const b of BUILDINGS) for (let y = 18; y <= b.ty + 3; y++) ground[y][b.tx + Math.floor(b.w / 32)] = T.PATH;
     // A few olives, flowers and stones about the place.
-    for (const [x, y, t] of [[3, 15, T.OLIVE], [36, 15, T.OLIVE], [3, 17, T.FLOWERS], [36, 17, T.FLOWERS], [17, 2, T.FLOWERS], [27, 2, T.STONE], [17, 27, T.FLOWERS], [21, 27, T.OLIVE], [11, 15, T.FLOWERS], [29, 15, T.FLOWERS]] as [number, number, number][]) objs[y][x] = t;
+    for (const [x, y, t] of [[3, 15, T.OLIVE], [37, 19, T.OLIVE], [3, 17, T.FLOWERS], [36, 18, T.FLOWERS], [17, 2, T.FLOWERS], [27, 2, T.STONE], [17, 27, T.FLOWERS], [21, 27, T.OLIVE], [11, 15, T.FLOWERS], [29, 15, T.FLOWERS]] as [number, number, number][]) objs[y][x] = t;
     // The ordinary households: a cottage each, with a path from the door to the square.
     this.households = villageHouseholds(G.data.seed);
     for (const h of this.households) {
@@ -4708,6 +4731,7 @@ class VillageScene extends PlayScene {
     this.targets.push(
       { x: 16 * TILE + 8, y: 15 * TILE, label: "The village well", act: () => G.say("The village well. With your water jar in hand, press Space here to fill it.") },
       { x: 31 * TILE + 8, y: 25 * TILE + 12, label: "The village altar", act: () => ui(this).openAltar("shrine") },
+      { x: (VW - 2) * TILE + 8, y: 14 * TILE, label: "Read the sign", act: () => G.say("East: the gymnasion and the stadion track. Young men train there every day.") },
     );
     // A festival: pennants strung over the altar ground, the sacrificial fire lit, and the village gathered there.
     const fest = festToday();
@@ -4739,7 +4763,9 @@ class VillageScene extends PlayScene {
     let sx = G.data.px, sy = G.data.py;
     if (G.data.entry === "N") { sx = 20 * TILE + 8; sy = 1.5 * TILE; }
     if (G.data.entry === "S") { sx = 20 * TILE + 8; sy = (VH - 1.5) * TILE; }
+    if (G.data.entry === "E") { sx = (VW - 1.5) * TILE; sy = 15 * TILE + 8; }
     G.data.entry = ""; G.data.scene = "Village";
+    for (let y = 14; y <= 16; y++) for (let x = VW - 2; x < VW; x++) this.objects.putTileAt(-1, x, y); // keep the east way clear
     this.makePlayer(sx, sy);
     this.ambience = new Ambience(this, G, { outdoor: true, terrain: 3, layer: this.objects, chimneys });
     this.player.setCollideWorldBounds(true);
@@ -4853,6 +4879,7 @@ class VillageScene extends PlayScene {
     if (!this.common(dt)) return;
     this.noumeniaVisit(HOUSE_SPOTS.map(([x, y]) => [x + 2, y + 4] as [number, number]), 0.7, 2, "It is the night of Noumenia. The dead have come into the village: pale shapes stand at the doors, where the living have set out suppers for Hecate.");
     if (this.knock > 0) return;
+    if (this.player.x > VW * TILE - 6) { if (!this.leaving) { G.data.entry = "W"; G.data.scene = "Gym"; this.goTo("Gym"); } return; }
     if (this.player.y < 6) this.leaveVillage("Farm");
     else if (this.player.y > VH * TILE - 12) this.leaveVillage("Wild");
   }
@@ -4885,12 +4912,183 @@ const SLOT = 44, GAP = 4;
 interface Cell { bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image; qty: Phaser.GameObjects.Text; star: Phaser.GameObjects.Text }
 const HOTBAR_X = (W - (SLOT * 10 + GAP * 9)) / 2, HOTBAR_Y = H - SLOT - 14;
 
+// ------------------------------------------------------------------ the gymnasion
+const GW = 56, GH = 22;
+/** The stadion track runs east-west on rows 8–11, from the start sills to the finish post: about a stade, scaled down. */
+const TRACK = { y0: 8, y1: 11, start: 6, finish: 50 };
+class GymScene extends PlayScene {
+  objects!: Phaser.Tilemaps.TilemapLayer;
+  youths: Walker[] = [];
+  race?: { runners: { w: Walker; x: number; v: number; phase: number; done: number }[]; state: "ready" | "go" | "done"; t: number; order: number; place: number; onDone: (place: number, n: number) => void; banner: Phaser.GameObjects.Text };
+  constructor() { super("Gym"); }
+  create() {
+    this.leaving = false; this.race = undefined; this.hold = false;
+    const r = rng(G.data.seed ^ 0x6e7a5);
+    const ground: number[][] = [], objs: number[][] = [];
+    for (let y = 0; y < GH; y++) {
+      ground.push([]); objs.push([]);
+      for (let x = 0; x < GW; x++) {
+        ground[y].push(r() < 0.25 ? T.GRASS2 : T.GRASS);
+        const edge = x < 1 || y < 1 || x >= GW - 1 || y >= GH - 1;
+        let o = edge && !(x === 0 && y >= 14 && y <= 16) ? T.EDGE : -1;
+        // Plane trees along the north and south, for shade, as at every gymnasion.
+        if (!edge && (y === 2 || y === 19) && x % 4 === (y === 2 ? 1 : 3) && x > 2 && x < GW - 3) o = T.TREE;
+        objs[y].push(o);
+      }
+    }
+    for (let y = TRACK.y0; y <= TRACK.y1; y++) for (let x = TRACK.start - 2; x <= TRACK.finish + 2; x++) ground[y][x] = T.PATH; // the track, beaten earth
+    for (let x = 0; x <= 20; x++) ground[15][x] = T.PATH; // the way in, past the herm to the palaestra
+    for (let y = 12; y <= 15; y++) ground[y][6] = T.PATH;
+    const map = this.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: GW, height: GH });
+    const ts = map.addTilesetImage("tiles", "tiles", TILE, TILE, 0, 0)!;
+    const gl = map.createBlankLayer("ground", ts)!.putTilesAt(ground, 0, 0);
+    softenPatches(map, gl, ground, T.GRASS2, T.GRASS, seasonGroundTint(G));
+    this.objects = map.createBlankLayer("objects", ts)!; this.objects.putTilesAt(objs, 0, 0);
+    this.objects.setCollision(SOLID).setDepth(1);
+    varyLayers(G, gl, this.objects);
+    const solids = this.physics.add.staticGroup();
+    const solid = (x: number, y: number, w: number, h: number) => { const b = solids.create(x, y, "") as Phaser.Physics.Arcade.Sprite; b.setVisible(false); (b.body as Phaser.Physics.Arcade.StaticBody).setSize(w, h); };
+    const g = this.add.graphics().setDepth(TRACK.y0 * TILE - 1);
+    // The start sills (balbis): a row of stone slabs with grooves for the toes; the finish: a post at each side.
+    g.fillStyle(0xd8d0bc).fillRect(TRACK.start * TILE, TRACK.y0 * TILE, 6, (TRACK.y1 - TRACK.y0 + 1) * TILE);
+    for (let y = TRACK.y0 * TILE + 3; y < (TRACK.y1 + 1) * TILE; y += 8) g.fillStyle(0x9c968a).fillRect(TRACK.start * TILE + 2, y, 2, 4);
+    g.fillStyle(0xe9e1cf, 0.55).fillRect(TRACK.finish * TILE + 7, TRACK.y0 * TILE, 2, (TRACK.y1 - TRACK.y0 + 1) * TILE);
+    for (const y of [TRACK.y0 * TILE - 10, (TRACK.y1 + 1) * TILE]) { g.fillStyle(0xe9e1cf).fillRect(TRACK.finish * TILE + 6, y, 4, 12); g.fillStyle(0xc4402a).fillRect(TRACK.finish * TILE + 5, y, 6, 3); }
+    // The palaestra: a colonnaded court for wrestling, roofed in red tile.
+    const px0 = 9 * TILE, py0 = 16 * TILE, pw = 11 * TILE;
+    const pg = this.add.graphics().setDepth(py0 + 3 * TILE);
+    pg.fillStyle(0xa8987a).fillRect(px0, py0 - 4, pw, 6); pg.fillStyle(0x9c4a32).fillRect(px0 - 4, py0 - 14, pw + 8, 11); pg.fillStyle(0x7a3a28).fillRect(px0 - 4, py0 - 4, pw + 8, 2);
+    pg.fillStyle(0x8a7a62).fillRect(px0, py0 + 2, pw, 30);
+    for (let x = px0 + 4; x < px0 + pw - 2; x += 14) { pg.fillStyle(0xf2ecd8).fillRect(x, py0 + 2, 5, 30); pg.fillStyle(0xd8d0bc).fillRect(x - 1, py0 + 2, 7, 2); }
+    pg.fillStyle(0xd8d0bc).fillRect(px0 - 4, py0 + 32, pw + 8, 5);
+    solid(px0 + pw / 2, py0 + 18, pw, 30);
+    // The herm of Hermes, lord of the gymnasion.
+    const hx = 4 * TILE + 8, hy = 14 * TILE + 6;
+    this.add.image(hx, hy, "herm").setOrigin(0.5, 1).setDepth(hy); solid(hx, hy - 3, 8, 6);
+    const sc = this;
+    this.targets = [
+      { x: hx, y: hy - 4, label: "Touch the herm of Hermes", act: () => {
+        if (G.data.offered.gymHerm === G.dayNumber) { G.say("You've touched the herm for luck today."); return; }
+        G.data.offered.gymHerm = G.dayNumber; const after = G.addFavor("Hermes", 1, 3);
+        G.say(`You touch the herm for luck, as the athletes do before they train. (Hermes ${after >= 0 ? "+" : ""}${after}, up to +3)`);
+      } },
+      { x: TRACK.start * TILE + 12, y: (TRACK.y1 + 1) * TILE + 4, get label() { return G.isDay ? "Race the young men (wager 5 silver)" : "The start line"; }, act: () => sc.offerRace() },
+      { x: px0 + pw / 2, y: py0 + 40, get label() { return G.isDay ? "Wrestle in the palaestra (wager 5 silver)" : "The palaestra"; }, act: () => sc.offerWrestle() },
+    ];
+    this.physics.world.setBounds(0, 0, GW * TILE, GH * TILE);
+    this.cameras.main.setBounds(0, 0, GW * TILE, GH * TILE);
+    this.setupInput();
+    let sx = G.data.px, sy = G.data.py;
+    if (G.data.entry === "W") { sx = 1.5 * TILE; sy = 15 * TILE + 8; }
+    G.data.entry = ""; G.data.scene = "Gym";
+    this.makePlayer(sx, sy);
+    this.ambience = new Ambience(this, G, { outdoor: true, terrain: 3, layer: this.objects, chimneys: [] });
+    this.player.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, this.objects); this.buildTrunks();
+    this.physics.add.collider(this.player, solids);
+    this.animals = [];
+    // Young men at the track by day, stretching and running their laps.
+    this.youths = [];
+    const used = new Set<string>();
+    for (let i = 0; i < 4; i++) {
+      const f = makeFolk(rng((G.data.seed ^ (0x9a + i * 77)) >>> 0), `gym${i}`, "adult", false, used);
+      const w = new Walker(this, f, (8 + i * 3) * TILE, (TRACK.y1 + 2) * TILE + 6, [(8 + i * 3) * TILE, (TRACK.y1 + 2) * TILE + 6]);
+      w.sprite.setVisible(G.isDay); this.youths.push(w);
+    }
+    this.cameras.main.fadeIn(250);
+    G.say(G.isDay ? "The gymnasion: a track of beaten earth under the plane trees, and the palaestra's colonnade. Young men are training, oiled and dusty." : "The gymnasion is empty under the stars.");
+    // A festival footrace waiting to be run.
+    const fid = G.data.raceFor;
+    if (fid) { G.data.raceFor = undefined; const f = festival(fid); this.time.delayedCall(900, () => this.startRace((place, n) => ui(this).awardAgon(f, place, `${f.agon!.name[0].toUpperCase() + f.agon!.name.slice(1)} at the ${f.name}: you finished ${["", "first", "second", "third", "fourth", "fifth"][place]} of ${n}.`))); }
+  }
+  offerRace() {
+    if (!G.isDay) { G.say("No one runs here at night."); return; }
+    if (this.race) return;
+    if (G.data.silver < 5) { G.say("They want 5 silver on it, to make it interesting."); return; }
+    ui(this).choose("Race the young men down the stadion for 5 silver? Tap Shift, fast, to sprint; mind your Air.", () => {
+      G.data.silver -= 5;
+      this.startRace((place) => {
+        if (place === 1) { G.data.silver += 15; G.say("You win the race! They pay up, grumbling: +15 silver (your 5 back, and 10 of theirs)."); }
+        else G.say(`You come in ${["", "first", "second", "third", "last"][place]}. They pocket your 5 silver, and slap you on the back.`);
+      });
+    });
+  }
+  offerWrestle() {
+    if (!G.isDay) { G.say("The palaestra is empty at night."); return; }
+    if (G.data.silver < 5) { G.say("A bout costs 5 silver on the side, they say."); return; }
+    ui(this).choose("Wrestle a bout for 5 silver? Throw your weight with the beat (Space).", () => {
+      G.data.silver -= 5;
+      ui(this).rhythm("Wrestling in the palaestra", "Throw your weight with the beat (Space).", 6, (score) => {
+        const you = score + 2 * (G.data.aretai.Kratos ?? 3) + (G.patron?.aretai === "Kratos" ? 2 : 0), them = 6 + d12() + Math.floor(Math.random() * 6);
+        if (you >= them) { G.data.silver += 10; G.say(`You throw him three times in the sand (${you} to ${them}). +10 silver.`); }
+        else G.say(`He throws you, and you taste the sand (${you} to ${them}). Your 5 silver is his.`);
+      });
+    });
+  }
+  /** A footrace down the track: you and three young men. Tap Shift to sprint; your Air decides how long you can keep it up. */
+  startRace(onDone: (place: number, n: number) => void) {
+    const laneY = (i: number) => (TRACK.y0 + i) * TILE + 10;
+    this.player.setPosition(TRACK.start * TILE + 14, laneY(1)); this.player.setVelocity(0, 0); this.facing = 2;
+    this.hold = true;
+    const runners = this.youths.slice(0, 3).map((w, i) => {
+      w.sprite.setVisible(true).setPosition(TRACK.start * TILE + 14, laneY(i === 0 ? 0 : i + 1)).setVelocity(0, 0);
+      return { w, x: w.sprite.x, v: 0, phase: Math.random() * 6, done: 0 };
+    });
+    const banner = this.add.text(this.player.x + 40, this.player.y - 40, "Ready...", { fontFamily: FONT, fontSize: "14px", color: "#f2e6c9", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(0.5).setResolution(4).setDepth(99999);
+    this.race = { runners, state: "ready", t: 0, order: 0, place: 0, onDone, banner };
+    G.essence.Air = Math.max(G.essence.Air, G.essenceMax.Air * 0.8); // a breath at the line
+  }
+  raceTick(dt: number) {
+    const R = this.race!; R.t += dt;
+    const finishX = TRACK.finish * TILE + 8;
+    if (R.state === "ready") {
+      const left = 3 - Math.floor(R.t);
+      R.banner.setText(left > 0 ? String(left) : "Go!").setPosition(this.player.x + 40, this.player.y - 40);
+      if (R.t >= 3) { R.state = "go"; R.t = 0; this.hold = false; SOUND.sfx("loose"); this.time.delayedCall(600, () => R.banner.setVisible(false)); }
+      return;
+    }
+    if (R.state !== "go") return;
+    // The young men: a steady pace with surges and fades of their own.
+    for (const r of R.runners) {
+      if (r.done) { if (r.v > 0) { r.v = Math.max(0, r.v - 120 * dt); r.x += r.v * dt; } }
+      else {
+        const target = 82 + 14 * Math.sin(R.t * 1.3 + r.phase) + (R.t > 4 ? 8 : 0) + r.phase * 2;
+        r.v += (target - r.v) * Math.min(1, dt * 3); r.x += r.v * dt;
+        if (r.x >= finishX) r.done = ++R.order;
+      }
+      r.w.sprite.x = r.x;
+      const pose = r.v > 5 ? [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(R.t * (r.v / 14)) % 4] : POSE.stand;
+      r.w.sprite.setFrame(2 * POSES + pose).setDepth(r.w.sprite.y);
+    }
+    if (this.player.x >= finishX && !R.place) { R.place = R.order + 1; R.order++; }
+    if (R.place || R.t > 40) {
+      R.state = "done"; const place = R.place || R.runners.length + 1;
+      this.time.delayedCall(800, () => { R.banner.destroy(); for (const r of R.runners) r.w.sprite.setPosition(r.w.home[0], r.w.home[1]); this.race = undefined; R.onDone(place, R.runners.length + 1); });
+    }
+  }
+  update(_t: number, dms: number) {
+    const dt = dms / 1000;
+    for (const w of this.youths) { w.sprite.setVisible(G.isDay || !!this.race); if (!this.race) w.update(dt, this.paused); }
+    if (!this.race) for (const w of this.youths) if (w.doing === "idle" && w.wait <= 0 && G.isDay) { w.goTo(Phaser.Math.Between(TRACK.start + 2, TRACK.finish - 2) * TILE, (TRACK.y1 + 2) * TILE + Phaser.Math.Between(-2, 30)); w.wait = 3 + Math.random() * 5; }
+    if (this.race) this.raceTick(dt);
+    if (!this.common(dt)) return;
+    if (this.knock > 0) return;
+    if (this.player.x < 6 && !this.race) { if (!this.leaving) { G.data.entry = "E"; G.data.scene = "Village"; this.goTo("Village"); } }
+  }
+  subjectAt(): string | null { return null; }
+  clearObject() {}
+  useItem() {
+    const tool = G.selectedItem && ITEMS[G.selectedItem.id].kind === "tool" ? G.selectedItem.id : null;
+    if (this.tryStrike(tool)) return;
+  }
+}
+
 class UIScene extends Phaser.Scene {
   rainGfx?: Phaser.GameObjects.Graphics;
   drops: { x: number; y: number; v: number }[] = [];
   /** Rain falls across the screen outdoors, slanting a little. */
   drawRain(dt: number) {
-    const on = G.data.weather === "rain" && ["Farm", "Wild", "Village"].includes(G.data.scene);
+    const on = G.data.weather === "rain" && ["Farm", "Wild", "Village", "Gym"].includes(G.data.scene);
     if (!this.rainGfx || !this.rainGfx.active) { this.rainGfx = this.add.graphics().setDepth(-1); this.drops = []; this.children.sendToBack(this.rainGfx); this.children.moveAbove(this.rainGfx, this.shade); }
     this.rainGfx.clear();
     if (!on) return;
@@ -5001,67 +5199,85 @@ class UIScene extends Phaser.Scene {
   }
 
   makeHelp(font: { fontFamily: string; color: string }) {
-    const left = [
+    // Two pages of two columns.
+    const pages: [string[], string[]][] = [[[
       "CONTROLS",
-      "Move: WASD or arrows. Run: hold Shift (spends Air).",
+      "Move: WASD or arrows. Run: tap Shift, fast, for bursts of speed (each tap spends a little Air).",
       "Aim: point the mouse at anything within two paces. Mouse outside the window: you act on what you face.",
       "Left click or Space: work with what you hold. Right click or E: interact. Q: study.",
       "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap). C: crafting.",
-      "J: journal. K: lore book. F: the gods. P: who you are. M: mute. N: music. H: this help. Esc: pause, save and quit.",
+      "J: journal. K: lore book. F: the gods. P: who you are. V (hold): sing. M: mute. N: music. H: this help. Esc: pause, save and quit.",
       "",
       "PACING",
-      "Every action draws Essence from its Aretai's element (fighting Fire, field work Earth, study Water; aim, song and running Air). Skill and the matching god's hour make it cheaper. An empty bar refills in about 12 seconds.",
-      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. A campfire (12 Fiber, 4 Stone) lets you sleep out. Your life is saved each dawn.",
+      "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, song and running Air. Skill makes each act cheaper, and so does the matching god's hour. An empty bar refills in about 12 seconds (slower when weary).",
+      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. A campfire (12 Fiber, 4 Stone, by hand) lets you sleep out for half a bed's rest. Your life is saved each dawn.",
       "",
       "FIGHTING AND HUNTING",
       "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
       "Sword (forged by Lykos): short reach, hardest blow. Axe, mattock and sickle serve at a pinch.",
+      "Bare hands (an empty slot): a light punch that knocks a creature back.",
       "Bow: hold Space to aim, click where the arrow lands. Lead moving quarry.",
       "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows take Vitality (the red bar: 6 per point of Health). At 0 you fall, and your Life Thread frays. Food, sleep and time heal it.",
-      "",
-      "YOUR GUEST",
-      "Tiresias, an old blind seer, sits about the farm. His small requests lead you through the whole world, one a day.",
-      "",
-      "MUSIC",
-      "Hold V to hum: 1–8 sing the scale of the harmonia; the wheel changes harmonia; hold an instrument to play it. Some melodies are minor magic: people teach them, nymphs and birds sing them (sing them back to learn).",
-      "",
-      "COOKING",
-      "Campfire or hearth: up to three foods make a dish that strengthens an Aretai a while; some are a god's own dish. Eat: Space.",
-    ];
-    const right = [
+    ], [
       "THE HOMESTEAD",
       "Hoe tills, the jar waters (refill at the well), the sickle cuts brush, the axe fells, the mattock breaks stone.",
       "Sow on tilled soil and water daily; crops watered every night or sown in their god's hour grow finer (★). Sell at the pithos.",
       "Goats: pet and milk them (E), keep manger and trough full. Honey every few days. Wine: mend the vat, tread grapes, wait 6 days.",
       "Crafting: handwork anywhere (C). Build a workbench, hold it and click to set it down, then E at it for chests, fences, a kiln, a loom, a press (oil, must) and a forge (bronze, tool work).",
+      "Tiresias, an old blind seer, sits about the farm. His small requests lead you through the whole world, one a day.",
       "",
+      "COOKING",
+      "At a campfire or the hearth (E): up to three foods in the pot. A dish strengthens the Aretai of its rarest food for a while, and heals; some old combinations are a god's own dish, and bring that god near. Eat with Space.",
+      "",
+      "FISHING",
+      "Make a rod (C). Hold it and press Space facing water within three paces to cast. Strike (Space) when the float dips, then press as the mark crosses the green. Fresh water and the sea hold different fish; the deep holds the big ones; dawn, dusk and rain bring them up.",
+      "",
+      "MUSIC",
+      "Hold V to hum: 1–8 sing the steps of the harmonia, and the mouse wheel changes harmonia. Hold an instrument to play it instead. Some melodies are minor magic: people teach them; nymphs and birds sing them (sing them back to learn).",
+    ]], [[
       "THE WILD",
-      "East lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
+      "East of the farm lies the wild; each place stays as you left it. Gaps in its borders can be anywhere along an edge. Forage shows its fruit once you know the plant (Q).",
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
       "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
-      "Fishing: make a rod (C). Hold it, Space facing water to cast; strike when the float dips, then press as the mark crosses the green.",
+      "The dead walk at night at crossroads and graveyards; on Noumenia, the first of the month, they gather.",
       "",
+      "FESTIVALS AND GAMES",
+      "The village keeps the festivals of the year on their days (J lists the next three). On the day, go to the altar: walk in the rite, bring the feast what it wants, and enter the agon for prizes and Kleos. Offerings to the festival's god count double.",
+      "East of the village are the gymnasion and the stadion track. The footrace is run there; any day, you can race the young men for a wager. Tap Shift to sprint.",
+    ], [
       "GODS, SIGNS AND PEOPLE",
       "Each of the day's twelve hours belongs to a god of the Cosmic Wheel. Pray and make offerings at altars (E).",
       "Favor (F) steps up at 1, 4, 8, 10, 12: help, gifts in the god's domain, a power to call on there, their Aretai +1, protection. Disfavor mirrors it, to real danger at -12. It drifts back toward 0. Country shrines, graveyards and crossroads herms have keepers who will tell you what their god wants.",
       "Hesiod's signs mark the year: study one as it happens and it helps for 4 days. Birds on your right are fair omens, on your left a warning. Watch for glints: rare finds.",
       "Villagers: talk daily and give gifts (hold the item, E). Theron trades; Lykos upgrades tools and forges swords.",
-      "Ask villagers if they need anything, and for rumors of lands they've heard of. J: your journal of promises and rumors.",
-    ];
+      "Ask villagers if they need anything, and for rumors of lands they've heard of. J: your journal of festivals, promises and rumors.",
+      "Strangers come to the inn; feed them, for any of them may be a god.",
+    ]]];
     const hbg = this.add.rectangle(W / 2, H / 2, 920, 630, 0x1f1712, 0.96).setStrokeStyle(2, 0xc4703f);
     const title = this.add.text(W / 2, 18, "Works & Days", { ...font, fontSize: "20px" }).setOrigin(0.5, 0);
-    const col = (lines: string[], x: number) => this.add.text(x, 50, lines.join("\n"), { ...font, fontSize: "12px", lineSpacing: 1, wordWrap: { width: 428 } });
-    const lt = col(left, W / 2 - 444), rt = col(right, W / 2 + 14);
-    const foot = this.add.text(W / 2, H - 26, "Click or press H to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);
-    const ht = this.add.container(0, 0, [title, lt, rt, foot]);
+    const col = (lines: string[], x: number) => this.add.text(x, 54, lines.join("\n"), { ...font, fontSize: "13px", lineSpacing: 2, wordWrap: { width: 424 } });
+    const pageObjs = pages.map(([l, r]) => [col(l, W / 2 - 444), col(r, W / 2 + 14)]);
+    const foot = this.add.text(W / 2, H - 26, "", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);
+    let page = 0;
+    const showPage = (n: number) => {
+      page = (n + pages.length) % pages.length;
+      pageObjs.forEach((objs, i) => objs.forEach((o) => o.setVisible(i === page)));
+      foot.setText(`Page ${page + 1} of ${pages.length}  ·  ← → or click to turn the page  ·  H, Space or Esc to close`);
+    };
+    showPage(0);
+    const lt = pageObjs[0][0], rt = pageObjs[0][1];
+    this.input.keyboard!.on("keydown-RIGHT", () => { if (this.help.visible) showPage(page + 1); });
+    this.input.keyboard!.on("keydown-LEFT", () => { if (this.help.visible) showPage(page - 1); });
+    this.helpPage = showPage;
+    const ht = this.add.container(0, 0, [title, ...pageObjs.flat(), foot]); void lt; void rt;
     this.help = this.add.container(0, 0, [hbg, ht]).setDepth(20).setVisible(true);
     this.modal = true;
     const closeHelp = () => { if (this.help.visible) { this.help.setVisible(false); this.modal = !!this.inv; } };
     this.input.keyboard!.on("keydown-H", () => {
       if (this.dialog || this.inv) return;
-      this.help.setVisible(!this.help.visible); this.modal = this.help.visible;
+      this.help.setVisible(!this.help.visible); this.modal = this.help.visible; if (this.help.visible) showPage(0);
     });
     this.input.keyboard!.on("keydown-E", () => {
       if (this.chestPanel) { this.closeChest(); this.closedByE = performance.now(); }
@@ -5071,9 +5287,10 @@ class UIScene extends Phaser.Scene {
       if (this.ritual && k === "SPACE") return; else if (this.sheetPanel && k === "ESC") this.closeSheet(); else if (this.talkPanel && k === "ESC" && !this.ritual) this.closeTalk(); else if (this.craft && (k === "ESC" || (k === "E" && this.craftAt !== "hand"))) this.closeCraft(); else if (this.chestPanel && (k === "ESC" || k === "E")) this.closeChest(); else if (this.devPanel && k === "ESC") this.closeDev(); else if (this.loreBook && k !== "SPACE") this.closeLore(); else if (this.market && k === "ESC") this.closeMarket(); else if (this.inv && k === "ESC") this.toggleInventory(); else if (k === "ESC" && !this.help.visible && !this.dialog && !this.ritual && this.playScene()) this.openPause(); else closeHelp();
     });
     this.input.keyboard!.on("keydown-E", () => { if (this.market) this.closeMarket(); else if (this.talkPanel) this.closeTalk(); });
-    hbg.setInteractive().on("pointerdown", closeHelp);
+    hbg.setInteractive().on("pointerdown", () => { if (page < pages.length - 1) showPage(page + 1); else { closeHelp(); showPage(0); } });
   }
 
+  helpPage?: (n: number) => void;
   prompt(label: string | null) { this.promptText.setText(label ? `E — ${label}` : ""); }
 
   update(_t: number, dms: number) {
@@ -5109,7 +5326,7 @@ class UIScene extends Phaser.Scene {
     else if (c >= day - 1.2 && c < day) { col = 0xd9732e; a = 0.25 * (1 - (day - c) / 1.2); }
     else if (c >= day) { col = 0x0b1630; a = Math.min(0.62, 0.3 + (c - day) * 0.12); }
     // A grey day: overcast and rain dim the daylight a little.
-    const outdoor = ["Farm", "Wild", "Village"].includes(G.data.scene);
+    const outdoor = ["Farm", "Wild", "Village", "Gym"].includes(G.data.scene);
     if (outdoor && c < day && (G.data.weather === "rain" || G.data.weather === "cloudy")) { const g = G.data.weather === "rain" ? 0.2 : 0.08; if (a < g) { col = 0x3a4250; a = g; } }
     this.shade.setFillStyle(col, a);
 
@@ -5331,7 +5548,11 @@ class UIScene extends Phaser.Scene {
       if (ideal) { G.earn("Kleos", 1, `your gift to the ${f.name} feast`); G.addFavor(f.god, 1, 10); }
       this.festivalMenu(f, ideal ? `"${ITEMS[held!.id].name}! Just what the ${f.name} wants." It goes to the head of the table, and everyone has some. (Everyone in the village +2; ${f.god} +1.)` : `It goes on the table with everything else, and is eaten. The village is glad of it. (Everyone in the village +1.)`);
     } });
-    if (f.agon && !rec.agon) opts.push({ label: `Enter ${f.agon.name} (${f.agon.aretai}; prize: ${f.agon.prizeName})`, fn: () => { rec.agon = 1; this.closeTalk(); G.note("festAgon"); this.rhythm(`${f.name}: ${f.agon!.name}`, f.agon!.help, 6, (score) => this.agonResult(f, score)); } });
+    if (f.agon && !rec.agon) opts.push({ label: f.agon.kind === "race" ? `Run in ${f.agon.name} at the gymnasion track (prize: ${f.agon.prizeName})` : `Enter ${f.agon.name} (${f.agon.aretai}; prize: ${f.agon.prizeName})`, fn: () => {
+      rec.agon = 1; this.closeTalk(); G.note("festAgon");
+      if (f.agon!.kind === "race") { G.data.raceFor = f.id; const sc = this.playScene(); G.say("The runners go out to the stadion east of the village, and the crowd follows."); if (sc) { G.data.entry = "W"; G.data.scene = "Gym"; sc.goTo("Gym"); } return; }
+      this.rhythm(`${f.name}: ${f.agon!.name}`, f.agon!.help, 6, (score) => this.agonResult(f, score));
+    } });
     opts.push({ label: `Make an offering at the altar (counts double for ${f.god} today)`, fn: () => this.openAltar("shrine") });
     const done = [rec.rite && "walked in the rite", rec.feast && "given to the feast", rec.agon && (rec.place ? `placed ${["", "first", "second", "third", "last"][rec.place]} in the contest` : "entered the contest")].filter(Boolean).join(", ");
     this.showTalk(`The ${f.name}`, `${f.god}'s festival · ${G.dateLabel()}`, said ?? `${f.desc}${done ? `\n\nYou have ${done}.` : ""}`, opts);
@@ -5347,8 +5568,12 @@ class UIScene extends Phaser.Scene {
     const names = [...folk].sort(() => Math.random() - 0.5).slice(0, 3);
     const rivals = names.map((n) => ({ n, v: 6 + d12() + Math.floor(Math.random() * 6) }));
     const place = 1 + rivals.filter((r) => r.v > you).length;
-    rec.place = place;
     const table = [...rivals.map((r) => ({ n: r.n, v: r.v })), { n: "You", v: you }].sort((x, y) => y.v - x.v).map((r, i) => `${i + 1}. ${r.n} (${r.v})`).join("   ");
+    this.awardAgon(f, place, `${a.name[0].toUpperCase() + a.name.slice(1)}: your timing ${score} of 18, ${a.aretai} ${ar} (×2)${bonus ? `, +${bonus}` : ""}: ${you}.\n\n${table}`);
+  }
+  /** Prizes for a festival agon, by place. */
+  awardAgon(f: FestivalDef, place: number, summary: string) {
+    const a = f.agon!, rec = festRec(f); rec.place = place;
     let prize = "";
     if (place === 1) {
       prize = `You win ${a.prizeName}! ${a.prize.map(([id, n]) => give(id, n)).join(", ")}.`;
@@ -5358,7 +5583,7 @@ class UIScene extends Phaser.Scene {
     } else if (place === 2) { G.data.silver += 10; G.earn("Kleos", 1, `second at the ${f.name}`); prize = "Second place: 10 silver, and the crowd's cheers."; }
     else if (place === 3) { G.data.silver += 4; prize = "Third place: 4 silver."; }
     else prize = "Last. The crowd laughs, kindly enough, and someone hands you a cup of wine.";
-    this.festivalMenu(f, `${a.name[0].toUpperCase() + a.name.slice(1)}: your timing ${score} of 18, ${a.aretai} ${ar} (×2)${bonus ? `, +${bonus}` : ""}: ${you}.\n\n${table}\n\n${prize}`);
+    this.festivalMenu(f, `${summary}\n\n${prize}`);
   }
 
   // ---------------------------------------------------------------- fishing: bringing it in
@@ -6773,7 +6998,7 @@ for (const ev of ["keydown", "pointerdown"]) window.addEventListener(ev, () => S
   pixelArt: true,
   physics: { default: "arcade", arcade: { debug: false } },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-  scene: [BootScene, TitleScene, CreationScene, FarmScene, HouseScene, WildScene, VillageScene, CaveScene, UIScene],
+  scene: [BootScene, TitleScene, CreationScene, FarmScene, HouseScene, WildScene, VillageScene, GymScene, CaveScene, UIScene],
 });
 
 (window as unknown as { WHEEL: typeof WHEEL }).WHEEL = WHEEL;

@@ -46,7 +46,9 @@ export interface SaveData {
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
   treeHits: Record<string, number>;
-  scene: "Farm" | "House" | "Wild" | "Village" | "Cave";
+  scene: "Farm" | "House" | "Wild" | "Village" | "Cave" | "Gym";
+  /** A festival footrace waiting to be run at the gymnasion (the festival's id). */
+  raceFor?: string;
   wx: number; wy: number; // the wilderness screen, in screens from home (0,0)
   /** Where along the side you walk in (tile x for N/S, tile y for E/W), so you arrive at the gap you left by. */
   entryAt?: number | null;
@@ -315,6 +317,7 @@ export class GameState {
     if (this.data.scene === "House") return "Your hut";
     if (this.data.scene === "Farm") return "Your homestead · Cultivated Farmlands";
     if (this.data.scene === "Village") return "The village · 1 screen from home";
+    if (this.data.scene === "Gym") return "The gymnasion · east of the village";
     if (this.data.scene === "Cave") { const c = this.data.caves[this.data.cave.key]; return `A ${c?.type ?? ""} cave · level ${this.data.cave.level}${this.data.torchLit ? " · torchlit" : " · in darkness"}`; }
     const rec = this.data.screens[`${this.data.wx},${this.data.wy}`];
     const dist = Math.abs(this.data.wx) + Math.abs(this.data.wy);
