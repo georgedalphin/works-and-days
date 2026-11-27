@@ -8,7 +8,7 @@ import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary,
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
 import type { SiteRec } from "./sites";
-import { WAYFARERS, rollWayfarers, wayChance, brigandChance, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
+import { CUTTHROAT_GREET, WAYFARERS, rollWayfarers, wayChance, brigandChance, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
@@ -4449,6 +4449,12 @@ interface WayGroup {
   tree?: [number, number]; water?: [number, number]; fire?: Phaser.GameObjects.Image; glow?: Phaser.GameObjects.Image; stone?: Phaser.GameObjects.Image; gfx?: Phaser.GameObjects.Graphics;
   bite?: number; swing?: number; stray?: Animal; leading?: boolean; quest?: string; raidT?: number; raidOn?: boolean; helpedRaid?: boolean; lost?: number;
   cool?: Map<Animal, number>; pack?: Animal[]; prey?: Animal; fortress?: boolean; beast?: Animal; killedBeast?: boolean;
+  /**
+   * Brigands' temper. Most bands are robbers: they want your purse, not your life, so in a fight they offer you
+   * quarter once you're hurt, and let you go if you run. A cutthroat band (rarer, farther out, more at night) means to
+   * leave no one to tell of it: they chase far, take everything, and may come on even after you've paid.
+   */
+  cutthroat?: boolean; quarter?: boolean; routTried?: Set<Animal>;
 }
 /** Something a stranger would be glad to eat. */
 const isFoodGift = (id: string) => !!id && !!ITEMS[id] && (!!INGREDIENTS[id] || ITEMS[id].kind === "meal" || ITEMS[id].kind === "crop" || ["Milk", "Honey", "Plum", "Cornel", "WildGrapes", "Grapes", "Wine"].includes(id));
@@ -4720,6 +4726,7 @@ class WildScene extends PlayScene {
     const fgen = rng(screenSeed(wx, wy) ^ 0x2545f491);
     this.placeForage(fgen, this.landTerrain, this.isSea ? (this.site ? 3 + Math.floor(fgen() * 3) : 0) : 4 + Math.floor(fgen() * 4), (x, y) =>
       x > 1 && y > 1 && x < WW - 2 && y < WH - 2 && objs[y][x] === -1 && ground[y][x] !== T.PATH && ground[y][x] !== T.FLAGS);
+    this.arrivals = []; this.fauna = [];
     if (!this.isSea) this.spawnCreatures(p, gen); else { this.animals = []; this.chase = new Map(); }
     if (plain) this.spawnMythborn();
     if (this.hasCave) this.placeCaveMouth();
@@ -5597,8 +5604,11 @@ class WildScene extends PlayScene {
     return o === -1 || o === T.FLOWERS;
   }
 
+  /** This land's creatures (kind, how many), kept so newcomers can wander in. */
+  fauna: [Species, number][] = [];
   spawnCreatures(p: Profile, gen: () => number) {
     this.animals = [];
+    this.fauna = p.creatures as [Species, number][];
     const free = (x: number, y: number) => this.free(x, y);
     const spot = (): [number, number] => {
       for (let i = 0; i < 60; i++) {
@@ -5616,14 +5626,57 @@ class WildScene extends PlayScene {
           const flock: Animal[] = [];
           for (let j = 0; j < 3; j++) { const a = new Animal(this, kind, x + j * 6, y + (j % 2) * 5, new Phaser.Geom.Rectangle(x - 120, y - 90, 240, 180), free); flock.push(a); this.animals.push(a); }
           flock.forEach((a) => (a.flock = flock));
-        } else {
-          const range = kind === "deer" ? 110 : 70;
-          const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), free);
-          this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
-          this.animals.push(a);
-        }
+        } else this.makeCreature(kind, x, y);
       }
     }
+  }
+
+  /** One creature of this land, at home around (x, y). */
+  makeCreature(kind: Species, x: number, y: number) {
+    const range = kind === "deer" ? 110 : 70;
+    const a = new Animal(this, kind, x, y, new Phaser.Geom.Rectangle(x - range, y - range, range * 2, range * 2), (px, py) => this.free(px, py));
+    this.physics.add.collider(a.sprite, this.objects); this.collideTrunks(a.sprite);
+    this.animals.push(a);
+    return a;
+  }
+
+  /** Newcomers due to wander in (in seconds), one for each creature that left. */
+  arrivals: number[] = [];
+  /**
+   * Creatures that go off through a gap in the edge of the map have gone on to other country: they're
+   * removed. Now and then another of this land's creatures wanders in a while later, somewhere out of sight.
+   */
+  departures(dt: number) {
+    const W = WW * TILE, H = WH * TILE, m = 6;
+    const owned = new Set<Animal>(); for (const g of this.ways) for (const a of [...g.foes, ...g.goats, ...g.raiders, ...(g.pack ?? [])]) owned.add(a);
+    for (const a of [...this.animals]) {
+      if (a.state === "dead" || a.state === "gone" || a.def.flies || a === this.monster || owned.has(a) || this.chase.has(a) || a.orbit) continue;
+      const x = a.sprite.x, y = a.sprite.y;
+      if (x > -m && y > -m && x < W + m && y < H + m) continue;
+      a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1);
+      const left = this.animals.filter((b) => b.state !== "dead" && !b.def.flies && b !== this.monster && !owned.has(b)).length;
+      if (this.fauna.length && (left < 2 || Math.random() < 0.5)) this.arrivals.push(15 + Math.random() * 45);
+    }
+    if (this.paused || !this.arrivals.length) return;
+    this.arrivals = this.arrivals.map((t) => t - dt);
+    if (this.arrivals[0] > 0) return;
+    this.arrivals.shift();
+    this.wanderIn();
+  }
+  /** A creature of this land comes into a spot you can't see from where you stand. */
+  wanderIn(): Animal | undefined {
+    const pool = this.fauna.filter(([k]) => !SPECIES[k].flies);
+    const total = pool.reduce((n, [, w]) => n + w, 0); if (!total) return;
+    let r = Math.random() * total, kind = pool[0][0];
+    for (const [k, w] of pool) { if ((r -= w) <= 0) { kind = k; break; } }
+    const view = this.cameras.main.worldView;
+    for (let i = 0; i < 80; i++) {
+      const x = (3 + Math.floor(Math.random() * (WW - 6))) * TILE + 8, y = (3 + Math.floor(Math.random() * (WH - 6))) * TILE + 8;
+      if (!this.free(x, y) || this.depthAt(x, y + 5) || Phaser.Geom.Rectangle.Contains(view, x, y) || Math.hypot(x - this.player.x, y - this.player.y) < 170) continue;
+      const a = this.makeCreature(kind, x, y); a.sprite.setAlpha(0); this.tweens.add({ targets: a.sprite, alpha: 1, duration: 800 });
+      return a;
+    }
+    return undefined;
   }
 
   placeCaveMouth() {
@@ -6361,6 +6414,8 @@ class WildScene extends PlayScene {
   /** How likely people are about here: near your farm and the village, and with roads, more; out in the wilds, seldom. */
   get nearHome() { return Math.min(Math.max(Math.abs(G.data.wx), Math.abs(G.data.wy)), Math.max(Math.abs(G.data.wx), Math.abs(G.data.wy - 1))); }
   get peopleChance() { return wayChance(this.nearHome, this.rec.roads?.length ?? 0); }
+  /** How likely a band of brigands is cutthroats rather than robbers: one in eight near the settled lands, more farther out and by night. */
+  get cutthroatChance() { return Math.min(0.5, 0.12 + 0.06 * Math.max(0, this.depth - 2)) * (G.isDay ? 1 : 1.5); }
   /** How likely brigands are waiting on this screen's road: more the farther it is from home. */
   get ambushChance() { return brigandChance(this.nearHome, this.rec.roads?.length ?? 0, G.isDay); }
   /** On arrival: perhaps someone is here, on the road or at their work. */
@@ -6449,6 +6504,7 @@ class WildScene extends PlayScene {
     const seed = Math.floor(Math.random() * 1e9), folk = makeParty(def, seed), sc = this;
     const g: WayGroup = { def, people: [], foes: [], goats: [], raiders: [], phase: "", t: 0, t2: 0, life: 120 + Math.random() * 120, met: false, talking: false, done: {}, trail: [], trailT: 0, chatT: 2 + Math.random() * 4, chatI: 0,
       nearSaid: false, gone: false, kills: 0, god: def.god || TWELVE[Math.floor(Math.random() * TWELVE.length)], anchor: [0, 0], restT: 0, truth: Math.random() < 0.5 ? 0 : 1, shootT: 1.5 };
+    if (def.id === "brigands") g.cutthroat = Math.random() < this.cutthroatChance;
     // Where they stand, and where they are going.
     let spots: [number, number][] = [];
     const ring = (cx: number, cy: number, r: number) => folk.map((_, i) => [cx + Math.cos((i / folk.length) * Math.PI * 2 + 0.6) * r, cy + Math.sin((i / folk.length) * Math.PI * 2 + 0.6) * r * 0.8] as [number, number]);
@@ -6919,7 +6975,9 @@ class WildScene extends PlayScene {
       return;
     }
     // Strike first, and it's a fight whatever was said.
-    if (g.phase !== "fight" && live.some((a) => a.state === "charge" || a.state === "recoil" || (a.hp >= 0 && a.hp < QUARRY.brigand.hp))) { if (g.phase === "parley") ui(this).closeTalk(); for (const a of live) a.appeased = false; this.brigandsAttack(g, "Blood is drawn, and that settles it."); return; }
+    if (g.phase === "paid") return; // they have what they came for, and are going
+    const bloodied = g.phase !== "quarter" && g.phase !== "gaveup" ? (a: Animal) => a.hp >= 0 && a.hp < QUARRY.brigand.hp : () => false; // wounds from the fight before don't restart it
+    if (g.phase !== "fight" && live.some((a) => a.state === "charge" || a.state === "recoil" || bloodied(a))) { if (g.phase === "parley") ui(this).closeTalk(); for (const a of live) a.appeased = false; this.brigandsAttack(g, "Blood is drawn, and that settles it."); return; }
     if (g.phase === "") {
       if (nearest < (G.isDay ? 120 : 84)) {
         g.phase = "coming"; G.say(live.length > 1 ? `${live.length === 2 ? "Two" : "Three"} men step out onto the way ahead of you, and they are not smiling.` : "A man steps out onto the way ahead of you, and he is not smiling.");
@@ -6930,20 +6988,36 @@ class WildScene extends PlayScene {
     if (g.phase === "coming") {
       for (const a of live) { if (a.state === "charge" || a.state === "recoil") continue; a.state = "walk"; a.tx = px; a.ty = py + 2; a.timer = 1; (a as FigureFoe).faceTo(px, py); }
       if (nearest < 34) this.parley(g);
-      else if (nearest > 280) { g.phase = "gaveup"; G.say("You leave them behind. They don't follow far."); for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); } }
+      else if (nearest > (g.cutthroat ? 420 : 280)) { g.phase = "gaveup"; G.say(g.cutthroat ? "You've lost them, for now." : "You leave them behind. They don't follow far."); for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); } }
       return;
     }
-    if (g.phase === "gaveup") { if (nearest < 90) g.phase = "coming"; return; }
+    if (g.phase === "gaveup") { if (nearest < (g.cutthroat ? 140 : 90)) g.phase = "coming"; return; }
+    if (g.phase === "quarter") {
+      for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); (a as FigureFoe).faceTo(px, py); }
+      if (!ui(this).talkPanel) this.brigandsAttack(g, "You give no answer.");
+      return;
+    }
     if (g.phase === "parley") {
       for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); (a as FigureFoe).faceTo(px, py); }
       if (!ui(this).talkPanel) this.brigandsAttack(g, "You turn your back on them. That was a mistake.");
       return;
     }
     if (g.phase === "fight") {
+      if (!g.cutthroat) {
+        // Robbers: it's your purse they want. Hurt you enough and they offer quarter; run, and they let you go.
+        if (!g.quarter && G.data.vitality > 0 && G.data.vitality <= G.vitalityMax * 0.35) { this.offerQuarter(g); return; }
+        if (nearest > 170) {
+          g.phase = "gaveup"; G.say("They let you go. It's your purse they wanted, not a chase.");
+          for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); }
+          return;
+        }
+      } else if (nearest > 420) { g.phase = "gaveup"; G.say("You've lost them, for now. They'll be watching the road."); for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); } return; }
       for (const a of live) {
-        // Hurt badly, a man throws down his weapon and runs.
-        if (a.hp > 0 && a.hp <= 1) { this.rout(g, a); continue; }
+        // Hurt badly, a robber throws down his weapon and runs; a cutthroat may fight on.
+        g.routTried ??= new Set();
+        if (a.hp > 0 && a.hp <= 1 && !g.routTried.has(a)) { g.routTried.add(a); if (!g.cutthroat || Math.random() < 0.4) { this.rout(g, a); continue; } }
         if (a.state === "idle" || a.state === "walk") a.charge(30);
+        if (g.cutthroat && a.state === "charge") a.chaseT = 30; // they don't tire of it
         if ((a as FigureFoe).folk.extras.pole === "bow" && a.state === "charge" && dist(a) > 70 && dist(a) < 230 && (g.shootT -= dt) <= 0) {
           g.shootT = 2.2 + Math.random(); a.state = "recoil"; a.timer = 0.6; a.sprite.setVelocity(0, 0);
           this.time.delayedCall(250, () => { if (a.sprite.active && a.state !== "dead") this.shootAt(a); });
@@ -6956,21 +7030,26 @@ class WildScene extends PlayScene {
   parley(g: WayGroup) {
     const u = ui(this), live = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed), n = live.length;
     g.phase = "parley";
-    const toll = Math.min(G.data.silver, 6 + 4 * n + this.depth * 2);
+    const toll = g.cutthroat ? G.data.silver : Math.min(G.data.silver, 6 + 4 * n + this.depth * 2);
     const go = (msg: string) => { u.closeTalk(); this.brigandsLeave(g, msg); };
     const fight = (msg: string) => { u.closeTalk(); this.brigandsAttack(g, msg); };
     const opts: { label: string; fn: () => void }[] = [];
     if (G.grace("Hermes") >= 7) opts.push({ label: "Walk on (Hermes keeps his own)", fn: () => go("You walk on as if they weren't there. The one with the club opens his mouth, and shuts it again, and they stand aside: something about you says Hermes, patron of thieves, would not like it. (Swift One)") });
-    if (G.data.silver > 0) opts.push({ label: `Hand over ${toll} silver`, fn: () => { G.data.silver -= toll; go(`They weigh the coins in their hands, grin, and melt back into the brush. (−${toll} silver)`); } });
+    if (G.data.silver > 0) opts.push({ label: g.cutthroat ? `Hand over all you have (${toll} silver)` : `Hand over ${toll} silver`, fn: () => {
+      G.data.silver -= toll;
+      if (g.cutthroat && Math.random() < 0.3) fight(`They take it, and look at each other, and one of them laughs. "Dead men don't talk to soldiers." (−${toll} silver)`);
+      else go(`They weigh the coins in their hands, grin, and melt back into the brush. (−${toll} silver)`);
+    } });
     else opts.push({ label: "Turn out your empty purse", fn: () => { const r = d12(); if (r <= 6) go("They stare at your empty purse, and laugh, and one of them claps you on the back. \"Poorer than us! Go on, then.\""); else fight("\"Nothing? Then we'll take it out of your hide.\""); } });
-    const tl = (G.data.aretai.Logos ?? 3) + 1 + G.boon("Hermes");
+    const tl = (G.data.aretai.Logos ?? 3) + 1 + G.boon("Hermes") - (g.cutthroat ? 3 : 0);
     opts.push({ label: "Talk your way past (Logos)", fn: () => { const r = d12(); if (r <= tl) go(`You talk: about the soldiers you passed on the road, about the shepherd who saw them, about how poor you are and how rich the next fool will be. They look at each other, and let you by. (d12 ${r}, needed 1–${tl})`); else fight(`They hear you out, then laugh. "Pretty words." (d12 ${r}, needed 1–${tl})`); } });
     const held = G.selectedItem?.id ?? "", armed = ["spear", "sword", "axe"].includes(held), kl = Math.min(3, Math.floor((G.data.currencies.Kleos ?? 0) / 3));
     const tt = Math.max(1, (G.data.aretai.Thymos ?? 3) + (armed ? 2 : 0) + kl - (n - 1) + G.boon("Ares"));
     opts.push({ label: `Face them down (Thymos${armed ? `, ${ITEMS[held].name.toLowerCase()} in hand` : ""})`, fn: () => { const r = d12(); if (r <= tt) { go(`You plant your feet and look them in the eye${armed ? `, your ${ITEMS[held].name.toLowerCase()} ready` : ""}${kl ? ", and one of them mutters your name" : ""}. They decide you are not worth it. (d12 ${r}, needed 1–${tt})`); G.earn("Kleos", 1, "you stared down brigands"); } else fight(`Your voice cracks. They smell it. (d12 ${r}, needed 1–${tt})`); } });
     opts.push({ label: "Fight them", fn: () => fight("You won't pay. So be it.") });
     const names = live.map((a) => (a as FigureFoe).folk.name).join(" and ");
-    u.showTalk(n > 1 ? "Brigands" : "A brigand", `${names} · men of the lonely roads`, `${pick(g.def.greet)}${live.some((a) => (a as FigureFoe).folk.extras.pole === "bow") ? "\n\nOne of them has an arrow on the string." : ""}`, opts);
+    const greet = g.cutthroat ? pick(CUTTHROAT_GREET) + "\n\nThere is old blood on the club, and none of them looks away." : pick(g.def.greet);
+    u.showTalk(n > 1 ? "Brigands" : "A brigand", `${names} · ${g.cutthroat ? "cutthroats of the lonely roads" : "men of the lonely roads"}`, `${greet}${live.some((a) => (a as FigureFoe).folk.extras.pole === "bow") ? "\n\nOne of them has an arrow on the string." : ""}`, opts);
   }
   brigandsAttack(g: WayGroup, msg: string) {
     g.phase = "fight";
@@ -6992,8 +7071,28 @@ class WildScene extends PlayScene {
     if (G.data.silver <= 0) { G.say("You've nothing to throw them. They keep coming."); return; }
     const n = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed).length, toll = Math.min(G.data.silver, 10 + 5 * n + this.depth * 2);
     G.data.silver -= toll;
+    if (g.cutthroat && Math.random() < 0.4) { G.say(`You throw your purse down in the road. One snatches it up; the others come on anyway. They want no one telling tales. (−${toll} silver)`); return; }
     for (const a of g.foes) if (a.state === "charge" || a.state === "recoil") { a.state = "idle"; a.sprite.setVelocity(0, 0); }
     this.brigandsLeave(g, `You throw your purse down in the road. They snatch it up and are gone. (−${toll} silver)`);
+  }
+  /** Robbers, when you're hurt: lower your weapon and pay, and you live. */
+  offerQuarter(g: WayGroup) {
+    const u = ui(this), live = g.foes.filter((a) => a.sprite.active && a.state !== "dead" && !a.routed), n = live.length;
+    g.quarter = true; g.phase = "quarter";
+    for (const a of live) { a.state = "idle"; a.timer = 99; a.sprite.setVelocity(0, 0); (a as FigureFoe).faceTo(this.player.x, this.player.y); }
+    const toll = Math.min(G.data.silver, 10 + 5 * n + this.depth * 2), best = this.bestThing();
+    const opts: { label: string; fn: () => void }[] = [];
+    if (toll > 0) opts.push({ label: `Throw them your purse (${toll} silver)`, fn: () => { u.closeTalk(); G.data.silver -= toll; this.brigandsLeave(g, `You throw your purse down. They snatch it up and back away into the brush. (−${toll} silver)`); } });
+    else if (best) opts.push({ label: `Let them take your ${ITEMS[best.id].name.toLowerCase()}`, fn: () => { u.closeTalk(); G.removeItem(best.id, best.qty); this.brigandsLeave(g, `They go through your pack, and take the ${ITEMS[best.id].name.toLowerCase()}${best.qty > 1 ? ` (${best.qty})` : ""}. "Pleasure doing business."`); } });
+    else opts.push({ label: "Show them you've nothing", fn: () => { u.closeTalk(); this.brigandsLeave(g, "They turn out your pack, find nothing worth the carrying, and spit, and go."); } });
+    opts.push({ label: "Fight on", fn: () => { u.closeTalk(); this.brigandsAttack(g, "You raise your weapon again."); } });
+    u.showTalk(n > 1 ? "Brigands" : "A brigand", "they hold back", `"Enough! You're bleeding, friend. ${toll > 0 ? "Throw down the purse" : "Let us see what you carry"}, and walk away. Nobody needs to die on this road."`, opts);
+  }
+  /** The most valuable stack in your pack (what a robber takes when your purse is empty). */
+  bestThing(): Slot | null {
+    let best: Slot | null = null, bv = 0;
+    for (const sl of G.data.slots) { if (!sl) continue; const v = (ITEMS[sl.id]?.value ?? 0) * sl.qty; if (v > bv) { bv = v; best = sl; } }
+    return best;
   }
 
   // ---- what you do for them
@@ -7027,7 +7126,14 @@ class WildScene extends PlayScene {
     this.time.delayedCall(3500, () => this.tweens.add({ targets: a.sprite, alpha: 0, duration: 1200, onComplete: () => { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } }));
   }
   struckDown(a: Animal | string) {
-    if (typeof a !== "string" && a.kind === "brigand" && G.data.silver > 0 && !G.warded("Hades") && !G.data.divine.charges.Hades) {
+    const band = typeof a !== "string" && a.kind === "brigand" ? this.ways.find((x) => x.foes.includes(a as FigureFoe)) : undefined;
+    if (band && band.cutthroat && !G.warded("Hades") && !G.data.divine.charges.Hades) {
+      // Cutthroats leave you for dead: everything they can carry, and another thread of your life.
+      const lost = G.data.silver; G.data.silver = 0; const best = this.bestThing(); if (best) G.removeItem(best.id, best.qty);
+      G.data.lifeThread = Math.max(0, G.data.lifeThread - 1);
+      G.say(`They leave you for dead in the road${lost ? `, and take every coin (−${lost} silver)` : ""}${best ? ` and your ${ITEMS[best.id].name.toLowerCase()}` : ""}. You live, but only just. (Life Thread −1 more)`);
+      band.phase = "paid"; for (const b of band.foes) if (b.sprite.active && b.state !== "dead") { b.appeased = true; this.runOff(b, 40); }
+    } else if (typeof a !== "string" && a.kind === "brigand" && G.data.silver > 0 && !G.warded("Hades") && !G.data.divine.charges.Hades) {
       const lost = Math.ceil(G.data.silver / 2); G.data.silver -= lost;
       G.say(`While you lie senseless, they go through your things: −${lost} silver.`);
       const g = this.ways.find((x) => x.foes.includes(a as FigureFoe)); if (g) { g.phase = "paid"; for (const b of g.foes) if (b.sprite.active && b.state !== "dead") { b.appeased = true; this.runOff(b, 40); } }
@@ -7276,6 +7382,7 @@ class WildScene extends PlayScene {
   update(_t: number, dms: number) {
     const dt = dms / 1000;
     this.updateAnimals(dt);
+    this.departures(dt);
     this.updateMythborn(dt);
     this.directHutFolk(dt);
     this.directSiteFolk(dt);
@@ -8437,6 +8544,7 @@ class UIScene extends Phaser.Scene {
       "Somewhere out there are Delphi, where the Pythia speaks Apollo's oracles to the clean, once a month, and Knossos, Minos' palace, with the Labyrinth beneath it. Take a torch, and Ariadne's thread.",
       "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. Beasts, brigands and folk are slowed and drowned by the same ground and water (birds, shades and sea creatures aside); companions wade with you but wait at the edge of deep water. Creatures swim only a stretch they can cross on one breath, and go around wider water. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Some creatures only defend themselves (boar, bear, deer, fox): back away and they break off. Hunters (wolves, jackals, lions, and the monsters and the dead) keep after you until you are well away, or across water they can't swim.",
+      "Brigands on the far roads are mostly robbers: hurt you and they offer quarter for your purse, run and they let you go. Some bands are cutthroats, who take everything and chase far. Creatures that wander off the edge of the map are gone; others may wander in.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "The dead walk at night at crossroads and graveyards; on Noumenia, the first of the month, they gather.",

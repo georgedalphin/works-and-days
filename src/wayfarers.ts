@@ -134,6 +134,12 @@ export const WAY_SEEN: Record<string, string> = {
   brigands: "Something about the stillness here makes the back of your neck prickle.",
 };
 /** Someone coming into view while you're here. */
+/** What cutthroats say when they step out: not a toll, but everything. */
+export const CUTTHROAT_GREET = [
+  "\"Everything. The purse, the pack, the cloak off your back. Then we'll see.\"",
+  "\"Long way from anywhere, this. Nobody to hear. Empty your purse on the ground, slowly.\"",
+  "\"You should have stayed on the farm. Put it all down, every coin.\"",
+];
 export const WAY_COMING: Record<string, string> = {
   traveler: "A traveler comes into view along the way.", peddler: "A peddler comes along, his pots clanking.", pilgrim: "A pilgrim in white is coming this way.",
   rhapsode: "Someone is singing, coming along the road.", runner: "A runner comes pounding along the way.", pilgrims: "Two pilgrims in white come along the way.",
