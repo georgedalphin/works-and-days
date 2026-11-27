@@ -29,12 +29,13 @@ import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROU
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { BEASTS, OX_DAY, newBeast, type Beast, type BeastKind } from "./herd";
+import { WONDERS, WONDER_ORDER, WORKSHOP, WARD_KINDS, fits, successes, type Wonder, type WonderId, type WonderCtx, type Ench, type Workshop } from "./wonders";
 import { Animal, SPECIES, SURE_FOOTED, BREATHLESS, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { artCondition, artWhere, RURAL_TEACHERS, type ArtCtx } from "./rural";
 import { MATERIALS, material, weaveBonuses, weaveDays, type Material, type WeaveCtx } from "./circlets";
 import { ASPECTS, HERBS, REMEDIES, remedyOf, conditions, brewOf, brewTier, type Aspect, type BrewCtx } from "./pharmakeia";
-import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
+import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art, type Currency } from "./gods";
 import { essencePools } from "./data";
 import { MONSTERS, isMonster, monsterFor, wanderTarget, WANDER_MIN_DEPTH, GRAVE_OFFERINGS, RIDDLES, type MonsterKind } from "./monsters";
 import { MYTH, RUNGS, RUNG_DAYS, NAIAD_NAMES, SATYR_NAMES, SPRING_SITES } from "./mythborn";
@@ -71,6 +72,46 @@ const TEACH = "\n\n(You learn Pharmakeia, the herb-Art: every check is 2 easier 
 interface Target { x: number; y: number; label: string; act: () => void }
 /** A Greek name's possessive: Argos' and Onos', but Aura's. */
 const poss = (n: string) => (n.endsWith("s") ? `${n}'` : `${n}'s`);
+// ---- Thaumatapoiia: what your wonder-made things do (wonders.ts)
+/** A working bound into a thing, once it has settled. */
+const wonderOn = (item: string | undefined | null, id: WonderId): Ench | undefined => { if (!item) return undefined; const e = G.data.wonders.on[item]?.find((x) => x.id === id); return e && e.settleUntil === undefined ? e : undefined; };
+const wornWonders = (id: WonderId) => (Object.values(G.data.worn).filter(Boolean) as string[]).map((it) => wonderOn(it, id)).filter((e): e is Ench => !!e);
+const DEAD_KINDS = ["eidolon", "lampad", "skeleton"];
+/** A blow with a wonder-made weapon: keen edge and bound fire bite deeper, a ghost blade cuts the dead, a bane slays its kind. */
+function weaponWonder(tool: string, kind: string, base: number): number {
+  let dmg = base;
+  const k = wonderOn(tool, "keen"); if (k) dmg += [0.5, 1, 1.5][k.tier - 1];
+  const f = wonderOn(tool, "flame"); if (f) { dmg += [0.5, 1, 1.5][f.tier - 1]; f.fed = G.dayNumber; }
+  const g = wonderOn(tool, "ghost"); if (g && DEAD_KINDS.includes(kind)) dmg += [1, 2, 3][g.tier - 1];
+  const b = wonderOn(tool, "bane"); if (b) dmg = b.choice === kind ? dmg * [2, 3, 3][b.tier - 1] + (b.tier === 3 ? 1 : 0) : Math.max(0.5, dmg - (b.tier === 1 ? 0.5 : 1));
+  return dmg;
+}
+/** Fire or a ghost blade touches the shades. */
+const touchesDead = (tool: string) => !!(wonderOn(tool, "ghost") || wonderOn(tool, "flame"));
+/** What kind of harm a creature does: beasts', men's weapons, or uncanny. */
+const harmOf = (kind: string): "beast" | "weapon" | "uncanny" => kind === "brigand" ? "weapon" : DEAD_KINDS.includes(kind) || ["empousa", "minotaur", "siren", "sphinx", "stymphalian", "strix", "centaur", "lion"].includes(kind) ? "uncanny" : "beast";
+/** Worn warding or divine protection turning a blow. */
+function armorWard(src: "beast" | "weapon" | "uncanny", dmg: number): number {
+  if (dmg <= 0) return dmg;
+  let best = dmg;
+  for (const e of wornWonders(src === "uncanny" ? "divine" : "warding")) {
+    if (src !== "uncanny" && e.choice !== src) continue;
+    best = Math.min(best, e.tier === 1 ? dmg * 0.75 : e.tier === 2 ? dmg * 0.5 : dmg * 0.5 - 1);
+  }
+  return Math.max(0, Math.round(best));
+}
+/** Living armor shifts to take a blow (once or twice a day). */
+function livingTurns(): boolean {
+  for (const e of wornWonders("living")) {
+    if (e.tier < 2) continue;
+    if (e.usedDay !== G.dayNumber) { e.usedDay = G.dayNumber; e.used = 0; }
+    if ((e.used ?? 0) < e.tier - 1) { e.used = (e.used ?? 0) + 1; return true; }
+  }
+  return false;
+}
+/** A flame-bound thing you carry, if any (it lights the dark). */
+const flameCarried = () => G.data.slots.find((sl) => sl && wonderOn(sl.id, "flame"))?.id;
+const UNCANNY_CAUSES = ["lightning", "Dionysus' madness", "Apollo's fever", "plague", "the cold of the grave", "a storm"];
 /** One of your working animals in the scene. */
 interface HerdSprite { b: Beast; sprite: Phaser.GameObjects.Sprite; t: Target; animT: number; biteT: number; huntT: number; wanderT: number; tx: number; ty: number; scented: boolean; goal?: Animal; mode?: "guard" | "catch" | "bay" }
 
@@ -96,6 +137,8 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
   if (G.exhausted) { G.say("You are too exhausted to work. Rest."); return null; }
   const disc = G.hourDiscount(aretai);
   let [el, cost] = laborCost(effort, aretai);
+  const mw = wonderOn(G.selectedItem?.id, "masterwork"), mwF = mw ? [0.8, 0.6, 0.5][mw.tier - 1] : 1; // a masterwork tool: the work seems to do itself
+  cost *= mwF; fatigue *= mwF;
   if (aretai === "Thymos" && G.data.divine.day.fury === G.dayNumber) cost /= 2; // Ares' battle-fury
   if (!G.spend({ [el]: cost })) {
     G.spentFlash = { el, at: performance.now() };
@@ -104,7 +147,7 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
   }
   const zeus = aretai === "Kratos" ? (G.warded("Zeus") ? 0 : 1 - 0.08 * G.boon("Zeus")) : 1; // Zeus eases heavy labor
   G.addFatigue(fatigue * disc * zeus * (G.gear.work ? 0.85 : 1) * (G.blessed("dawn") ? 0.85 : 1) * (G.crownHas("ivy") ? 0.9 : 1)); // a working tunic, the dawn's blessing, an ivy crown: the work tires you less
-  return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
+  return disc < 1 ? ` (${poss(G.patron!.god)} hour: the work comes easier)` : "";
 }
 
 // ------------------------------------------------------------------ music
@@ -235,7 +278,7 @@ function mealEffect(id: string, q: number): { ar?: string; god?: string; n: numb
 }
 /** An item's name in a sentence: lower case, except names of gods and heroes. */
 const lowerName = (id: string) => /^(Hecate|Prometheus|Kykeon|Kakavia|Melikraton)/.test(ITEMS[id].name) ? ITEMS[id].name : ITEMS[id].name.toLowerCase();
-const effectText = (e: { ar?: string; god?: string; n: number; hours: number }) => e.god ? `${e.god}'s favor counts as ${e.n} higher for ${e.hours} hours` : `${e.ar} +${e.n} for ${e.hours} hours`;
+const effectText = (e: { ar?: string; god?: string; n: number; hours: number }) => e.god ? `${poss(e.god)} favor counts as ${e.n} higher for ${e.hours} hours` : `${e.ar} +${e.n} for ${e.hours} hours`;
 /** Eat the dish in your hand. */
 function eatHeld() {
   const i = G.data.selected, s = G.data.slots[i]; if (!s) return;
@@ -619,7 +662,7 @@ abstract class PlayScene extends Phaser.Scene {
     }
     const sc = this;
     const station: Record<string, Station> = { Workbench: "workbench", Kiln: "kiln", Loom: "loom", Press: "press", Forge: "forge" };
-    if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => ui(sc).openCraft(station[p.id]) };
+    if (station[p.id]) o.t = { ...o.t, label: `Work at the ${ITEMS[p.id].name.toLowerCase()}`, act: () => (p.id === "Forge" ? sc.forgeChoice() : ui(sc).openCraft(station[p.id])) };
     else if (p.id === "Chest") o.t = { ...o.t, label: "Open the chest", act: () => ui(sc).openChest(p) };
     else if (p.id === "Boat") o.t = { ...o.t, get label() { return sc.boat ? "" : "Get in the boat"; }, act: () => sc.boardBoat(o) };
     else if (p.id === "Campfire") {
@@ -892,7 +935,9 @@ abstract class PlayScene extends Phaser.Scene {
     this.cameras.main.shake(160, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(220, () => this.player.clearTint());
     if (body) { // wounds to the body: lightning, falling rock, drowning, stings
-      const v = Math.max(1, Math.round(dmg / 3 / (cause === "lightning" && G.crownHas("oak") ? 2 : 1))); G.heal(-v); // Zeus' oak: lightning hurts the crowned half as much
+      let v = Math.max(1, Math.round(dmg / 3 / (cause === "lightning" && G.crownHas("oak") ? 2 : 1))); // Zeus' oak: lightning hurts the crowned half as much
+      if (UNCANNY_CAUSES.includes(cause)) v = Math.max(0, armorWard("uncanny", v)); // divine protection
+      G.heal(-v);
       G.say(`${what} (−${v} Vitality)${this.lowWarn()}`);
       if (G.data.vitality <= 0) this.struckDown(cause);
       return;
@@ -1413,7 +1458,8 @@ abstract class PlayScene extends Phaser.Scene {
     this.hurtAt = this.time.now;
     const d = SPECIES[a.kind];
     const hit = landBlow(blowOf(d.damage) + (G.exhausted ? 1 : 0) + (G.selectedItem?.id === "Kopis" ? 1 : 0)); // armor where it lands turns it; worn out (or swinging a kopis), you take it worse
-    let dmg = hit.dmg;
+    let dmg = armorWard(harmOf(a.kind), hit.dmg); // warding, divine protection
+    const shifted = dmg > 0 && livingTurns(); if (shifted) dmg = 0; // living armor takes it
     if (G.warded("Ares") && dmg > 0) dmg = Math.max(1, Math.floor(dmg / 2)); // Ares turns the blow
     if (hit.turned) SOUND.sfx("chop");
     G.heal(-dmg); G.addFatigue(2);
@@ -1426,6 +1472,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
     const verb: Record<string, string> = { minotaur: "gores", brigand: "clubs", boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
+    if (shifted) G.say("Your living armor shifts under the blow and takes it.");
     G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you${hit.where}! ${dmg > 0 ? `(−${dmg} Vitality)${this.lowWarn()}` : "(no harm done)"}`);
     if (G.data.vitality <= 0) this.struckDown(a);
   }
@@ -1648,7 +1695,7 @@ abstract class PlayScene extends Phaser.Scene {
       return false;
     }
     if (torch) tool = "torch";
-    if (a.kind === "eidolon" && tool !== "torch" && tool !== "SilverDagger") { G.say("Your blow passes through the shade like smoke. Only fire, or silver, touches the dead."); return true; }
+    if (a.kind === "eidolon" && tool !== "torch" && tool !== "SilverDagger" && !(tool && touchesDead(tool))) { G.say("Your blow passes through the shade like smoke. Only fire, or silver, touches the dead."); return true; }
     if (a.kind === "skeleton" && a.state === "dead") return false;
     const b = labor(tool ? EFFORT.strike : EFFORT.shove, 1, "Thymos"); if (b === null) return true;
     const name = beast(a.kind);
@@ -1677,6 +1724,7 @@ abstract class PlayScene extends Phaser.Scene {
     let dmg = tool === "torch" ? 1 : a.kind === "skeleton" ? ({ mattock: 2, axe: 1, sickle: 0, spear: 1, sword: 1, Club: 2, Labrys: 2, Kopis: 1, SilverDagger: 1, Javelin: 0 } as Record<string, number>)[tool] ?? 1 : MELEE[tool];
     if (tool === "SilverDagger" && (isMonster(a.kind) || a.kind === "eidolon")) dmg += 1; // silver bites the uncanny
     if (G.grace("Zeus") >= 4 && isMonster(a.kind)) dmg += 1; // Zeus against the monsters
+    if (tool !== "torch") dmg = weaponWonder(tool, a.kind, dmg); // wonder-made: keen, fire, ghost blade, bane
     if (dmg === 0) { G.say(`Your ${tool} skitters off bare bone. It needs a crushing blow.`); return true; }
     a.hp -= dmg;
     if (a.kind === "empousa" && a.state !== "charge" && a.state !== "recoil") { a.charge(6); a.sprite.setTexture("empousaTrue", 0); }
@@ -1891,11 +1939,12 @@ abstract class PlayScene extends Phaser.Scene {
     const jav = ammo === "Javelin", what = jav ? "javelin" : "spear";
     const hit = this.animals.find((a) => a.state !== "dead" && a.state !== "gone" && a.sprite.visible && a.kind !== "goat"
       && Math.hypot(a.sprite.x - x, a.sprite.y + 3 - y) <= QUARRY[a.kind].size + 3);
-    if (hit && hit.kind === "eidolon") { G.say(`Your ${what} passes through the shade and clatters on the stone.`); hit.charge(5); }
+    const ret = wonderOn(ammo, "returning");
+    if (hit && hit.kind === "eidolon" && !touchesDead(ammo)) { G.say(`Your ${what} passes through the shade and clatters on the stone.`); hit.charge(5); }
     else if (hit) {
       const q = QUARRY[hit.kind];
       if (hit.hp < 0) hit.hp = q.hp;
-      const dmg = hit.kind === "skeleton" ? (jav ? 0 : 1) : SPEAR_THROW.damage - (jav ? 1 : 0);
+      const dmg = weaponWonder(ammo, hit.kind, hit.kind === "skeleton" ? (jav ? 0 : 1) : SPEAR_THROW.damage - (jav ? 1 : 0)) + (ret?.tier === 3 ? 1 : 0);
       hit.hp -= dmg; this.poisonHit(hit);
       if (hit.hp <= 0) { G.say(`Your ${what} takes the ${beast(hit.kind)} cleanly.`); this.kill(hit); this.creatureEvent(hit, "slain"); }
       else {
@@ -1909,6 +1958,9 @@ abstract class PlayScene extends Phaser.Scene {
       for (const a of this.animals) if (a.kind !== "goat" && a.state !== "dead" && a.state !== "gone" && Math.hypot(a.sprite.x - x, a.sprite.y - y) < 48) a.bolt({ x, y });
     }
     // It comes to rest on open ground: if it fell in brush or water, where it last skipped.
+    // A returning weapon comes back: to your hand, or (weakly bound) to your feet.
+    if (ret && ret.tier >= 2 && !G.addItem(ammo, 1)) { G.say(`Your ${what} turns in the air and flies back into your hand.`); return; }
+    if (ret) { this.dropItem(ammo, 1, this.player.x + (this.facing === 1 ? -8 : 8), this.player.y + 6); G.say(`Your ${what} tumbles back and lands at your feet.`); return; }
     let dx = x, dy = y;
     const ux = this.player.x - x, uy = this.player.y + 4 - y, ul = Math.hypot(ux, uy) || 1;
     for (let i = 0; i < 16 && !this.openGround(dx, dy); i++) { dx += (ux / ul) * 6; dy += (uy / ul) * 6; }
@@ -2560,6 +2612,21 @@ abstract class PlayScene extends Phaser.Scene {
   riding = ""; yoked = "";
   trail: [number, number][] = []; traces?: Phaser.GameObjects.Graphics;
   shied = new WeakSet<Animal>(); panniersSaidT = 0;
+  /** Where and when you work wonders: the hour, season, moon and weather, and the forge. */
+  wonderCtx(where: Workshop): WonderCtx {
+    const rec = (this as unknown as { rec?: ScreenRec }).rec;
+    return { clock: G.data.clock, daylight: G.daylight, isDay: G.isDay, season: G.month.season, moon: G.moon, weather: G.data.weather, festival: festToday()?.name ?? "",
+      terrain: rec?.terrain ?? 3, where, crossroads: (rec?.roads?.length ?? 0) >= 3, graveyard: false };
+  }
+  /** E at your own forge: plain forge-work, or wonder-making once you know how. */
+  forgeChoice() {
+    const u = ui(this);
+    if (!G.data.wonders.known.length) { u.openCraft("forge"); return; }
+    u.showTalk("Your forge", "bronze and fire", "The coals are banked. What will you make?", [
+      { label: "Forge-work (make and mend)", fn: () => { u.closeTalk(); u.openCraft("forge"); } },
+      { label: "Thaumatapoiia: work a wonder", fn: () => u.openWonders(this.wonderCtx("home")) },
+    ]);
+  }
   /** Which of your animals belong in this scene: all of them on the farm, those walking with you elsewhere outdoors. */
   herdWanted(): Beast[] {
     if (!this.petAllowed()) return [];
@@ -2799,7 +2866,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Warnings of danger: Athena's owls, Artemis' birds, a watchful companion. And Athena's grey eyes see through an empousa. */
   dangerTick(dt: number) {
     if ((this.dangerT -= dt) > 0 || this.paused) return; this.dangerT = 0.5;
-    const owl = G.grace("Athena") >= 4, birds = G.grace("Artemis") >= 7, hound = [...this.herd.values()].find((h) => h.b.kind === "hound" && h.b.follow), watcher = (!!this.pet && !this.pet.riding && TAMABLE[G.data.companion?.kind ?? ""]?.role === "watch" && !G.data.companion?.stay) || !!hound;
+    const owl = G.grace("Athena") >= 4, birds = G.grace("Artemis") >= 7, hound = [...this.herd.values()].find((h) => h.b.kind === "hound" && h.b.follow), living = wornWonders("living").length > 0, watcher = living || (!!this.pet && !this.pet.riding && TAMABLE[G.data.companion?.kind ?? ""]?.role === "watch" && !G.data.companion?.stay) || !!hound;
     const grey = G.grace("Athena") >= 7;
     for (const a of this.animals) {
       if (this.warned.has(a) || a.state === "dead" || a.state === "gone" || !a.sprite.visible || a.appeased) continue;
@@ -2812,8 +2879,8 @@ abstract class PlayScene extends Phaser.Scene {
       if (!owl && !birds && !watcher) continue;
       const dir = Math.abs(dx) > Math.abs(dy) * 2 ? (dx > 0 ? "east" : "west") : Math.abs(dy) > Math.abs(dx) * 2 ? (dy > 0 ? "south" : "north") : `${dy > 0 ? "south" : "north"}-${dx > 0 ? "east" : "west"}`;
       const c = G.data.companion;
-      G.say(hound ? `${hound.b.name} stiffens, hackles up, growling low toward the ${dir}: something dangerous is near.` : watcher ? `${c!.name} goes still, ears up, staring ${dir}: something dangerous is near.` : owl ? `An owl hoots, sharp and sudden: Athena's warning. Something dangerous is near, to the ${dir}.` : `The birds fall silent, then cry out in alarm to the ${dir}: something dangerous is near.`);
-      if (watcher) this.alarm({ sprite: hound ? hound.sprite : this.pet!.sprite } as unknown as Animal);
+      G.say(hound ? `${hound.b.name} stiffens, hackles up, growling low toward the ${dir}: something dangerous is near.` : living && !(this.pet && TAMABLE[c?.kind ?? ""]?.role === "watch") ? `Your living armor goes cold against your skin, on the ${dir} side: something dangerous is near.` : watcher ? `${c!.name} goes still, ears up, staring ${dir}: something dangerous is near.` : owl ? `An owl hoots, sharp and sudden: Athena's warning. Something dangerous is near, to the ${dir}.` : `The birds fall silent, then cry out in alarm to the ${dir}: something dangerous is near.`);
+      if (watcher && (hound || this.pet)) this.alarm({ sprite: hound ? hound.sprite : this.pet!.sprite } as unknown as Animal);
     }
   }
   // ---------------------------------------------------------------- friends who join you (friends.ts)
@@ -2966,7 +3033,9 @@ abstract class PlayScene extends Phaser.Scene {
       if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
-    const hit = landBlow(blowOf(8)), dmg = hit.dmg;
+    const hit = landBlow(blowOf(8));
+    let dmg = armorWard(from.kind === "stymphalian" ? "uncanny" : "weapon", hit.dmg);
+    if (dmg > 0 && livingTurns()) { dmg = 0; G.say("Your living armor shifts and the arrow glances off."); }
     G.heal(-dmg); G.addFatigue(1); this.invuln = 0.8;
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
@@ -4172,7 +4241,7 @@ class FarmScene extends PlayScene {
     G.data.crops[k] = { id: crop, growth: 0, dryNights: 0, dryStreak: 0, hourBonus: hour, withered: false, picks: 0, sign: signed };
     this.drawCrop(k);
     if (signed) G.say("Sown in the season the signs proclaim, it will grow finer.");
-    G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.aretai === "Night" ? "the night, Hades' time" : `${d.god}'s hour`}, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
+    G.say(`You sow ${d.name.toLowerCase()}.${hour ? ` Sown in ${d.aretai === "Night" ? "the night, Hades' time" : `${poss(d.god)} hour`}, it will grow finer.` : ""}${G.data.ground[k] === "wet" ? "" : " Water it today."}`);
   }
 
   /** Grapes picked in Dionysus' hour, or by one he favors, are finer. */
@@ -5272,7 +5341,7 @@ class WildScene extends PlayScene {
         this.targets.push({ x: at([f[0] + 2, f[1] + 1])[0], y: at([f[0] + 2, f[1] + 1])[1] + 4, label: "Make an offering to Apollo and Artemis", act: () => ui(sc).priestTalk("Apollo", "", "Leto's altar on Ortygia", true, 8) });
         this.targets.push({ x: at(f)[0], y: at(f)[1] + 6, get label() { return s.marks!.palm ? "" : "Pray under Leto's palm"; }, act: () => sc.letoPalm() });
       } break;
-      case "forge": if (here(f)) { prop("pl_Forge", f, true, 6); this.targets.push({ x: at(f)[0], y: at(f)[1] + 8, get label() { return s.marks!.forge === seasonKey(G.data.year, G.month.season) ? "" : "Search about the god's forge"; }, act: () => sc.godsForge() }); } break;
+      case "forge": if (here(f)) { prop("pl_Forge", f, true, 6); this.targets.push({ x: at(f)[0], y: at(f)[1] + 8, get label() { return s.marks!.forge === seasonKey(G.data.year, G.month.season) ? (G.data.wonders.known.length ? "Work a wonder at the god's forge" : "") : "Search about the god's forge"; }, act: () => (s.marks!.forge === seasonKey(G.data.year, G.month.season) ? ui(sc).openWonders(sc.wonderCtx("god")) : sc.godsForge()) }); } break;
       case "sirens": case "reef": if (here(wreck)) {
         const img = prop("wreck", wreck, false, 8); if (s.treasury) img.setAlpha(0.8);
         this.targets.push({ x: at(wreck)[0], y: at(wreck)[1], get label() { return s.treasury ? "" : "Search the wreck"; }, act: () => sc.searchWreck() });
@@ -5450,9 +5519,9 @@ class WildScene extends PlayScene {
   }
   intoLabyrinth() {
     if (this.leaving) return;
-    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || G.data.divine.day.hecateLight === G.dayNumber;
+    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || !!flameCarried() || G.data.divine.day.hecateLight === G.dayNumber;
     if (G.doomed("Hecate") && !G.data.divine.day.hecateLight) { G.data.torchLit = false; G.say("Your light will not catch. Hecate denies you fire in the dark."); }
-    else if (G.count("Lamp") <= 0 && G.data.torchLit && G.data.divine.day.hecateLight !== G.dayNumber) G.removeItem("Torch", 1);
+    else if (G.count("Lamp") <= 0 && !flameCarried() && G.data.torchLit && G.data.divine.day.hecateLight !== G.dayNumber) G.removeItem("Torch", 1);
     G.data.px = this.player.x; G.data.py = this.player.y + 18;
     G.data.scene = "Labyrinth"; G.data.entry = "D";
     this.goTo("Labyrinth");
@@ -5937,10 +6006,12 @@ class WildScene extends PlayScene {
       const type: CaveType = roll <= 6 ? "common" : roll <= 9 ? "sacred" : "chthonic";
       G.data.caves[this.key] = { type, boss: "alive", hoard: false, mined: {} };
     }
-    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || G.data.divine.day.hecateLight === G.dayNumber;
+    const flame = flameCarried();
+    G.data.torchLit = G.count("Lamp") > 0 || G.count("Torch") > 0 || !!flame || G.data.divine.day.hecateLight === G.dayNumber;
     if (G.doomed("Hecate") && !G.data.divine.day.hecateLight) { G.data.torchLit = false; G.say("Your light will not catch. Hecate denies you fire in the dark."); }
     else if (G.data.divine.day.hecateLight === G.dayNumber) G.say("Hecate's torch goes before you into the dark.");
     else if (G.count("Lamp") > 0) G.say("You light your clay lamp and duck inside. Its steady flame throws the light wide.");
+    else if (flame) G.say(`The fire bound in your ${ITEMS[flame].name.toLowerCase()} lights the way in.`);
     else if (G.data.torchLit) { G.removeItem("Torch", 1); G.say("You light a torch and duck inside."); }
     else G.say("You have no torch. You feel your way into the dark: every action is at -3. (Make torches with C.)");
     G.note("cave");
@@ -8784,6 +8855,9 @@ class UIScene extends Phaser.Scene {
       "THE ARTS (R)",
       "Rites you know, and weaving. The Rural Arts (Hearth Blessing, Crop Blessing, Flock Thriving, Dawn Renewal, Wild Panic, Solar Witness) are taught by country folk; each is done in its place, and components, the hour and the season lower its CRs. Crowns and wreaths are woven of fresh plants (sprigs cut from trees with the sickle): a crown is worn, a wreath hangs at home.",
       "",
+      "THAUMATAPOIIA, WONDER-MAKING",
+      "Lykos the smith teaches it once he knows you (4), and more when he knows you well (8); Hephaestus' favor (+4) gives his own: Flame Weapon and Living Armor. At a forge (yours; Lykos' for 5 silver, +1; the god's forge on its island, +5): choose a thing you carry or wear and a working. Components and cosmic costs are spent whether or not it takes; each check passed is a success (0 fails, 1 weak, 2 full, 3 a masterpiece). Long workings take a few days' sessions, and some must settle overnight or a week.",
+      "",
       "PHARMAKEIA, THE HERB-ART",
       "Make a mortar (C), hold it and press Space anywhere. Up to four herbs: each has aspects (healing, sleep, sight, warding...); the strongest, less its opposite, makes the remedy. Gnosis, Techne and one more Aretai are checked; the hour, moon, season, place and fresh herbs all help. A root-cutter, a herb-woman or Myrrhine can teach you.",
       "",
@@ -8874,7 +8948,7 @@ class UIScene extends Phaser.Scene {
     const p = G.patron;
     if (p) {
       this.badge.setFillStyle(Phaser.Display.Color.HexStringToColor(p.color).color);
-      this.patron.setText(`${p.god}'s hour (${p.aretai}): ${p.benefit}`);
+      this.patron.setText(`${poss(p.god)} hour (${p.aretai}): ${p.benefit}`);
     } else {
       this.badge.setFillStyle(0x6b7a99);
       this.patron.setText("Night belongs to the chthonic powers. Rest soon.");
@@ -8954,7 +9028,7 @@ class UIScene extends Phaser.Scene {
     }
     const s = G.selectedItem;
     const d = s ? ITEMS[s.id] : null;
-    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${toolName(d.id, G.toolLevel(d.id), d.name)}${d.greek ? ` (${d.greek})` : ""}${s!.id === "jar" ? ` · ${G.data.jarWater}/${jarCap()} water` : ""}${s!.id === "bow" ? ` · ${G.count("Arrow")} arrows · Archery ${G.archery} · hold Space to aim, click to loose` : ""}${s!.id === "Sling" ? ` · ${G.count("Stone")} stones · hold Space to aim, click to loose` : ""}${s!.id === "FireArrow" ? (G.count("bow") ? " · hold Space to aim your bow, click to loose" : " · you need a bow") : ""}${s!.id === "Waterskin" ? ` · ${G.data.skin ?? 0}/4 drinks` : ""}${s!.id === "HealerKit" ? (G.data.kitDay === G.dayNumber ? " · used today" : " · Space to bind your wounds") : ""}` : "Bare hands");
+    this.itemName.setText(d ? `${s!.q && s!.q > 1 ? QUALITY[s!.q] + " " : ""}${toolName(d.id, G.toolLevel(d.id), d.name)}${d.greek ? ` (${d.greek})` : ""}${(G.data.wonders.on[d.id] ?? []).map((e) => ` · ${WONDERS[e.id].name}${e.settleUntil !== undefined ? " (settling)" : ""}`).join("")}${s!.id === "jar" ? ` · ${G.data.jarWater}/${jarCap()} water` : ""}${s!.id === "bow" ? ` · ${G.count("Arrow")} arrows · Archery ${G.archery} · hold Space to aim, click to loose` : ""}${s!.id === "Sling" ? ` · ${G.count("Stone")} stones · hold Space to aim, click to loose` : ""}${s!.id === "FireArrow" ? (G.count("bow") ? " · hold Space to aim your bow, click to loose" : " · you need a bow") : ""}${s!.id === "Waterskin" ? ` · ${G.data.skin ?? 0}/4 drinks` : ""}${s!.id === "HealerKit" ? (G.data.kitDay === G.dayNumber ? " · used today" : " · Space to bind your wounds") : ""}` : "Bare hands");
   }
 
   toggleInventory() {
@@ -9115,7 +9189,7 @@ class UIScene extends Phaser.Scene {
     } });
     if (v.id === "myrrhine") opts.push({ label: "Ask about the gods", fn: () => {
       const p = G.patron;
-      this.talkTo(v, `"${p ? `This is ${p.god}'s hour, the hour of ${p.aretai}. ${p.benefit}.` : "The night is not ours."} ${pick([
+      this.talkTo(v, `"${p ? `This is ${poss(p.god)} hour, the hour of ${p.aretai}. ${p.benefit}.` : "The night is not ours."} ${pick([
         "Each god gives most to those who work in step with them.",
         "The Twelve notice who honors them. So do the ones beneath the earth.",
         "Bring the first of anything to the altar, and you will not be forgotten.",
@@ -9191,7 +9265,7 @@ class UIScene extends Phaser.Scene {
     } });
     opts.push({ label: `Make an offering at the altar (counts double for ${f.god} today)`, fn: () => this.openAltar("shrine") });
     const done = [rec.rite && "walked in the rite", rec.feast && "given to the feast", rec.agon && (rec.place ? `placed ${["", "first", "second", "third", "last"][rec.place]} in the contest` : "entered the contest")].filter(Boolean).join(", ");
-    this.showTalk(`The ${f.name}`, `${f.god}'s festival · ${G.dateLabel()}`, said ?? `${f.desc}${done ? `\n\nYou have ${done}.` : ""}`, opts);
+    this.showTalk(`The ${f.name}`, `${poss(f.god)} festival · ${G.dateLabel()}`, said ?? `${f.desc}${done ? `\n\nYou have ${done}.` : ""}`, opts);
   }
   /** The agon: your rhythm, your Aretai (twice), your hour, and for song your instrument and a song of the god, against three rivals. */
   agonResult(f: FestivalDef, score: number) {
@@ -9670,8 +9744,8 @@ class UIScene extends Phaser.Scene {
       const after = G.addFavor(god, (fine ? 2 : 1) + (liked ? 1 : 0), cap);
       this.priestTalk2(god, who, `The ${ITEMS[held].name.toLowerCase()} is given to ${god}${liked ? ", and it is the kind of thing the god loves" : ""}. (favor ${after >= 0 ? "+" : ""}${after}; offerings here raise favor as far as +${cap})`);
     } });
-    const line = name ? (chthonic ? `"Speak softly here. What do you need of the ${god === "Hades" ? "lord below" : "goddess of the crossroads"}?"` : `"Be welcome at ${god}'s shrine. What do you seek?"`)
-      : atAltar ? `${chthonic ? "The graves are quiet." : `${god}'s altar, its fire tended.`} ${held ? "" : "Hold something to offer it."}` : "";
+    const line = name ? (chthonic ? `"Speak softly here. What do you need of the ${god === "Hades" ? "lord below" : "goddess of the crossroads"}?"` : `"Be welcome at ${poss(god)} shrine. What do you seek?"`)
+      : atAltar ? `${chthonic ? "The graves are quiet." : `${poss(god)} altar, its fire tended.`} ${held ? "" : "Hold something to offer it."}` : "";
     this.showTalk(who, d.domain, line, opts);
   }
   priestTalk2(god: string, who: string, text: string) {
@@ -9730,6 +9804,23 @@ class UIScene extends Phaser.Scene {
   }
 
   smithOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
+    // Thaumatapoiia: Lykos knows more than bronze.
+    const rel = G.rel(v.id), kn = G.data.wonders.known;
+    const basic: WonderId[] = ["keen", "returning", "warding", "masterwork"], deep: WonderId[] = ["bane", "ghost", "divine"];
+    const toLearn = (rel >= 8 ? [...basic, ...deep] : basic).filter((id) => !kn.includes(id));
+    if (toLearn.length || !kn.length) opts.push({ label: kn.length ? "Ask Lykos what more he knows of wonders" : "Ask Lykos about the wonder-craft", fn: () => {
+      if (rel < 4) { this.talkTo(v, `"Wonder-making? Thaumatapoiia?" He snorts. "That's not taught to every farmer who comes by for a nail. Come to know me first." (Friendship +4 needed)`); return; }
+      if (!toLearn.length) { this.talkTo(v, `"I've told you all I'll tell you, for now. The rest is between you and the Lame God." (Friendship +8 for more)`); return; }
+      kn.push(...toLearn);
+      const first = toLearn.includes("keen");
+      this.talkTo(v, first
+        ? `He looks at you a long while, then shuts the smithy door. "There's bronze-work, and there's the other thing. The god's work. A good blade can be taught to want to cut; a spear to come home; a shield to turn one kind of harm; a hoe to do half the work itself. It takes the right things, the right hour, and more of you than you'd think. Some of it costs you, whether it takes or not." He shows you how.\n\n(You learn Thaumatapoiia: ${toLearn.map((id) => WONDERS[id].name).join(", ")}. Work wonders at your own forge, or here at his for a little coin.${G.favor("Hephaestus") >= 4 ? " Hephaestus favors you: his own secrets, binding fire and waking armor, come to you at the forge." : " When Hephaestus favors you (+4), his own secrets will come to you at the forge."})`
+        : `"You've earned the old tricks." He tells you how to forge a creature's death into a blade, how to make bronze cut a ghost, and how to work the signs that turn the gods' own anger.\n\n(You learn ${toLearn.map((id) => WONDERS[id].name).join(", ")}.)`);
+    } });
+    if (kn.length) opts.push({ label: "Work a wonder at Lykos' forge (5 silver for fire and charcoal)", fn: () => {
+      if (G.data.silver < 5) { this.talkTo(v, `"Charcoal isn't free. Five silver."`); return; }
+      G.data.silver -= 5; this.openWonders((this.game.scene.getScene("Village") as unknown as PlayScene).wonderCtx("lykos"));
+    } });
     const job = G.data.smithJob;
     if (job && (WEAR[job.tool] || job.tool === "Kopis")) { // bronze armor (or a kopis) on order
       const nm = ITEMS[job.tool].name.toLowerCase();
@@ -9895,7 +9986,7 @@ class UIScene extends Phaser.Scene {
     const d = MYTH[id], m = mythRec(id), today = G.dayNumber, rung = rungOf(m.days);
     const title = id === "naiad" ? (rung >= 1 ? `${m.name}, the Naiad` : "The Naiad") : rung >= 1 ? `${m.name} and the satyrs` : "The satyrs";
     const next = RUNG_DAYS[rung + 1];
-    const sub = `${d.kind} · ${d.god}'s · ${RUNGS[rung]}${next ? ` (appeased on ${m.days} of ${next} days for ${RUNGS[rung + 1]})` : ""}`;
+    const sub = `${d.kind} · ${poss(d.god)} · ${RUNGS[rung]}${next ? ` (appeased on ${m.days} of ${next} days for ${RUNGS[rung + 1]})` : ""}`;
     const pick = (a: string[]) => a[Math.floor(Math.random() * a.length)];
     const opts: { label: string; fn: () => void }[] = [];
     const held = G.selectedItem;
@@ -10416,7 +10507,7 @@ class UIScene extends Phaser.Scene {
     let preview = "Put something in the pot.";
     if (this.pot.length) {
       const r = cookResult(this.pot), stars = ["", "plain", "good", "rich"][r.tier];
-      if (r.named && G.data.dishes.includes(r.id)) preview = `${r.named.name}: ${r.named.god}'s own dish (${stars}). ${effectText(mealEffect(r.id, r.tier))}.`;
+      if (r.named && G.data.dishes.includes(r.id)) preview = `${r.named.name}: ${poss(r.named.god)} own dish (${stars}). ${effectText(mealEffect(r.id, r.tier))}.`;
       else {
         const plain = PLAIN[r.aretai];
         preview = `${plain.name} (${stars}): ${effectText(mealEffect(`meal_${r.aretai}`, r.tier))}.${r.named ? "\nSomething about this combination smells like a festival..." : ""}`;
@@ -10573,6 +10664,163 @@ class UIScene extends Phaser.Scene {
       G.say(`You weave a wreath of ${names} and hang it over your door, saying what it is for. ${sel.map((m) => m.wreath.text).join("; ")}. It will keep ${plan.days} day${plan.days > 1 ? "s" : ""}. (${shown})${b0}`);
     }
     this.weaveSel = []; this.closeCraft();
+  }
+
+  // ---------------------------------------------------------------- Thaumatapoiia: wonder-making at the forge
+  wonderAt?: WonderCtx; wSel = ""; wWid: WonderId | "" = ""; wChoice = "";
+  openWonders(ctx: WonderCtx) {
+    if (this.market || this.dialog || this.loreBook || this.craft) return;
+    if (this.inv) this.toggleInventory();
+    this.closeTalk();
+    this.wonderAt = ctx; this.craftAt = "forge"; this.modal = true; this.buildWonders();
+  }
+  /** Workings you can do: those taught you, and Hephaestus' own once he favors you. */
+  static wonderKnown(id: WonderId) { return G.data.wonders.known.includes(id) || (WONDERS[id].teach === "hephaestus" && G.data.wonders.known.length > 0 && G.favor("Hephaestus") >= 4); }
+  /** Your things a working could go into: what you carry, and the armor you wear. */
+  static wonderItems(): string[] {
+    const ids = new Set<string>();
+    for (const s of G.data.slots) if (s && WONDER_ORDER.some((w) => fits(WONDERS[w], s.id))) ids.add(s.id);
+    for (const id of Object.values(G.data.worn)) if (id && fits(WONDERS.warding, id)) ids.add(id);
+    return [...ids];
+  }
+  /** Creatures you know well enough to forge a bane against (lore 2, and one slain), with the part of it the work needs. */
+  static baneKinds(): { kind: string; part: string | null }[] {
+    return Object.keys(QUARRY).filter((k) => G.lore(k) >= 2 && (G.data.tir.ev[`kill:${k}`] ?? 0) > 0 && !["hare", "bird", "duck", "gull", "pigeon", "crab", "bustard"].includes(k))
+      .map((k) => { const d = QUARRY[k].drops.filter(([id]) => id !== "Meat"); return { kind: k, part: d.length ? d[d.length - 1][0] : null }; });
+  }
+  static wonderPlan(w: Wonder, ctx: WonderCtx, choice: string) {
+    const comps: [string, number][] = [...w.comps];
+    if (w.id === "bane") { const b = UIScene.baneKinds().find((x) => x.kind === choice); if (b?.part) comps.push([b.part, 1]); }
+    if (w.id === "warding") comps.push(choice === "weapon" ? ["Copper", 1] : ["Hide", 1]);
+    const conds = [...w.bonus(ctx), ...(WORKSHOP[ctx.where].n ? [{ label: WORKSHOP[ctx.where].name, n: WORKSHOP[ctx.where].n }] : [])];
+    const bonus = conds.reduce((n, c) => n + c.n, 0);
+    const haveComps = comps.every(([id, n]) => G.count(id) >= n);
+    const canPay = G.data.silver >= w.silver && Object.entries(w.cost).every(([k, v]) => k === "Hubris" || (G.data.currencies[k as Currency] ?? 0) >= (v ?? 0));
+    return { comps, conds, bonus, haveComps, canPay };
+  }
+  buildWonders() {
+    this.craft?.destroy();
+    const ctx = this.wonderAt!, font = { fontFamily: FONT, color: "#f2e6c9" };
+    const w = 760, h = 500, x0 = (W - w) / 2, y0 = Math.max(6, (H - h) / 2 - 20);
+    const root = this.add.container(0, 0).setDepth(23); this.craft = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xd9732e));
+    root.add(this.add.text(W / 2, y0 + 8, "Thaumatapoiia: wonder-making", { ...font, fontSize: "19px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 32, `At ${WORKSHOP[ctx.where].name} · ${G.timeLabel()} · ${G.moon} · ${G.month.season}. Costs are paid whether or not it takes.`, { ...font, fontSize: "11px", color: "#c9b48f" }).setOrigin(0.5, 0));
+    const work = G.data.wonders.work;
+    if (work) {
+      const wd = WONDERS[work.wid], today = work.last === G.dayNumber;
+      root.add(this.add.text(x0 + 20, y0 + 56, `Work in progress: ${wd.name} on your ${ITEMS[work.item].name.toLowerCase()}${work.choice ? ` (${work.choice === "beast" || work.choice === "weapon" ? WARD_KINDS[work.choice as "beast"] : beast(work.choice)})` : ""}, ${work.done} of ${work.of} days done.`, { ...font, fontSize: "13px", color: "#fbe39a" }));
+      const has = G.count(work.item) > 0 || Object.values(G.data.worn).includes(work.item);
+      const b = this.add.text(x0 + 20, y0 + 80, today ? "You have worked on it today. Come back tomorrow." : has ? `▶ Work on it today (four hours)${work.done + 1 === work.of ? ": the last day, and the checks" : ""}` : `You must have your ${ITEMS[work.item].name.toLowerCase()} with you.`, { ...font, fontSize: "15px", color: !today && has ? "#f2c14e" : "#8d877b" });
+      root.add(b); if (!today && has) b.setInteractive({ useHandCursor: true }).on("pointerdown", () => this.continueWonder());
+      const ab = this.add.text(x0 + w - 20, y0 + 82, "Abandon it", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(1, 0);
+      root.add(ab); ab.setInteractive({ useHandCursor: true }).on("pointerdown", () => this.choose("Abandon the work? What you spent is lost.", () => { G.data.wonders.work = null; this.buildWonders(); }));
+      root.add(this.add.text(W / 2, y0 + h - 20, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+      return;
+    }
+    // Your things.
+    const items = UIScene.wonderItems();
+    if (!items.includes(this.wSel)) this.wSel = items[0] ?? "";
+    root.add(this.add.text(x0 + 20, y0 + 54, "Your things:", { ...font, fontSize: "13px", color: "#c9b48f" }));
+    items.forEach((id, i) => {
+      const y = y0 + 74 + i * 20, on = id === this.wSel, ench = G.data.wonders.on[id] ?? [];
+      root.add(this.add.image(x0 + 28, y + 7, "items", id));
+      const t = this.add.text(x0 + 40, y, `${on ? "▸ " : ""}${ITEMS[id].name}${Object.values(G.data.worn).includes(id) ? " (worn)" : ""}${ench.length ? ` · ${ench.map((e) => `${WONDERS[e.id].name}${e.settleUntil !== undefined ? " (settling)" : ""}`).join(", ")}` : ""}`, { ...font, fontSize: "11px", color: on ? "#f2c14e" : "#f2e6c9", wordWrap: { width: 300 } });
+      root.add(t); t.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.wSel = id; this.wWid = ""; this.buildWonders(); });
+    });
+    if (!items.length) root.add(this.add.text(x0 + 20, y0 + 74, "You carry nothing a working could go into: a weapon, armor, or a tool.", { ...font, fontSize: "11px", color: "#8d877b" }));
+    // The workings.
+    const ws = WONDER_ORDER.filter((id) => UIScene.wonderKnown(id) && this.wSel && fits(WONDERS[id], this.wSel));
+    if (!ws.includes(this.wWid as WonderId)) this.wWid = ws[0] ?? "";
+    const xw = x0 + 380;
+    root.add(this.add.text(xw, y0 + 54, "Workings you know for it:", { ...font, fontSize: "13px", color: "#c9b48f" }));
+    ws.forEach((id, i) => {
+      const wd = WONDERS[id], on = id === this.wWid;
+      const t = this.add.text(xw, y0 + 74 + i * 18, `${on ? "▸ " : ""}${wd.name} (${wd.greek}) · ${wd.checks.map((c) => `${c.aretai} ${c.cr}`).join(", ")}`, { ...font, fontSize: "11px", color: on ? "#f2c14e" : "#f2e6c9" });
+      root.add(t); t.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.wWid = id; this.wChoice = ""; this.buildWonders(); });
+    });
+    const unknown = WONDER_ORDER.filter((id) => !UIScene.wonderKnown(id)).length;
+    if (unknown) root.add(this.add.text(xw, y0 + 78 + ws.length * 18, `(${unknown} more workings to learn: from Lykos as he comes to know you, and from Hephaestus himself.)`, { ...font, fontSize: "10px", color: "#8d877b", wordWrap: { width: 360 } }));
+    if (!this.wWid) { root.add(this.add.text(W / 2, y0 + h - 20, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0)); return; }
+    const wd = WONDERS[this.wWid as WonderId];
+    // The bane's creature, or the kind of harm warded.
+    let ty = Math.max(y0 + 250, y0 + 84 + items.length * 20);
+    let choices: { id: string; label: string }[] = [];
+    if (wd.id === "bane") choices = UIScene.baneKinds().map((b) => ({ id: b.kind, label: beast(b.kind) }));
+    if (wd.id === "warding") choices = [{ id: "beast", label: "beasts" }, { id: "weapon", label: "weapons" }];
+    if (choices.length && !choices.some((c) => c.id === this.wChoice)) this.wChoice = choices[0].id;
+    if (wd.id === "bane" && !choices.length) { root.add(this.add.text(x0 + 20, ty, "A bane wants a creature you understand (lore 2) and have slain, and a part of it if it leaves one.", { ...font, fontSize: "12px", color: "#e0806a" })); ty += 22; }
+    if (choices.length) {
+      root.add(this.add.text(x0 + 20, ty, wd.id === "bane" ? "Against:" : "To turn:", { ...font, fontSize: "12px", color: "#c9b48f" }));
+      let cx = x0 + 90;
+      for (const c of choices) {
+        const t = this.add.text(cx, ty, `${c.id === this.wChoice ? "●" : "○"} ${c.label}`, { ...font, fontSize: "12px", color: c.id === this.wChoice ? "#f2c14e" : "#f2e6c9" });
+        root.add(t); t.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.wChoice = c.id; this.buildWonders(); });
+        cx += t.width + 16; if (cx > x0 + w - 80) { cx = x0 + 90; ty += 18; }
+      }
+      ty += 24;
+    }
+    const plan = UIScene.wonderPlan(wd, ctx, this.wChoice), exact = (G.data.aretai.Gnosis ?? 3) >= 4;
+    const already = (G.data.wonders.on[this.wSel] ?? []).find((e) => e.id === wd.id);
+    const lines = [
+      `${wd.name}: ${wd.does}. Weakly: ${wd.tiers[0]}; as described: ${wd.tiers[1]}; enhanced: ${wd.tiers[2]}.${already ? " (Already bound into it: this would replace it.)" : ""}`,
+      `Components: ${plan.comps.map(([id, n]) => `${n} ${ITEMS[id].name.toLowerCase()} (${G.count(id)})`).join(", ") || "none"}${wd.silver ? `; ${money(wd.silver)} of silver and bronze for the work` : ""}.${Object.keys(wd.cost).length ? ` Cosmic cost: ${Object.entries(wd.cost).map(([k, v]) => `${k === "Hubris" ? "+" : ""}${v} ${k}`).join(", ")}.` : ""}`,
+      `Time: ${wd.hours ? `${wd.hours} hour${wd.hours > 1 ? "s" : ""} at the forge` : `${wd.days} days, four hours each at the forge`}${wd.settle ? `; then it must settle ${wd.settle === 1 ? "a night" : "a week"} (a Pneuma check each night, 7)` : ""}.`,
+      `Helping: ${plan.conds.length ? plan.conds.map((c) => `${c.label} +${c.n}`).join(" · ") : "nothing now"}.`,
+      `Checks (d12 + Aretai + help vs CR; each passed is a success; all passed with 6 to spare in all, one more): ${wd.checks.map((c) => { const a = G.data.aretai[c.aretai] ?? 3; return `${c.aretai} ${a}+${plan.bonus} vs ${c.cr}${exact ? ` (${Math.round(this.odds(a + plan.bonus, c.cr) * 100)}%)` : ""}`; }).join("; ")}.`,
+    ];
+    root.add(this.add.text(x0 + 20, ty, lines.join("\n"), { ...font, fontSize: "11px", color: "#fbe39a", wordWrap: { width: w - 40 }, lineSpacing: 3 }));
+    const ok = plan.haveComps && plan.canPay && (choices.length > 0 || (wd.id !== "bane" && wd.id !== "warding"));
+    const why = !plan.haveComps ? " (you lack components)" : !plan.canPay ? " (you can't pay its cost)" : "";
+    const btn = this.add.text(x0 + 20, y0 + h - 50, `▶ ${wd.hours ? "Do the work" : "Begin the work"}${why}`, { ...font, fontSize: "17px", color: ok ? "#f2c14e" : "#8d877b" });
+    root.add(btn);
+    if (ok) btn.setInteractive({ useHandCursor: true }).on("pointerover", () => btn.setColor("#ffffff")).on("pointerout", () => btn.setColor("#f2c14e")).on("pointerdown", () => this.beginWonder());
+    root.add(this.add.text(W / 2, y0 + h - 20, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+  beginWonder() {
+    const ctx = this.wonderAt!, wd = WONDERS[this.wWid as WonderId], item = this.wSel, plan = UIScene.wonderPlan(wd, ctx, this.wChoice);
+    if (!plan.haveComps || !plan.canPay) { this.buildWonders(); return; }
+    const hours = wd.hours ?? 4;
+    const b0 = labor(EFFORT.station, Math.ceil(hours * 1.5), "Techne"); if (b0 === null) return;
+    for (const [id, n] of plan.comps) G.removeItem(id, n);
+    G.data.silver -= wd.silver;
+    for (const [k, v] of Object.entries(wd.cost)) G.data.currencies[k as Currency] += k === "Hubris" ? v! : -v!;
+    G.data.clock = Math.min(G.collapseClock - 0.25, G.data.clock + hours);
+    if (wd.days) {
+      G.data.wonders.work = { wid: wd.id, item, choice: this.wChoice || undefined, done: 1, of: wd.days, last: G.dayNumber };
+      G.say(`You begin the ${wd.name} on your ${ITEMS[item].name.toLowerCase()}: four hours of forge-work, the first of ${wd.days} days. Come back to a forge each day to go on.${b0}`);
+      this.buildWonders(); return;
+    }
+    this.finishWonder(wd.id, item, this.wChoice || undefined, b0);
+  }
+  continueWonder() {
+    const work = G.data.wonders.work; if (!work || work.last === G.dayNumber) return;
+    const b0 = labor(EFFORT.station, 6, "Techne"); if (b0 === null) return;
+    G.data.clock = Math.min(G.collapseClock - 0.25, G.data.clock + 4);
+    work.done++; work.last = G.dayNumber;
+    if (work.done < work.of) { G.say(`Another day's work on the ${WONDERS[work.wid].name}: ${work.done} of ${work.of}.${b0}`); this.buildWonders(); return; }
+    G.data.wonders.work = null;
+    this.finishWonder(work.wid, work.item, work.choice, b0);
+  }
+  /** The checks, and what comes of them. */
+  finishWonder(wid: WonderId, item: string, choice: string | undefined, b0: string) {
+    const ctx = this.wonderAt!, wd = WONDERS[wid], plan = UIScene.wonderPlan(wd, ctx, choice ?? "");
+    const rolls = wd.checks.map((c) => { const a = G.data.aretai[c.aretai] ?? 3, roll = d12(); return { c, a, roll, total: roll + a + plan.bonus, cr: c.cr }; });
+    const succ = successes(rolls), nm = ITEMS[item].name.toLowerCase();
+    const shown = rolls.map((r) => `${r.c.aretai}: d12 ${r.roll} + ${r.a}${plan.bonus ? ` + ${plan.bonus}` : ""} vs ${r.cr} ${r.total >= r.cr ? "✓" : "✗"}`).join("; ");
+    G.note("wonder");
+    if (!succ) { SOUND.sfx("hurt"); G.say(`The work will not take: whatever you bound into the ${nm} slips out of it again as it cools. The components are spent. (${shown})${b0}`); this.closeCraft(); return; }
+    const list = (G.data.wonders.on[item] ??= []).filter((e) => e.id !== wid);
+    const e: Ench = { id: wid, tier: succ as 1 | 2 | 3, choice };
+    if (wd.settle) e.settleUntil = G.dayNumber + wd.settle;
+    if (wid === "flame") e.fed = G.dayNumber;
+    list.push(e); G.data.wonders.on[item] = list;
+    if (succ >= 2) G.addFavor("Hephaestus", 1, 6);
+    if (succ === 3) G.earn("Kleos", 1, `a masterpiece of the forge (${wd.name})`);
+    SOUND.sfx("find");
+    const what = wd.tiers[succ - 1];
+    G.say(`${succ === 3 ? "A masterpiece! " : succ === 1 ? "It takes, but only just. " : ""}Your ${nm} is bound with ${wd.name}${choice ? ` (${choice === "beast" || choice === "weapon" ? `against ${WARD_KINDS[choice as "beast"]}` : `against the ${beast(choice)}`})` : ""}: ${what}.${wd.settle ? ` It must settle ${wd.settle === 1 ? "overnight" : "for a week"} before it works.` : ""}${succ >= 2 ? " (Hephaestus +1)" : ""} (${shown})${b0}`);
+    this.closeCraft();
   }
 
   // ---------------------------------------------------------------- Pharmakeia: the mortar

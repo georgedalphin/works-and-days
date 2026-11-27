@@ -1,4 +1,5 @@
 import { BEASTS, type Beast } from "./herd";
+import { WONDERS, DISTORTIONS, type WonderData } from "./wonders";
 import { COMFORT_KIND } from "./home";
 import { MATERIALS } from "./circlets";
 const CROWN_GOD: Record<string, string> = Object.fromEntries(MATERIALS.map((m) => [m.id, m.god]));
@@ -98,6 +99,8 @@ export interface SaveData {
   manger: number; // fodder in the goats' manger
   /** Working animals: hound, ox, donkey, horse (herd.ts). */
   beasts: Beast[];
+  /** Thaumatapoiia: the workings you know, those bound into your things (by item id), and a work in progress. */
+  wonders: WonderData;
   trough: number; // water in the goats' trough
   hiveDay: number; // day number of the last honey harvest
   crops: Record<string, CropRec>; // "x,y" on the homestead
@@ -292,7 +295,7 @@ export class GameState {
     }
     d.ground ??= {}; d.treeHits ??= {};
     d.goats ??= START_GOATS.map((g) => ({ ...g }));
-    d.manger ??= 2; d.beasts ??= []; d.trough ??= 2; d.hiveDay ??= -1;
+    d.manger ??= 2; d.beasts ??= []; d.wonders ??= { known: [], on: {} }; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
     d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.sites ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.worn ??= { body: "Chiton" }; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.vitality ??= 6 * Math.max(2, d.health ?? 4); d.meal ??= {}; d.dishes ??= []; d.songs ??= []; d.fest ??= {}; d.songUsed ??= {}; d.songBuff ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
@@ -394,7 +397,7 @@ export class GameState {
       scene: "House", px: 9 * 16 + 8, py: 7 * 16 + 8,
       tendedHearthDay: "",
       goats: START_GOATS.map((g) => ({ ...g })),
-      manger: 2, trough: 2, beasts: [], hiveDay: -1,
+      manger: 2, trough: 2, beasts: [], wonders: { known: [], on: {} }, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
       archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, sites: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], worn: { body: "Chiton" }, spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, vitality: 24, meal: {}, dishes: [], fest: {}, songs: [], songUsed: {}, songBuff: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
@@ -743,6 +746,23 @@ export class GameState {
     }
     if (this.data.smithJob && this.dayNumber === this.data.smithJob.ready) notes.push("Lykos the smith has finished your tool. Collect it at the smithy.");
     this.chores(notes);
+    // Wonders settling: a Pneuma check each night, or the working distorts a little. A flame that has gone a season without blood dies.
+    for (const [item, list] of Object.entries(this.data.wonders.on)) for (const e of [...list]) {
+      const nm = `${ITEMS[item]?.name.toLowerCase() ?? item}`;
+      if (e.settleUntil !== undefined) {
+        const roll = 1 + Math.floor(Math.random() * 12), a = this.data.aretai.Pneuma ?? 3;
+        if (roll + a < 7) {
+          if (e.tier > 1 && Math.random() < 0.5) { e.tier = (e.tier - 1) as 1 | 2; notes.push(`The ${WONDERS[e.id].name} settling in your ${nm} drifted in the night and came out weaker. (Pneuma d12 ${roll} + ${a} vs 7)`); }
+          else { e.quirk = DISTORTIONS[Math.floor(Math.random() * DISTORTIONS.length)]; notes.push(`The ${WONDERS[e.id].name} in your ${nm} settled a little wrong: ${e.quirk.toLowerCase()} (Pneuma d12 ${roll} + ${a} vs 7)`); }
+        }
+        if (e.settleUntil <= this.dayNumber) { delete e.settleUntil; notes.push(`The ${WONDERS[e.id].name} in your ${nm} has settled. It is fully yours now.`); }
+      }
+      if (e.id === "flame" && e.fed !== undefined) {
+        const hungry = this.dayNumber - e.fed;
+        if (hungry > 90) { list.splice(list.indexOf(e), 1); notes.push(`The fire in your ${nm} has gone out: a season without blood, and the binding failed.`); }
+        else if (hungry === 60) notes.push(`The fire in your ${nm} burns low. It wants blood.`);
+      }
+    }
     // The working animals at home eat from the manger too (those out with you graze where you sleep).
     for (const b of this.data.beasts) {
       if (!BEASTS[b.kind].grazes || (b.follow && rough)) continue;
