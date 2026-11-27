@@ -20,7 +20,7 @@ import { TIRESIAS, TIR_CALLS, TIR_WEATHER } from "./tiresias";
 import { fishHere, fishDef, type FishDef } from "./fishing";
 import { villageFestivals, daysUntil, festival, type FestivalDef } from "./festivals";
 import { HARMONIAI, INSTRUMENTS, MELODIES, melody, stepFreq, VILLAGE_SONGS, HUT_SONGS, type Melody } from "./music";
-import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD } from "./cooking";
+import { INGREDIENTS, PLAIN, NAMED, PLAIN_EFFECT, NAMED_EFFECT, cookResult, dishId, DISH_GOD, DISH_IDS } from "./cooking";
 import { WANTS, RUMOR_TERRAINS, RUMOR_WORDS, PARCELS, directions, requestPay, type Rumor, type Request } from "./quests";
 import { SIGNS as HESIOD_SIGNS, SIGN_DAYS, EFFECT_WORD, OMENS, OMEN_MEANING, KLEDON, FIND_TABLES, FIND_CHANCE, pickFrom, type SignDef, type OmenDef } from "./omens";
 import { STEPS, STEP_HELP, SIGNS, BIRTHRIGHTS, TRAININGS, HAMARTIAI, ASTHENEIAI, MOROI, YOUNG_ADULT, ARETAI_MAX_AT_CREATION, FAVOR_PLUS, FAVOR_MINUS, RESOURCE_POINTS, RESOURCE_MAX, SILVER_PER_WEALTH, NAMES, TUNICS, HAIRS, SKINS, type TableEntry } from "./creation";
@@ -30,6 +30,8 @@ import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
 import { Animal, SPECIES, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
+import { artCondition, artWhere, RURAL_TEACHERS, type ArtCtx } from "./rural";
+import { MATERIALS, material, weaveBonuses, weaveDays, type Material, type WeaveCtx } from "./circlets";
 import { ASPECTS, HERBS, REMEDIES, remedyOf, conditions, brewOf, brewTier, type Aspect, type BrewCtx } from "./pharmakeia";
 import { TWELVE, CHTHONIC, favorLabel, BOONS, OFFER_PATRON, HOME_CAP, SHRINE_CAP, DEVOTION_STEP, CURRENCIES, CURRENCY_DESC, raiseCost, ARTS, type Art } from "./gods";
 import { essencePools } from "./data";
@@ -96,7 +98,7 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
     return null;
   }
   const zeus = aretai === "Kratos" ? (G.warded("Zeus") ? 0 : 1 - 0.08 * G.boon("Zeus")) : 1; // Zeus eases heavy labor
-  G.addFatigue(fatigue * disc * zeus * (G.gear.work ? 0.85 : 1)); // a working tunic: the work tires you less
+  G.addFatigue(fatigue * disc * zeus * (G.gear.work ? 0.85 : 1) * (G.blessed("dawn") ? 0.85 : 1) * (G.crownHas("ivy") ? 0.9 : 1)); // a working tunic, the dawn's blessing, an ivy crown: the work tires you less
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
@@ -272,7 +274,13 @@ function workObject(sc: Phaser.Scene & { clearObject(x: number, y: number): void
       case "sickle":
         if (obj === T.BRUSH) { const b = labor(EFFORT.cut, 2, "Oikos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You cut the brush: ${give("Fiber", 2 + mastery("bramble"))}${b}`); }
         else if (obj === T.FLOWERS) { sc.clearObject(x, y); G.say(`You cut wildflowers: ${give("Flowers", 2)}`); }
-        else G.say("The sickle is for brush and flowers.");
+        else if (obj === T.TREE || obj === T.OLIVE || obj === T.PINE) { // a sprig for a crown or a wreath, once a day from each tree
+          const sp = (G.data.sprigs ??= {}), item = obj === T.TREE ? "OakLeaves" : obj === T.OLIVE ? "OliveSprig" : "PineBoughs", tree = obj === T.TREE ? "oak" : obj === T.OLIVE ? "olive tree" : "pine";
+          if (sp[hitKey] === G.dayNumber) { G.say(`You've taken what this ${tree} can spare today.`); return true; }
+          sp[hitKey] = G.dayNumber; G.markFresh(item);
+          G.say(`You cut a leafy spray from the ${tree}, with a word of thanks: ${give(item, 2)}. Weave it today, while it's fresh.`);
+        }
+        else G.say("The sickle is for brush, flowers, and sprigs from trees.");
         return true;
       case "axe":
         if (obj === T.SAPLING) { const b = labor(EFFORT.sapling, 4, "Kratos"); if (b === null) return true; sc.clearObject(x, y); G.say(`You fell the sapling: ${give("Wood", 2)}${b}`); }
@@ -406,7 +414,7 @@ abstract class PlayScene extends Phaser.Scene {
     const moving = vx !== 0 || vy !== 0;
     // Running: each tap of Shift is a quick burst of speed, paid in Air; tap fast and they build into a sprint.
     if (Phaser.Input.Keyboard.JustDown(k.SHIFT) && moving && !this.paused) {
-      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerTap, G.data.aretai.Aiolos ?? 3) * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1) * (1 - 0.3 * G.gear.aiolos);
+      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerTap, G.data.aretai.Aiolos ?? 3) * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : G.crownHas("celery") ? 0.75 : 1) * (1 - 0.3 * G.gear.aiolos);
       if (G.essence.Air >= cost) {
         G.essence.Air -= cost; this.dashLvl = Math.min(1, this.dashLvl + 0.34); this.dashT = 0.42;
         const puff = this.add.image(this.player.x, this.player.y + 6, "puff").setDepth(this.player.y - 1).setAlpha(0.55).setScale(0.5);
@@ -878,7 +886,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.cameras.main.shake(160, 0.006);
     this.player.setTint(0xff7070); this.time.delayedCall(220, () => this.player.clearTint());
     if (body) { // wounds to the body: lightning, falling rock, drowning, stings
-      const v = Math.max(1, Math.round(dmg / 3)); G.heal(-v);
+      const v = Math.max(1, Math.round(dmg / 3 / (cause === "lightning" && G.crownHas("oak") ? 2 : 1))); G.heal(-v); // Zeus' oak: lightning hurts the crowned half as much
       G.say(`${what} (−${v} Vitality)${this.lowWarn()}`);
       if (G.data.vitality <= 0) this.struckDown(cause);
       return;
@@ -925,7 +933,7 @@ abstract class PlayScene extends Phaser.Scene {
       case "Demeter": { const cs = this.growingCrops(); if (cs.length) { const [, c] = cs[Math.floor(Math.random() * cs.length)]; c.growth = Math.max(0, c.growth - 2); c.dryStreak++; this.redrawFarm(); G.say(`One of your crops has withered back overnight. ${at}`); } break; }
       case "Hephaestus": ch.botch = 1; G.say(`Your hands feel clumsy today. ${at}`); break;
       case "Poseidon": G.data.jarWater = 0; G.addFatigue(5); G.say(`You slip in the wet and your jar spills empty. ${at}`); break;
-      case "Hera": { const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 1; G.say(`${g.name} is off her milk today. ${at}`); } break; }
+      case "Hera": { if (G.blessed("flock") || G.wreathHas("wheat")) { G.say(`Hera frowns on your household, but your goats are blessed and shrug it off. ${at}`); break; } const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 1; G.say(`${g.name} is off her milk today. ${at}`); } break; }
       case "Athena": ch.dull = 1; G.say(`Your thoughts are slow and muddled today. ${at}`); break;
       case "Apollo": this.harm(10, `A headache throbs behind your eyes. ${at}`, "Apollo's fever"); break;
       case "Dionysus": if (G.data.vat.must > 0) { G.data.vat.q = Math.max(1, G.data.vat.q - 1); G.say(`Your must smells off today: the wine will be poorer. ${at}`); } else this.harm(8, `Your head aches as if after a feast you never had. ${at}`, "Dionysus' madness"); break;
@@ -946,13 +954,13 @@ abstract class PlayScene extends Phaser.Scene {
       case "Demeter": { const cs = this.growingCrops(); const n = Math.ceil(cs.length / 3); for (let i = 0; i < n; i++) cs[Math.floor(Math.random() * cs.length)][1].withered = true; this.redrawFarm(); if (n) G.say(`Blight: ${n} of your crops have blackened on the stalk. ${at}`); break; }
       case "Hephaestus": { const t = Object.entries(G.data.tools).filter(([, l]) => l >= 2); if (t.length) { const [id] = t[Math.floor(Math.random() * t.length)]; G.data.tools[id]--; G.say(`The edge of your ${ITEMS[id].name.toLowerCase()} chips and dulls: it is a lesser tool now. ${at}`); } else { const n = Math.floor(G.count("Arrow") / 2); G.removeItem("Arrow", n); G.say(`Your arrows warp and split${n ? ` (-${n})` : ""}. ${at}`); } break; }
       case "Poseidon": day.wellDry = today + 3; G.data.jarWater = 0; G.say(`The ground shudders underfoot. Your well will be dry for three days. ${at}`); break;
-      case "Hera": { const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 3; g.affection = Math.max(0, g.affection - 2); G.say(`${g.name} has fallen sick: no milk for three days. ${at}`); } break; }
+      case "Hera": { if (G.blessed("flock") || G.wreathHas("wheat")) { G.say(`Hera frowns on your household, but your goats are blessed and shrug it off. ${at}`); break; } const g = G.data.goats[Math.floor(Math.random() * G.data.goats.length)]; if (g) { day[`sick_${g.name}`] = today + 3; g.affection = Math.max(0, g.affection - 2); G.say(`${g.name} has fallen sick: no milk for three days. ${at}`); } break; }
       case "Athena": { const k = Object.entries(G.data.lore.tier).filter(([, t]) => t > 0); if (k.length) { const [id] = k[Math.floor(Math.random() * k.length)]; G.data.lore.tier[id]--; G.say(`Something you knew about ${LORE[id]?.name.toLowerCase() ?? id} slips from your mind. ${at}`); } break; }
       case "Apollo": this.harm(30, `A fever burns through you. ${at}`, "Apollo's fever"); break;
       case "Dionysus": if (G.data.vat.must > 0) { G.data.vat.must = 0; G.data.vat.sealed = -1; G.say(`The wine in your vat has soured to vinegar. ${at}`); } else this.harm(20, `The world tilts and roars like a feast gone wrong. ${at}`, "Dionysus' madness"); break;
       case "Hermes": { const n = Math.round(G.data.silver * 0.2); G.data.silver -= n; G.say(`Thieves! Your purse is lighter by ${money(n)}. ${at}`); break; }
       case "Ares": { const w = this as unknown as { spawnMonster?: (k: MonsterKind) => void; rec?: ScreenRec }; const k = w.rec ? monsterFor(w.rec.terrain)?.kind : undefined; if (w.spawnMonster && k) { G.say(`${at} Something terrible comes.`); w.spawnMonster(k); } else { G.say(at); this.summon("boar"); } break; }
-      case "Zeus": { this.lightning(this.player.x + 40, this.player.y - 10); G.essence.Fire = 0; this.harm(20, `Lightning strikes beside you! ${at}`, "lightning", true); break; }
+      case "Zeus": { if (this.scene.key === "Farm" && G.wreathHas("oak")) { G.say(`Thunder rolls over the homestead, but the oak wreath over your door turns the bolt aside. ${at}`); break; } this.lightning(this.player.x + 40, this.player.y - 10); G.essence.Fire = 0; this.harm(20, `Lightning strikes beside you! ${at}`, "lightning", true); break; }
       case "Hades": G.say(`The ground breathes cold. A shade rises. ${at}`); this.summon("eidolon"); break;
       case "Hecate": G.say(`Dogs howl where no dogs are. The dead gather. ${at}`); this.summon("eidolon", 2); break;
     }
@@ -1194,6 +1202,66 @@ abstract class PlayScene extends Phaser.Scene {
     });
   }
 
+  // ---------------------------------------------------------------- the Rural Arts, and Wreaths and Crowns
+  /** Where and when you are, for the rites. */
+  artCtx(): ArtCtx {
+    const w = this.wildRec, wx = G.data.wx, wy = G.data.wy;
+    const near = Math.min(Math.max(Math.abs(wx), Math.abs(wy)), Math.max(Math.abs(wx), Math.abs(wy - 1)));
+    const threatened = this.animals.some((a) => a.state === "charge" && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 260);
+    return { scene: this.scene.key, outdoors: this.outdoors, clock: G.data.clock, daylight: G.daylight, month: G.data.month, day: G.data.day, season: G.month.season,
+      moon: G.moon, weather: G.data.weather, terrain: w?.terrain, nearHome: w ? near : 0, cave: !!(this as unknown as { hasCave?: boolean }).hasCave, threatened,
+      hostedDays: G.dayNumber - G.data.hostedDay, family: (G.data.friends ?? []).some((f) => f.role !== "follow"), tended: G.data.tendedHearthDay === G.dateKey,
+      festGod: festToday()?.god, sprouted: Object.values(G.data.crops).some((c) => !c.withered && c.growth === 1), years: G.data.year - 1,
+      spotKey: `${this.scene.key}:${wx},${wy}`, lastDawnSpot: G.data.dawnSpot };
+  }
+  /** A rite has worked: what happens now (and the words for it). */
+  artDone(id: string): string {
+    switch (id) {
+      case "dawn": {
+        G.addFatigue(-25); const ctx = this.artCtx(); G.data.dawnSpot = ctx.spotKey;
+        const st = (G.data.dawnStreak ??= { n: 0, last: -9 }); st.n = st.last === G.dayNumber - 1 ? st.n + 1 : 1; st.last = G.dayNumber;
+        if (st.n % 7 === 0) { const v = G.addFavor("Apollo", 1, 6); return `Fatigue −25. Seven mornings running: Apollo, the sun, knows your face now. (Apollo ${v >= 0 ? "+" : ""}${v})`; }
+        return `Fatigue −25. (${st.n} morning${st.n > 1 ? "s" : ""} running.)`;
+      }
+      case "panic": {
+        let n = 0;
+        for (const a of this.animals) if (a.state !== "dead" && a.state !== "gone" && a.kind !== "goat" && a.sprite.visible && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 320) { a.appeased = true; a.bolt(this.player); n++; }
+        const w = this as unknown as { ways?: { people: Folk[] }[]; dropWay?: (g: unknown) => void };
+        const people = (w.ways ?? []).length; if (people && w.dropWay) for (const g of [...(w.ways ?? [])]) w.dropWay(g);
+        this.cameras.main.shake(300, 0.004);
+        return `${n ? `${n} creature${n > 1 ? "s" : ""} scatter${n > 1 ? "" : "s"} in blind terror, and won't come back.` : "Nothing was near; the birds go up crying."}${people ? " The people on the road run too, every one, as Pan's terror takes them." : ""}`;
+      }
+      case "solar": {
+        const o = G.data.omen, lines: string[] = [];
+        if (o && o.day === G.dayNumber) { o.read = true; lines.push(`Today's sign was ${o.god}${o.god.endsWith("s") ? "'" : "'s"}, and it was ${o.good ? "truly good" : "ill, whatever it seemed"}.`); }
+        else lines.push("No sign was given today; Helios has nothing to say of omens.");
+        const sat = mythRec("satyrs");
+        if (sat.stolen) { G.addItem(sat.stolen, 1); lines.push(`He saw the satyrs make off with your ${ITEMS[sat.stolen].name.toLowerCase()}, and shames them into giving it back. It's in your pack.`); sat.stolen = undefined; }
+        G.data.divine.day.solar = G.dayNumber;
+        for (const a of this.animals) if (a.kind === "empousa" && a.state !== "dead") a.sprite.setTexture("empousaTrue", 0);
+        lines.push("For the rest of the day, no disguise holds under the sun: an empousa shows her true face to you.");
+        return lines.join(" ");
+      }
+    }
+    return "";
+  }
+  /** A rite has gone badly wrong. */
+  artFailed(id: string) {
+    switch (id) {
+      case "hospitality": G.addFavor("Zeus", -1); break;
+      case "hearth": G.addFavor("Demeter", -1); break;
+      case "crop": { const cs = Object.values(G.data.crops).filter((c) => !c.withered); if (cs.length) { cs[Math.floor(Math.random() * cs.length)].withered = true; this.redrawFarm(); } break; }
+      case "flock": for (const g of G.data.goats) g.affection = Math.max(0, g.affection - 1); break;
+      case "dawn": G.addFatigue(15); break;
+      case "panic": G.addFatigue(20); for (const a of this.animals) if (a.state !== "dead" && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 200 && SPECIES[a.kind]?.aggression > 0) a.charge(6); break;
+    }
+  }
+  /** Where and when you weave. */
+  weaveCtx(): WeaveCtx {
+    const site = this.scene.key === "Wild" ? (this as unknown as { site?: { kind: string } }).site?.kind : undefined;
+    return { scene: this.scene.key, outdoors: this.outdoors, clock: G.data.clock, moon: G.moon, season: G.month.season, festival: !!festToday(), site, terrain: this.wildRec?.terrain };
+  }
+
   /** Put on what you hold (and what you wore there goes into your pack). */
   wearHeld() {
     const id = G.selectedItem!.id, d = WEAR[id], old = G.data.worn[d.slot];
@@ -1238,6 +1306,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.fish) this.fishTick();
     if ((this.mealT -= dt) <= 0) {
       this.mealT = 1; for (const m of G.mealTick()) G.say(m);
+      if (G.crownChanged) { G.crownChanged = false; dressPlayer(this); }
       if (!this.paused) this.maybeHearSong();
       for (const o of this.placedObjs) if (o.p.id === "Campfire") this.showFire(o);
       if (G.data.weather === "rain" && this.scene.key === "Farm") { const f = this as unknown as FarmScene; for (const [k, v] of Object.entries(G.data.ground)) if (v === "tilled") { const [x, y] = k.split(",").map(Number); f.setGround(x, y, "wet"); } } // rain soaks the tilled soil
@@ -1303,7 +1372,10 @@ abstract class PlayScene extends Phaser.Scene {
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
     const [calm, by] = aretaiCalm(a.kind);
     if ((a.kind === "eidolon" || a.kind === "lampad") && G.songOn("paean")) bonus -= 4; // Apollo's hymn keeps the dead at a distance
-    const scary = a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton" ? 0 : G.gear.intim + (G.selectedItem?.id === "Labrys" ? 1 : 0); // bronze, a lion's mane, the golden axe: they give a beast pause (the dead don't care)
+    if ((a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton") && G.crownHas("willow")) bonus -= 4; // a willow crown: the dead must hold back
+    if ((a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton") && G.wreathHas("willow") && (this.scene.key === "Farm" || this.scene.key === "House")) return false; // they may cross the threshold, but do no harm
+    if (beastly && G.crownHas("pine")) bonus -= 1; // a pine crown: at home in the wild
+    const scary = a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton" ? 0 : G.gear.intim + (G.selectedItem?.id === "Labrys" ? 1 : 0) + (G.crownHas("oak") ? 1 : 0); // bronze, a lion's mane, the golden axe: they give a beast pause (the dead don't care)
     const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus - calm - scary;
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > agg) {
@@ -2399,7 +2471,7 @@ abstract class PlayScene extends Phaser.Scene {
   mates: { f: Friend; s: Phaser.GameObjects.Sprite; animT: number; biteT: number; facing: number; mode: "follow" | "wander"; tx: number; ty: number; wait: number; target?: Animal; t: Target; said: boolean }[] = [];
   matesDone = false;
   /** How much a friendly chat warms someone: Aphrodite's favor, her hour and her grace. */
-  warmth() { const aph = G.boon("Aphrodite"); return Math.max(1, 1 + (aph >= 2 ? 1 : 0) + (G.patron?.aretai === "Phoenix" ? 1 : 0) + (G.grace("Aphrodite") >= 4 ? 1 : 0) + (G.songOn("charm") ? 1 : 0) + (G.songOn("charm2") ? 1 : 0)); }
+  warmth() { const aph = G.boon("Aphrodite"); return Math.max(1, 1 + (aph >= 2 ? 1 : 0) + (G.patron?.aretai === "Phoenix" ? 1 : 0) + (G.grace("Aphrodite") >= 4 ? 1 : 0) + (G.songOn("charm") ? 1 : 0) + (G.songOn("charm2") ? 1 : 0) + (G.crownHas("myrtle") ? 1 : 0) + (G.crownHas("rose") ? 1 : 0)); }
   /** Ask someone to throw in their lot with you: to follow you, or to live on your homestead and help. */
   askToJoin(fr: Friend, onJoin: () => void, onNo: () => void) {
     const u = ui(this), list = (G.data.friends ??= []), cap = G.friendCap;
@@ -2789,8 +2861,13 @@ const caveDark = () => { // a torch, a lamp; a bronze mirror and Hades' grace ea
   return inDark ? (G.grace("Hades") >= 4 ? "dark1" : "dark0") : steps[Math.min(2, n)];
 };
 /** Draw the player in what they wear now, and show it at once in the scene they're in. */
+/** The colors of the crown on your head, if one is there and not wilted. */
+function crownColors(): string[] | undefined {
+  const c = G.data.crown; if (!c || c.until <= G.absHour) return undefined;
+  const ms = c.mats.map(material); return [ms[0].leaf, ...ms.map((m) => m.flower ?? (m.leaf !== ms[0].leaf ? m.leaf : "")).filter(Boolean)].slice(0, 3);
+}
 function dressPlayer(scene: Phaser.Scene) {
-  makePlayerTexture(scene, G.data.look, G.data.worn);
+  makePlayerTexture(scene, G.data.look, G.data.worn, crownColors());
   for (const s of scene.game.scene.getScenes(true)) { const p = (s as PlayScene).player; if (p?.active && p.texture) p.setTexture("player", Number(p.frame.name) || 0); }
 }
 /** Begin (or resume) a life: dress the player in their colors and open the world. */
@@ -2798,7 +2875,7 @@ function startLife(scene: Phaser.Scene, state: GameState) {
   G = state;
   (window as unknown as { G: GameState }).G = G; // for testing from the console
   (window as unknown as { dressPlayer: typeof dressPlayer }).dressPlayer = dressPlayer;
-  makePlayerTexture(scene, G.data.look, G.data.worn);
+  makePlayerTexture(scene, G.data.look, G.data.worn, crownColors());
   scene.scene.start(G.data.scene);
   if (scene.scene.isActive("UI")) scene.scene.stop("UI");
   scene.scene.launch("UI");
@@ -3435,14 +3512,14 @@ class FarmScene extends PlayScene {
   tendGoat(g: Goat, a: Animal) {
     const today = G.dayNumber;
     if (g.pettedDay !== today) {
-      g.pettedDay = today; g.affection = Math.min(10, g.affection + (G.grace("Hera") >= 4 ? 2 : 1));
+      g.pettedDay = today; g.affection = Math.min(10, g.affection + (G.grace("Hera") >= 4 ? 2 : 1) + (G.blessed("flock") ? 1 : 0) + (G.wreathHas("pine") ? 1 : 0));
       this.heart(a.sprite.x, a.sprite.y);
       G.say(`${g.name} leans into your hand. (Affection ${g.affection}/10)`);
     } else if (g.fed && g.milkedDay !== today && (G.data.divine.day[`sick_${g.name}`] ?? 0) > today) {
       G.say(`${g.name} is sick and off her milk. Hera's displeasure is on your household.`);
     } else if (g.fed && g.milkedDay !== today) {
       g.milkedDay = today; G.addFatigue(1);
-      const n = g.affection >= (G.lore("goat") >= 3 ? 5 : 6) ? 2 : 1;
+      const n = (g.affection >= (G.lore("goat") >= 3 ? 5 : 6) ? 2 : 1) + (G.blessed("flock") ? 1 : 0); // Pan's blessing on the flock
       G.say(`You milk ${g.name}: ${give("Milk", n)}${n > 1 ? " (a contented goat gives more)" : ""}`);
     } else {
       G.say(`${g.name} · affection ${g.affection}/10 · ${g.fed ? "ate and drank well last night; milked today" : "went hungry last night, so no milk today"}.`);
@@ -3548,7 +3625,9 @@ class FarmScene extends PlayScene {
       if (reap) G.say("Reaped in its season, as the signs say: an extra measure.");
       const dem = G.boon("Demeter"); // Demeter's favor (or anger) at the harvest
       const extra = dem !== 0 && Math.random() < 0.15 * Math.abs(dem) ? Math.sign(dem) : 0;
-      const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra + reap), q);
+      const blessed = G.blessed("crop") ? 1 : 0; // the Crop Blessing
+      const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra + reap + blessed), q);
+      if (blessed) G.say("The blessed field gives a measure more. Share the surplus.");
       G.markFresh(d.id);
       if (extra > 0) G.say("Demeter is generous: an extra measure.");
       if (G.grace("Demeter") >= 4) { const sn = 1 + (Math.random() < 0.5 ? 1 : 0); G.say(`Green-Blessed: the harvest gives back seed, ${give(seedId(d.id), sn)}.`); }
@@ -4971,7 +5050,7 @@ class WildScene extends PlayScene {
     } });
     if (who === "Circe" && s.marks!.cup !== today) opts.push({ label: "Drink from the cup she offers", fn: () => {
       s.marks!.cup = today;
-      if (G.count("Moly") > 0) { G.earn("Kleos", 1, "you drank Circe's cup unchanged"); const v = G.addFavor("Hermes", 1, 6); again(`You drink. Nothing happens. She stares at you, then at the moly at your belt, and laughs, delighted. "Hermes' doing! Well. You must be the clever one they told me of." (Hermes ${v >= 0 ? "+" : ""}${v})`); return; }
+      if (G.count("Moly") > 0 || G.crownHas("laurel")) { G.earn("Kleos", 1, "you drank Circe's cup unchanged"); const v = G.addFavor("Hermes", 1, 6); again(`You drink. Nothing happens. She stares at you, then at the moly at your belt, and laughs, delighted. "Hermes' doing! Well. You must be the clever one they told me of." (Hermes ${v >= 0 ? "+" : ""}${v})`); return; }
       u.closeTalk(); G.addFatigue(40); G.data.clock = Math.min(G.data.clock + 3, 23.5);
       G.say("The wine is sweet, and then the world tilts. You come to yourself hours later, on all fours in her sty, rooting among the acorns, with a nose too short and a voice that won't make words. Then it passes. She is laughing. (Time passes; +40 Fatigue. Moly, they say, protects against her.)");
     } });
@@ -5655,7 +5734,9 @@ class WildScene extends PlayScene {
     const u = ui(this);
     let text = "";
     switch (kind.id) {
-      case "shepherd": case "goatherd": text = `They press a skin of milk on you for the road: ${give("Milk", 2)}.`; break;
+      case "shepherd": case "goatherd":
+        if (!G.data.arts.includes("flock")) { G.data.arts.push("flock"); text = `"Your goats? Then you'll want Pan on your side. Out here, in the wild, where he can hear: play him the pipes, as well as you can, pour him wine, share a meal with him, and bring him flowers off the hill. Spring at noon is best. He'll keep the wolves off and the milk coming."\n\n(You learn Flock Thriving. Press R for the Arts.) They press a skin of milk on you too: ${give("Milk", 2)}.`; break; }
+        text = `They press a skin of milk on you for the road: ${give("Milk", 2)}.`; break;
       case "charcoal": text = `"Take these. Caves are dark." ${give("Torch", 2)}.`; break;
       case "fisher": text = `They share the day's catch, and a bundle of sea fennel: ${give("Meat", 1)}, ${give("SeaFennel", 2)}.`; break;
       case "hunter": G.data.archeryXp += 20; text = "He takes your bow, laughs at your grip, and fixes it. You shoot at a knot in a tree until your fingers sting. (Archery practice +20)"; break;
@@ -5671,6 +5752,7 @@ class WildScene extends PlayScene {
         break;
       }
       case "hermit": {
+        if (!G.data.arts.includes("dawn")) { G.data.arts.push("dawn"); text = `"Every morning for forty years I have watched him come up. Go outside before he does, face east, sip clean water and share a crust with him. Say what you like. Do it every day, and see."\n\n(You learn Dawn Renewal. Press R for the Arts.)`; break; }
         const b = G.data.birth;
         text = b ? `He looks at you a long time. "I see this: ${(MOROS_DREAMS[b.moros[0]] ?? "a road").replace(/^You dream of /, "").replace(/\.$/, "")}. And this: ${b.hamartia[1].charAt(0).toLowerCase() + b.hamartia[1].slice(1)}" He will say no more.` : "He looks at you a long time and says nothing at all.";
         break;
@@ -5887,7 +5969,7 @@ class WildScene extends PlayScene {
       if (!m.sprite.active || m.state === "dead") continue;
       const d = Math.hypot(m.sprite.x - this.player.x, m.sprite.y - this.player.y);
       if (m.kind === "siren" && G.isDay) {
-        const stopped = G.selectedItem?.id === "Wax" || G.count("Moly") > 0;
+        const stopped = G.selectedItem?.id === "Wax" || G.count("Moly") > 0 || G.crownHas("laurel"); // Apollo's laurel: no song bends your will
         if (d < 170 && !stopped && !this.paused && this.knock <= 0) {
           // The song pulls you toward her; you can still walk hard away.
           const v = this.player.body!.velocity, k = 42 / Math.max(1, d);
@@ -7635,6 +7717,11 @@ class VillageScene extends PlayScene {
     const opts: { label: string; fn: () => void }[] = [{ label: "Ask about their work", fn: () => again(h.trade.tip) }];
     const shop = HOUSE_WARES[h.trade.id];
     if (shop) opts.push({ label: h.trade.id === "weaver" ? "Buy clothes" : "Ask about the old gear on the wall", fn: () => this.houseShop(f.name, h, shop) });
+    if ((h.trade.id === "weaver" || h.trade.id === "basketmaker") && f.age !== "child" && !G.data.weaveTaught) opts.push({ label: "Ask them to show you how crowns are woven", fn: () => {
+      if (G.rel(f.id) < 2) { again(`"Maybe, when I know you better." (Friendship +2 needed)`); return; }
+      G.data.weaveTaught = true;
+      again(`${f.name} laughs and takes a handful of whatever's nearest. "Over, under, and tuck. Tight enough to hold, loose enough not to bruise. And fresh, always: a crown of yesterday's leaves is just rubbish on your head." Your fingers learn it.\n\n(You learn to weave crowns and wreaths properly. Press R for the Arts.)`);
+    } });
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => { rec.talked = today; const g = this.warmth(); ui(this).changeRel(f.id, g); again(`You talk about the weather, the harvest, the gossip from the well. ${f.name} laughs at something you say. (+${g}: ${relLabel(G.rel(f.id))})`); } });
     const held = G.selectedItem;
     if (held && ITEMS[held.id].kind !== "tool" && rec.gifted !== today) opts.push({ label: `Give ${f.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
@@ -8006,6 +8093,7 @@ class UIScene extends Phaser.Scene {
       if ((e.key === "c" || e.key === "C") && !this.market && !this.inv && !this.loreBook && !this.chestPanel) { if (this.craft) this.closeCraft(); else this.openCraft(); }
       if ((e.key === "f" || e.key === "F") && !this.talkPanel) { if (this.sheet === "gods") this.closeSheet(); else this.openSheet("gods"); }
       if ((e.key === "p" || e.key === "P") && !this.talkPanel) { if (this.sheet === "self") this.closeSheet(); else this.openSheet("self"); }
+      if ((e.key === "r" || e.key === "R") && !this.market && !this.inv && !this.craft && !this.loreBook && !this.chestPanel && !this.ritual) { if (this.talkPanel) this.closeTalk(); else if (this.playScene()) this.openArts(); }
     });
     kb.on("keyup", (e: KeyboardEvent) => { if (e.key === "v" || e.key === "V") this.singStop(); });
     this.input.on("wheel", (_p: unknown, _o: unknown, _dx: number, dy: number) => {
@@ -8052,6 +8140,9 @@ class UIScene extends Phaser.Scene {
       "",
       "FISHING",
       "Make a rod (C). Hold it and press Space facing water within three paces to cast. Strike (Space) when the float dips, then press as the mark crosses the green. Fresh water and the sea hold different fish; the deep holds the big ones; dawn, dusk and rain bring them up.",
+      "",
+      "THE ARTS (R)",
+      "Rites you know, and weaving. The Rural Arts (Hearth Blessing, Crop Blessing, Flock Thriving, Dawn Renewal, Wild Panic, Solar Witness) are taught by country folk; each is done in its place, and components, the hour and the season lower its CRs. Crowns and wreaths are woven of fresh plants (sprigs cut from trees with the sickle): a crown is worn, a wreath hangs at home.",
       "",
       "PHARMAKEIA, THE HERB-ART",
       "Make a mortar (C), hold it and press Space anywhere. Up to four herbs: each has aspects (healing, sleep, sight, warding...); the strongest, less its opposite, makes the remedy. Gnosis, Techne and one more Aretai are checked; the hour, moon, season, place and fresh herbs all help. A root-cutter, a herb-woman or Myrrhine can teach you.",
@@ -8273,7 +8364,10 @@ class UIScene extends Phaser.Scene {
   talkOpts: { label: string; fn: () => void }[] = [];
 
   /** A conversation card: who, how they feel about you, what they say, and what you can do. */
+  /** What the talk panel last showed (for tests, and anything that needs to know). */
+  talkLast = { title: "", sub: "", text: "" };
   showTalk(title: string, sub: string, text: string, opts: { label: string; fn: () => void }[], img?: string) {
+    this.talkLast = { title, sub, text };
     SOUND.sfx("talk");
     this.talkPanel?.destroy();
     if (this.inv) this.toggleInventory();
@@ -8311,7 +8405,7 @@ class UIScene extends Phaser.Scene {
     const sub = `${v.household[0].toUpperCase() + v.household.slice(1)} · ${v.patron}'s household · ${relLabel(rec.rel)} (${rec.rel >= 0 ? "+" : ""}${rec.rel})`;
     const aph = G.boon("Aphrodite");
     const phoenix = (G.patron?.aretai === "Phoenix" ? 1 : 0) + (aph >= 2 ? 1 : aph <= -2 ? -1 : 0); // Aphrodite's hour and favor
-    const welcome = (G.blessed("hospitality") ? 1 : 0) + (G.songOn("charm") ? 1 : 0) + (G.songOn("charm2") ? 1 : 0); // and the nightingale's song, or a love charm
+    const welcome = (G.blessed("hospitality") ? 1 : 0) + (G.songOn("charm") ? 1 : 0) + (G.songOn("charm2") ? 1 : 0) + (G.crownHas("myrtle") ? 1 : 0) + (G.crownHas("rose") ? 1 : 0); // and the nightingale's song, or a love charm
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
       rec.talked = today; G.note(`chat:${v.id}`); const gain = Math.max(0, 1 + phoenix + welcome + (G.grace("Aphrodite") >= 4 ? 1 : 0)); const r = this.changeRel(v.id, gain);
@@ -8331,7 +8425,7 @@ class UIScene extends Phaser.Scene {
       if (v.loves.includes(id)) { d = 3; say = `"${n[0].toUpperCase() + n.slice(1)}! How did you know? Thank you, truly."`; }
       else if (v.likes.includes(id)) { d = 2; say = `"Oh, ${n}. I'll put this to good use."`; }
       else if (v.dislikes.includes(id)) { d = -2; say = `"...${n}. Well. Thank you, I suppose."`; }
-      if (d > 0) d += phoenix + (G.songOn("charm") ? 1 : 0) + (G.songOn("charmGift") ? 1 : 0) + (G.grace("Aphrodite") >= 7 ? 2 : 0); // the Golden One's gifts
+      if (d > 0) d += phoenix + (G.songOn("charm") ? 1 : 0) + (G.songOn("charmGift") ? 1 : 0) + (G.crownHas("myrtle") ? 1 : 0) + (G.grace("Aphrodite") >= 7 ? 2 : 0); // the Golden One's gifts
       this.changeRel(v.id, d);
       this.talkTo(v, `${say}\n\n(${d >= 0 ? `+${d}` : d} with ${v.name}.)`);
     } });
@@ -8353,6 +8447,22 @@ class UIScene extends Phaser.Scene {
       if (rec.rel < ARTS.hospitality.teachAt) { this.talkTo(v, `"The Arts are not for strangers. Come to know me better first." (Friendship +${ARTS.hospitality.teachAt} needed)`); return; }
       G.data.arts.push("hospitality");
       this.talkTo(v, `"Then learn the Hospitality Blessing, Zeus's own. Perform it at your hearth: honey, milk, flowers, grapes and grain make it easier, and his hour and the full moon easier still. Done well, every guest and neighbor will feel welcome at your door."\n\n(You learn the Hospitality Blessing. Perform it at your hearth.)`);
+    } });
+    // The Rural Arts, from those who keep them, once they know you well enough.
+    const RURAL_TEACH: Record<string, [string, string, string]> = {
+      eudora: ["hearth", "Ask her how she keeps the inn so welcoming", `"It's the hearth, love. Keep it fed, give Hestia the first bite and the last, and mean your welcome. Then bless it: your best dish, clean spring water, a few herbs on the coals, of a morning. The house will thank you."`],
+      theron: ["crop", "Ask him how his fields do so well", `"Every farmer blesses his fields, or should. First fruits back to the gods, wine or milk on the furrows, a little grain burned. In spring, at sunrise, best of all. And share what comes of it, or don't expect it twice."`],
+      myrrhine: ["solar", "Ask her about Helios' witness", `"Helios sees everything under the sun. If you must know the truth of something done in daylight, go out at noon under an open sky, offer him gold and water and incense, and a drop of your own blood. Do not waste his time."`],
+    };
+    const rt = RURAL_TEACH[v.id];
+    if (rt && !G.data.arts.includes(rt[0])) { const [id, label, said] = rt, need = ARTS[id].teachAt; opts.push({ label, fn: () => {
+      if (rec.rel < need) { this.talkTo(v, `"Come to know me a little better first, and I'll tell you." (Friendship +${need} needed)`); return; }
+      G.data.arts.push(id); this.talkTo(v, `${said}\n\n(You learn the ${ARTS[id].name}. Press R for the Arts.)`);
+    } }); }
+    if (v.id === "myrrhine" && !G.data.weaveTaught) opts.push({ label: "Ask her how the crowns are woven", fn: () => {
+      if (rec.rel < 3) { this.talkTo(v, `"The god's crowns are not toys. Come to know me better." (Friendship +3 needed)`); return; }
+      G.data.weaveTaught = true;
+      this.talkTo(v, `"Fresh, always fresh: a plant cut yesterday has lost its god. Laurel for Apollo, olive for Athena, myrtle for Aphrodite. Speak to the plant, thank it, weave tight but don't crush it, and say aloud what it is for when you close the ring."\n\n(You learn to weave crowns and wreaths properly. Press R for the Arts.)`);
     } });
     if (v.id === "myrrhine" && !G.pharm.taught) opts.push({ label: "Ask her about healing herbs", fn: () => {
       if (rec.rel < 2) { this.talkTo(v, `"Apollo's healing is not for idle curiosity. Come to know me better." (Friendship +2 needed)`); return; }
@@ -8532,7 +8642,7 @@ class UIScene extends Phaser.Scene {
     G.say(`You ${verb} ${songName(m)}${strong ? ", and it rings true" : ""} (d12 ${roll}, needed 1–${skill}). ${out}${b}`);
   }
   static songSkill(m: Melody, inst = curInstrument()) {
-    return Math.max(1, (G.data.aretai.Ourania ?? 3) + inst.power + (inst.gods.includes(m.god) ? 1 : 0) + (G.patron?.god === m.god ? 2 : 0) + (G.songOn("muse") ? 2 : 0) + Math.max(0, G.boon("Apollo")) - m.hard);
+    return Math.max(1, (G.data.aretai.Ourania ?? 3) + inst.power + (inst.gods.includes(m.god) ? 1 : 0) + (G.patron?.god === m.god ? 2 : 0) + (G.songOn("muse") ? 2 : 0) + (G.crownHas("laurel") ? 1 : 0) + (G.wreathHas("laurel") && (G.data.scene === "House" || G.data.scene === "Farm") ? 1 : 0) + Math.max(0, G.boon("Apollo")) - m.hard);
   }
   /** While V is held: the harmonia, the eight steps, and the melodies you know. */
   drawSing() {
@@ -9127,6 +9237,10 @@ class UIScene extends Phaser.Scene {
         else { G.addFatigue(8); m.last = today; this.talkToMyth(id, `You trip over a hoof and land in the grass. The satyrs howl with laughter and won't stop. (+8 Fatigue) ${odds}`); }
       } });
     }
+    if (id === "satyrs" && rung >= 2 && !G.data.arts.includes("panic")) opts.push({ label: "Ask them about Pan's terror", fn: () => {
+      G.data.arts.push("panic");
+      this.talkToMyth(id, `They go quiet, which is frightening in itself. Then ${m.name} grins. "The goat-foot's own trick! When something hunts you in the wild, be the thing that hunts. Pipes at your belt, a fistful of wild herbs, and all your fear thrown outward at once. Best at noon, far from any house. But Pan's terror goes where it likes." They all shudder happily.\n\n(You learn Wild Panic. Press R for the Arts. It costs Hubris.)`);
+    } });
     if (rung >= 3 && m.gift !== today) {
       if (id === "naiad") opts.push({ label: "Bathe in the spring", fn: () => { m.gift = today; G.addFatigue(-40); this.talkToMyth(id, "You bathe in the cold, clear water, and come out feeling new. (-40 Fatigue)"); } });
       else opts.push({ label: "Share their feast", fn: () => {
@@ -9230,14 +9344,14 @@ class UIScene extends Phaser.Scene {
     const fine = slot?.q === 3, ft = festToday(), feast = where === "shrine" && ft?.god === god;
     G.removeItem(item, 1); G.data.offered[god] = today; G.note("offer");
     const g = G.gear, robed = g.riteAll || g.rite.includes(god);
-    const pure = G.songOn("pure"); // purified (Pharmakeia's katharmos)
+    const pure = G.songOn("pure") || G.crownHas("parsley") || (where === "home" && G.wreathHas("parsley")); // purified (a katharmos, a parsley crown, or a parsley wreath at home)
     const after = G.addFavor(god, (fine ? 2 : 1) * (feast ? 2 : 1) + (robed ? 1 : 0) + (pure ? 1 : 0), feast ? 10 : cap);
     this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}${feast ? ` at the ${ft!.name}, before the whole village` : ""}${robed ? `, dressed for the rite in your ${ITEMS[G.data.worn.body!].name.toLowerCase()}` : ""}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after}${feast ? "; on the god's festival, offerings count double, as high as +10" : ""}${robed ? "; dressed for it, +1 more" : ""}${pure ? "; purified, +1 more" : ""})`);
   }
 
   hearthMenu(tend: () => void) {
     const opts = [{ label: "Tend the hearth", fn: () => { this.closeTalk(); tend(); } }, { label: "Cook something", fn: () => { this.closeTalk(); this.openCook("hearth"); } }];
-    for (const id of G.data.arts) opts.push({ label: `Plan the ${ARTS[id].name}`, fn: () => this.planRitual(ARTS[id]) });
+    for (const id of G.data.arts) if (ARTS[id]?.where === "hearth") opts.push({ label: `Plan the ${ARTS[id].name}`, fn: () => this.planRitual(ARTS[id]) });
     this.showTalk("The hearth", "Hestia's fire, the heart of the household", "The fire burns low and steady. Here the household's rites are done.", opts);
   }
 
@@ -9366,58 +9480,85 @@ class UIScene extends Phaser.Scene {
   }
 
   // ---- rituals: plan, then perform
-  ritual?: { art: Art; use: Set<string>; step: number; results: { label: string; roll: number; bonus: number; need: number; ok: boolean }[]; marker?: Phaser.GameObjects.Rectangle; t: number; panel?: Phaser.GameObjects.Container };
+  ritual?: { art: Art; use: Set<string>; heart?: boolean; step: number; results: { label: string; roll: number; bonus: number; need: number; ok: boolean }[]; marker?: Phaser.GameObjects.Rectangle; t: number; panel?: Phaser.GameObjects.Container };
 
   ritualConditions(art: Art) {
-    const moonFull = G.moon === "Full moon";
-    const met: Record<string, boolean> = { zeusHour: G.patron?.aretai === "Kratos", fullMoon: moonFull, hosted: G.dayNumber - G.data.hostedDay <= 3 };
-    return art.timing.map((t) => ({ ...t, ok: !!met[t.id] }));
+    const ctx = this.playScene()?.artCtx();
+    const met: Record<string, boolean> = { zeusHour: G.patron?.aretai === "Kratos", fullMoon: G.moon === "Full moon", hosted: G.dayNumber - G.data.hostedDay <= 3 };
+    return art.timing.map((t) => ({ ...t, ok: t.id in met ? met[t.id] : !!ctx && artCondition(t.id, ctx) }));
   }
 
-  /** The CR of each check after components, timing and place. */
-  ritualCRs(art: Art, use: Set<string>) {
+  /** Do you have this component (any one of its alternatives)? Which item would be used? */
+  static compHave(c: Art["components"][number]): string | null {
+    for (const it of Array.isArray(c.item) ? c.item : [c.item]) {
+      if (it === "@water" && ((G.data.jarWater > 0 && G.count("jar") > 0) || (G.data.skin ?? 0) > 0)) return it;
+      if (it === "@springwater" && G.data.jarSpring && G.data.jarWater > 0 && G.count("jar") > 0) return it;
+      if (it === "@blood" && G.data.vitality > 2) return it;
+      if (it === "@pipes" && G.count("Syrinx") > 0) return it;
+      if (it === "@dish") { const d = DISH_IDS.find((id) => G.count(id) > 0); if (d) return d; continue; }
+      if (!it.startsWith("@") && G.count(it) > 0) return it;
+    }
+    return null;
+  }
+  static compTake(it: string) {
+    if (it === "@water") { if (G.data.jarWater > 0 && G.count("jar") > 0) G.data.jarWater--; else G.data.skin = Math.max(0, (G.data.skin ?? 0) - 1); }
+    else if (it === "@springwater") G.data.jarWater--;
+    else if (it === "@blood") G.heal(-2);
+    else if (!it.startsWith("@")) G.removeItem(it, 1);
+  }
+  /** The CR of each check after components, timing, place, and your heart poured in. */
+  ritualCRs(art: Art, use: Set<string>, heart = false) {
     const timing = this.ritualConditions(art).filter((t) => t.ok).reduce((n, t) => n + t.cr, 0);
-    const reduce = -use.size + timing + art.location.cr + (G.songOn("pure") ? -2 : 0); // purified for the rite
+    const reduce = -use.size + timing + art.location.cr + (G.songOn("pure") || G.crownHas("parsley") ? -2 : 0) + (heart ? -2 : 0); // purified for the rite; Pathos spent
     return art.checks.map((c) => ({ ...c, cr: Math.max(2, c.cr + reduce) }));
   }
 
   /** A d12 plus your Aretai (plus performance) must meet the CR. */
   odds(aretai: number, cr: number) { return Math.max(0, Math.min(1, (13 - (cr - aretai)) / 12)); }
 
+  ritualHeart = false;
   planRitual(art: Art, use?: Set<string>) {
-    const sel = use ?? new Set(art.components.filter((c) => G.count(c.item) > 0).map((c) => c.item));
-    const crs = this.ritualCRs(art, sel);
+    const sel = use ?? new Set(art.components.map((c, i) => (UIScene.compHave(c) ? String(i) : "")).filter(Boolean));
+    if (!use) this.ritualHeart = false;
+    const crs = this.ritualCRs(art, sel, this.ritualHeart);
+    const ctx = this.playScene()?.artCtx(), notHere = ctx ? artWhere(art.where, ctx) : "You can't do that here.";
     const exact = (G.data.aretai.Gnosis ?? 3) >= 4; // Gnosis reveals the true odds
     const rough = (p: number) => (p >= 0.85 ? "near certain" : p >= 0.6 ? "likely" : p >= 0.35 ? "a fair chance" : p >= 0.15 ? "unlikely" : "nearly impossible");
+    const costs = Object.entries(art.cost).filter(([, v]) => v);
     const lines: string[] = [];
-    lines.push(`${art.requirement}  Cost: ${Object.entries(art.cost).map(([k, v]) => `${v} ${k}`).join(", ")} (you have ${Object.entries(art.cost).map(([k]) => G.data.currencies[k as keyof typeof G.data.currencies]).join(", ")}).`);
-    lines.push("Conditions: " + this.ritualConditions(art).map((t) => `${t.ok ? "✓" : "·"} ${t.label} (${t.cr})`).join("   ") + `   ✓ ${art.location.label} (${art.location.cr})`);
+    lines.push(`${art.requirement}${costs.length ? `  Cost: ${costs.map(([k, v]) => (k === "Hubris" ? `+${v} Hubris` : `${v} ${k} (you have ${G.data.currencies[k as keyof typeof G.data.currencies]})`)).join(", ")}.` : ""}`);
+    if (notHere) lines.push(`Not here: ${notHere}`);
+    lines.push("Conditions: " + this.ritualConditions(art).map((t) => `${t.ok ? "✓" : "·"} ${t.label} (${t.cr})`).join("   "));
     lines.push("Checks (each: d12 + Aretai + performance must meet the CR):");
     for (const c of crs) { const a = G.data.aretai[c.aretai] ?? 3, p = this.odds(a, c.cr); lines.push(`   ${c.label} · ${c.aretai} ${a} · ${exact ? `CR ${c.cr} (${Math.round(p * 100)}% before performance)` : rough(p)}`); }
     lines.push(`Effect: ${art.effect}`);
     lines.push(`On failure: Likelihood ${art.failure.likelihood} of 12: ${art.failure.text}${exact ? "" : "   (Gnosis 4+ shows exact odds.)"}`);
-    const opts: { label: string; fn: () => void }[] = art.components.map((c) => {
-      const have = G.count(c.item) > 0, on = sel.has(c.item);
-      return { label: `${on ? "[x]" : "[ ]"} ${c.label}${have ? "" : " (you have none)"}  -1 CR`, fn: () => { if (!have) return; const n = new Set(sel); on ? n.delete(c.item) : n.add(c.item); this.planRitual(art, n); } };
+    const opts: { label: string; fn: () => void }[] = art.components.map((c, i) => {
+      const have = UIScene.compHave(c), on = sel.has(String(i));
+      return { label: `${on ? "[x]" : "[ ]"} ${c.label}${have ? "" : " (you have none)"}  -1 CR`, fn: () => { if (!have) return; const n = new Set(sel); on ? n.delete(String(i)) : n.add(String(i)); this.planRitual(art, n); } };
     });
-    const canPay = Object.entries(art.cost).every(([k, v]) => G.data.currencies[k as keyof typeof G.data.currencies] >= (v ?? 0));
-    opts.push({ label: canPay ? "Perform the rite now" : "Perform the rite (you can't pay its cost)", fn: () => { if (canPay) this.performRitual(art, sel); } });
+    const pathos = G.data.currencies.Pathos ?? 0, need = (art.cost.Pathos ?? 0) + 1;
+    opts.push({ label: `${this.ritualHeart ? "[x]" : "[ ]"} Pour your heart in (1 Pathos)  -2 CR`, fn: () => { if (!this.ritualHeart && pathos < need) return; this.ritualHeart = !this.ritualHeart; this.planRitual(art, sel); } });
+    const canPay = Object.entries(art.cost).every(([k, v]) => k === "Hubris" || G.data.currencies[k as keyof typeof G.data.currencies] >= (v ?? 0) + (k === "Pathos" && this.ritualHeart ? 1 : 0));
+    opts.push({ label: notHere ? "Perform the rite (not here)" : canPay ? "Perform the rite now" : "Perform the rite (you can't pay its cost)", fn: () => { if (canPay && !notHere) this.performRitual(art, sel); } });
     this.showTalk(art.name, `An Art of ${art.patron} · plan the rite: components, timing and place lower every CR`, lines.join("\n"), opts);
   }
 
   performRitual(art: Art, use: Set<string>) {
-    for (const [k, v] of Object.entries(art.cost)) G.data.currencies[k as keyof typeof G.data.currencies] -= v ?? 0;
-    for (const item of use) G.removeItem(item, 1);
+    for (const [k, v] of Object.entries(art.cost)) G.data.currencies[k as keyof typeof G.data.currencies] += k === "Hubris" ? (v ?? 0) : -(v ?? 0);
+    if (art.cost.Hubris) G.say(`+${art.cost.Hubris} Hubris: ${art.name} is no small thing to ask.`);
+    const heart = this.ritualHeart; if (heart) G.data.currencies.Pathos -= 1;
+    for (const i of use) { const c = art.components[Number(i)]; if (!c || c.keep) continue; const it = UIScene.compHave(c); if (it) UIScene.compTake(it); }
     this.closeTalk();
     this.modal = true;
-    this.ritual = { art, use, step: 0, results: [], t: 0 };
+    this.ritual = { art, use, step: 0, results: [], t: 0, heart };
     this.ritualStep();
   }
 
   /** One step of the rite: a short timing test, then the roll. Hitting the gold adds performance bonus. */
   ritualStep() {
     const r = this.ritual!; r.panel?.destroy();
-    const crs = this.ritualCRs(r.art, r.use);
+    const crs = this.ritualCRs(r.art, r.use, r.heart);
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     const w = 620, h = 200, x0 = (W - w) / 2, y0 = (H - h) / 2 - 40;
     const root = this.add.container(0, 0).setDepth(26);
@@ -9461,13 +9602,17 @@ class UIScene extends Phaser.Scene {
     const ok = r.results.every((x) => x.ok);
     let text: string;
     if (ok) {
-      G.data.blessing = { id: art.id, until: G.dayNumber + art.days - 1 };
-      G.addFavor(art.patron, 1);
-      text = `The rite is complete. The fire leaps once, and settles warm. ${art.effect}\n\n(Favor with ${art.patron} +1.)`;
+      const sc = this.playScene();
+      if (art.id === "hospitality") G.data.blessing = { id: art.id, until: G.dayNumber + art.days - 1 };
+      else if (art.days > 0) G.bless(art.id, art.days);
+      const after = G.addFavor(art.patron, 1);
+      const extra = sc ? sc.artDone(art.id) : "";
+      const opening = art.where === "hearth" ? "The fire leaps once, and settles warm." : art.where === "field" ? "A breeze runs over the furrows." : art.where === "dawn" ? "The sun clears the hills and looks you full in the face." : art.id === "panic" ? "Something vast and goat-footed laughs in the hills." : art.id === "solar" ? "The light sharpens, and everything stands out clear." : "The wild goes quiet, listening.";
+      text = `The rite is complete. ${opening} ${art.instant ? "" : art.effect}${extra ? `\n\n${extra}` : ""}\n\n(${art.patron} +1: favor now ${after >= 0 ? "+" : ""}${after}.)`;
     } else {
       const roll = 1 + Math.floor(Math.random() * 12);
       const bad = roll <= art.failure.likelihood;
-      if (bad && art.id === "hospitality") G.addFavor("Zeus", -1);
+      if (bad) this.playScene()?.artFailed(art.id);
       text = `The rite falters at "${r.results.find((x) => !x.ok)!.label.split(":")[0]}". ${bad ? art.failure.text : "No harm done, this time."} (Likelihood ${art.failure.likelihood}: d12 ${roll}.) The components and cost are spent.`;
     }
     r.panel?.destroy();
@@ -9624,16 +9769,134 @@ class UIScene extends Phaser.Scene {
     const fine = pot.every((id) => UIScene.countQ(id, 2) >= pot.filter((x) => x === id).length);
     for (const id of pot) UIScene.takeQ(id, 1, fine ? 2 : 1);
     const skill = UIScene.cookSkill(), roll = d12(), well = roll <= Math.ceil(skill / 2);
-    const tier = Math.min(3, r.tier + (fine ? 1 : 0) + (well ? 1 : 0));
+    const blest = this.cookAt === "hearth" && (G.blessed("hearth") || G.wreathHas("barley")); // a blessed hearth, a barley wreath
+    const tier = Math.min(3, r.tier + (fine ? 1 : 0) + (well ? 1 : 0) + (blest ? 1 : 0));
     const first = !G.data.dishes.includes(r.id);
     if (first) G.data.dishes.push(r.id);
     G.note("cook"); G.note(`cook:${r.id}`);
     SOUND.sfx(r.named && first ? "find" : "pickup");
     const got = give(r.id, 1, tier);
-    const how = [fine && "fine ingredients", well && `well cooked (Oikos d12 ${roll})`].filter(Boolean).join(", ");
+    const how = [fine && "fine ingredients", well && `well cooked (Oikos d12 ${roll})`, blest && "a blessed hearth"].filter(Boolean).join(", ");
     if (r.named && first) G.say(`A dish of the gods! ${r.named.name}: ${r.named.desc}`);
     G.say(`You cook: ${got}${how ? ` (${how})` : ""}. Eaten: ${effectText(mealEffect(r.id, tier))}.${b}`);
     this.pot = []; this.buildCook();
+  }
+
+  // ---------------------------------------------------------------- the Arts (R): rites, and weaving
+  openArts() {
+    const known = G.data.arts.filter((id) => ARTS[id]), ctx = this.playScene()!.artCtx();
+    const opts: { label: string; fn: () => void }[] = known.map((id) => {
+      const art = ARTS[id], why = artWhere(art.where, ctx);
+      return { label: `${art.name}${why ? "  (not here)" : ""}`, fn: () => this.planRitual(art) };
+    });
+    opts.push({ label: "Weave a crown or a wreath", fn: () => { this.closeTalk(); this.openWeave(this.playScene()!.weaveCtx()); } });
+    const lines: string[] = [];
+    const run = Object.entries(G.data.blessings ?? {}).filter(([id]) => G.blessed(id)).map(([id, until]) => `${ARTS[id]?.name ?? id} (${until - G.dayNumber + 1} day${until - G.dayNumber ? "s" : ""})`);
+    if (G.blessed("hospitality")) run.unshift("Hospitality Blessing");
+    lines.push(run.length ? `Blessings on you: ${run.join(", ")}.` : "No blessing is on you now.");
+    const cr = G.data.crown, wr = G.data.wreath, hrs = (u: number) => Math.max(0, Math.round(u - G.absHour));
+    if (cr && cr.until > G.absHour) lines.push(`On your head: a crown of ${cr.mats.map((m) => material(m).name.toLowerCase()).join(" and ")} (${hrs(cr.until)} hours before it wilts).`);
+    if (wr && wr.until > G.absHour) lines.push(`Over your door: a wreath of ${wr.mats.map((m) => material(m).name.toLowerCase()).join(" and ")} (${hrs(wr.until)} hours).`);
+    const unknown = Object.entries(RURAL_TEACHERS).filter(([id]) => !G.data.arts.includes(id));
+    if (unknown.length) lines.push(`\nThe Rural Arts you don't know yet, and who might teach them: ${unknown.map(([id, who]) => `${ARTS[id].name}: ${who}`).join("; ")}.`);
+    if (!G.data.weaveTaught) lines.push("A weaver or basket-maker in the village (or Myrrhine) could teach you to weave crowns properly.");
+    lines.push("Pharmakeia, the herb-Art, is done with the mortar: hold it and press Space.");
+    this.showTalk("The Arts", "Rites to perform, and circlets to weave (R)", lines.join("\n"), opts);
+  }
+
+  weaveSel: string[] = []; weaveKind: "crown" | "wreath" = "crown"; weaveAt?: WeaveCtx;
+  openWeave(ctx: WeaveCtx) {
+    if (this.market || this.dialog || this.loreBook || this.craft) return;
+    if (this.inv) this.toggleInventory();
+    this.weaveAt = ctx; this.weaveSel = []; this.weaveKind = ctx.scene === "House" || ctx.scene === "Farm" ? this.weaveKind : "crown"; this.craftAt = "workbench";
+    this.modal = true; this.buildWeave();
+  }
+  /** The checks for a weaving: one per material, with every bonus, and the skill penalties. */
+  static weavePlan(sel: Material[], kind: "crown" | "wreath", ctx: WeaveCtx) {
+    const bon = weaveBonuses(sel, kind, ctx), bonus = bon.reduce((n, b) => n + b.n, 0);
+    const hand = Math.max(G.data.aretai.Techne ?? 3, G.data.aretai.Oikos ?? 3);
+    const pen: { label: string; n: number }[] = [];
+    if (!G.data.weaveTaught && hand < 4) pen.push({ label: "Untaught, and Techne/Oikos under 4", n: 2 });
+    if (sel.length > 1 && hand < 6) pen.push({ label: "Several materials want Techne/Oikos 6", n: 2 });
+    const add = pen.reduce((n, p) => n + p.n, 0);
+    const checks = sel.map((m) => ({ m, aretai: m.check.aretai, cr: m.check.cr + add }));
+    const cost: Record<string, number> = {};
+    if (!ctx.festival) for (const m of sel) for (const [k, v] of Object.entries(m.cost ?? {})) cost[k] = (cost[k] ?? 0) + Math.ceil((v ?? 0) / (ctx.site === "delphi" ? 2 : 1));
+    return { bon, bonus, pen, checks, cost, days: sel.length ? weaveDays(sel, ctx) : 0, hours: sel.length <= 1 ? 2 : sel.length <= 3 ? 4 : 6 };
+  }
+  buildWeave() {
+    this.craft?.destroy();
+    const ctx = this.weaveAt!, font = { fontFamily: FONT, color: "#f2e6c9" };
+    const atHome = ctx.scene === "House" || ctx.scene === "Farm";
+    const w = 700, h = 470, x0 = (W - w) / 2, y0 = Math.max(6, (H - h) / 2 - 20);
+    const root = this.add.container(0, 0).setDepth(23); this.craft = root;
+    root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0x6a9a4a));
+    root.add(this.add.text(W / 2, y0 + 8, "Wreaths and Crowns", { ...font, fontSize: "19px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 32, "Fresh plants only (gathered today). Each material is a check, and every one must hold. A crown is worn at once; a wreath hangs at home.", { ...font, fontSize: "11px", color: "#c9b48f", wordWrap: { width: w - 30 }, align: "center" }).setOrigin(0.5, 0));
+    // Crown or wreath.
+    const kindBtn = (x: number, k: "crown" | "wreath", ok: boolean) => {
+      const t = this.add.text(x, y0 + 56, `${this.weaveKind === k ? "●" : "○"} ${k === "crown" ? "A crown, to wear" : "A wreath, to hang at home"}`, { ...font, fontSize: "13px", color: ok ? (this.weaveKind === k ? "#f2c14e" : "#f2e6c9") : "#6d675b" });
+      root.add(t); if (ok) t.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.weaveKind = k; this.buildWeave(); });
+    };
+    kindBtn(x0 + 20, "crown", true); kindBtn(x0 + 240, "wreath", atHome);
+    if (!atHome) root.add(this.add.text(x0 + 470, y0 + 58, "(wreaths are woven where they hang: at home)", { ...font, fontSize: "11px", color: "#8d877b" }));
+    // The materials.
+    MATERIALS.forEach((m, i) => {
+      const x = x0 + 20 + (i % 2) * 340, y = y0 + 84 + Math.floor(i / 2) * 22;
+      const have = G.count(m.item), fresh = have > 0 && G.isFresh(m.item), on = this.weaveSel.includes(m.id);
+      const can = fresh && (on || this.weaveSel.length < 4);
+      if (have) root.add(this.add.image(x + 8, y + 8, "items", m.item));
+      const t = this.add.text(x + 20, y, `${on ? "[x]" : "[ ]"} ${m.name} (${m.god}) · ${m.check.aretai} ${m.check.cr}${m.cost ? ` · ${Object.entries(m.cost).map(([k, v]) => `${k === "Hubris" ? "+" : ""}${v} ${k}`).join(", ")}` : ""} · ${have ? (fresh ? `${have} fresh` : "wilted") : "none"}`, { ...font, fontSize: "11px", color: on ? "#f2c14e" : can ? "#f2e6c9" : "#6d675b" });
+      root.add(t);
+      if (can) t.setInteractive({ useHandCursor: true }).on("pointerdown", () => { this.weaveSel = on ? this.weaveSel.filter((x) => x !== m.id) : [...this.weaveSel, m.id]; this.buildWeave(); });
+    });
+    // What it does, and the odds.
+    const sel = this.weaveSel.map(material), plan = UIScene.weavePlan(sel, this.weaveKind, ctx);
+    let ty = y0 + 84 + Math.ceil(MATERIALS.length / 2) * 22 + 8;
+    const lines: string[] = [];
+    if (!sel.length) lines.push("Choose up to four fresh materials. Laurel, oak, ivy and pine are cut or gathered in the wild; olive, oak and pine sprigs with the sickle; barley and wheat from your fields.");
+    else {
+      for (const m of sel) lines.push(`${m.name}: ${this.weaveKind === "crown" ? m.crown.text : m.wreath.text}.`);
+      lines.push(`Helping: ${plan.bon.length ? plan.bon.map((b) => `${b.label} +${b.n}`).join(" · ") : "nothing yet (dawn, the season, a festival, the moon, a holy place)"}${plan.pen.length ? `   Hindering: ${plan.pen.map((p) => `${p.label} +${p.n} CR`).join(" · ")}` : ""}`);
+      const exact = (G.data.aretai.Gnosis ?? 3) >= 4;
+      lines.push(`Checks: ${plan.checks.map((c) => { const a = G.data.aretai[c.aretai] ?? 3, p = this.odds(a + plan.bonus, c.cr); return `${c.m.name}: ${c.aretai} ${a}+${plan.bonus} vs ${c.cr}${exact ? ` (${Math.round(p * 100)}%)` : ""}`; }).join(" · ")}`);
+      lines.push(`Takes ${plan.hours} hours. It keeps its power ${plan.days} day${plan.days > 1 ? "s" : ""}.${Object.keys(plan.cost).length ? ` Cost: ${Object.entries(plan.cost).map(([k, v]) => `${k === "Hubris" ? "+" : ""}${v} ${k}`).join(", ")}.` : ""}`);
+    }
+    root.add(this.add.text(x0 + 20, ty, lines.join("\n"), { ...font, fontSize: "11px", color: "#fbe39a", wordWrap: { width: w - 40 }, lineSpacing: 2 }));
+    const canPay = Object.entries(plan.cost).every(([k, v]) => k === "Hubris" || (G.data.currencies[k as keyof typeof G.data.currencies] ?? 0) >= v);
+    const ok = sel.length > 0 && canPay && (this.weaveKind === "crown" || atHome);
+    const btn = this.add.text(x0 + 20, y0 + h - 50, ok ? "▶ Weave it" : sel.length && !canPay ? "▶ Weave it (you can't pay its cost)" : "▶ Weave it", { ...font, fontSize: "17px", color: ok ? "#f2c14e" : "#8d877b" });
+    root.add(btn);
+    if (ok) btn.setInteractive({ useHandCursor: true }).on("pointerover", () => btn.setColor("#ffffff")).on("pointerout", () => btn.setColor("#f2c14e")).on("pointerdown", () => this.weave());
+    root.add(this.add.text(W / 2, y0 + h - 20, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0));
+  }
+  weave() {
+    const ctx = this.weaveAt!, sel = this.weaveSel.map(material), kind = this.weaveKind;
+    if (!sel.length || sel.some((m) => !G.isFresh(m.item) || G.count(m.item) < 1)) { this.weaveSel = []; this.buildWeave(); return; }
+    const plan = UIScene.weavePlan(sel, kind, ctx);
+    const b0 = labor(EFFORT.hand, plan.hours, "Techne"); if (b0 === null) return;
+    for (const m of sel) G.removeItem(m.item, 1);
+    for (const [k, v] of Object.entries(plan.cost)) G.data.currencies[k as keyof typeof G.data.currencies] += k === "Hubris" ? v : -v;
+    G.data.clock = Math.min(G.collapseClock - 0.25, G.data.clock + plan.hours);
+    const rolls = plan.checks.map((c) => { const a = G.data.aretai[c.aretai] ?? 3, roll = d12(); return { c, a, roll, ok: roll + a + plan.bonus >= c.cr }; });
+    const shown = rolls.map((r) => `${r.c.m.name} (${r.c.aretai}): d12 ${r.roll} + ${r.a}${plan.bonus ? ` + ${plan.bonus}` : ""} vs ${r.c.cr} ${r.ok ? "✓" : "✗"}`).join("; ");
+    G.note("weave");
+    const names = sel.map((m) => m.name.toLowerCase()).join(" and ");
+    if (!rolls.every((r) => r.ok)) {
+      SOUND.sfx("hurt");
+      G.say(`You weave for ${plan.hours} hours, but the ${names} will not hold together: the circlet comes apart in your hands. (${shown})`);
+    } else if (kind === "crown") {
+      const gains: [string, number][] = [];
+      for (const m of sel) for (const [ar, n] of m.crown.gains) { const e = gains.find((g) => g[0] === ar); if (e) e[1] += n; else gains.push([ar, n]); }
+      G.wearCrown(sel.map((m) => m.id), gains, plan.days * 24);
+      dressPlayer(this); SOUND.sfx("find");
+      G.say(`You weave a crown of ${names}, speak its purpose aloud, and set it on your head. ${sel.map((m) => m.crown.text).join("; ")}. It will keep ${plan.days} day${plan.days > 1 ? "s" : ""}. (${shown})${b0}`);
+    } else {
+      G.data.wreath = { mats: sel.map((m) => m.id), until: G.absHour + plan.days * 24 };
+      SOUND.sfx("find");
+      G.say(`You weave a wreath of ${names} and hang it over your door, saying what it is for. ${sel.map((m) => m.wreath.text).join("; ")}. It will keep ${plan.days} day${plan.days > 1 ? "s" : ""}. (${shown})${b0}`);
+    }
+    this.weaveSel = []; this.closeCraft();
   }
 
   // ---------------------------------------------------------------- Pharmakeia: the mortar

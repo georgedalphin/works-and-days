@@ -1,4 +1,7 @@
 import { COMFORT_KIND } from "./home";
+import { MATERIALS } from "./circlets";
+const CROWN_GOD: Record<string, string> = Object.fromEntries(MATERIALS.map((m) => [m.id, m.god]));
+const WREATH_COMFORT: Record<string, number> = Object.fromEntries(MATERIALS.map((m) => [m.id, m.wreath.comfort]));
 import { WEAR, gearMods, type Worn, type WearSlot } from "./gear";
 import { GRACES } from "./graces";
 import { TRADE_WORK, NEAR_FORAGE, CHORE_NAME, type Friend } from "./friends";
@@ -66,6 +69,15 @@ export interface SaveData {
   fresh?: Record<string, number>;
   venom?: { n: number; tier: number };
   draught?: { gains: [string, number][]; until: number };
+  /** The Rural Arts' blessings running (art id: the last day it holds); where you last greeted the dawn, and how many mornings running. */
+  blessings?: Record<string, number>;
+  dawnSpot?: string; dawnStreak?: { n: number; last: number };
+  /** Wreaths and Crowns: the crown on your head and the wreath over your door (materials, and when they wilt, in absolute hours);
+   *  whether a weaver taught you; the day each tree last gave a sprig. */
+  crown?: { mats: string[]; until: number; gains: [string, number][] } | null;
+  wreath?: { mats: string[]; until: number } | null;
+  weaveTaught?: boolean;
+  sprigs?: Record<string, number>;
   companion?: { kind: string; name: string; since: number; riding?: boolean; stay?: { scene: string; wx: number; wy: number; x: number; y: number } } | null;
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
@@ -192,6 +204,8 @@ export class GameState {
   essenceMax: Essence;
   /** The element you last ran dry of, for the HUD to blink (not saved). */
   spentFlash?: { el: string; at: number };
+  /** The crown wilted: the player's look must be redrawn. */
+  crownChanged?: boolean;
   messages: { text: string; t: number }[] = [];
 
   constructor(data?: SaveData) {
@@ -223,8 +237,8 @@ export class GameState {
     this.endMeal("aretai", effect.ar ? undefined : "keep");
     if (effect.ar) {
       this.data.aretai[effect.ar] = (this.data.aretai[effect.ar] ?? 3) + effect.n;
-      this.data.meal.aretai = { ar: effect.ar, n: effect.n, until: this.absHour + effect.hours, dish };
-    } else if (effect.god) this.data.meal.favor = { god: effect.god, n: effect.n, until: this.absHour + effect.hours, dish };
+      this.data.meal.aretai = { ar: effect.ar, n: effect.n, until: this.absHour + effect.hours * (this.crownHas("barley") ? 1.5 : 1), dish };
+    } else if (effect.god) this.data.meal.favor = { god: effect.god, n: effect.n, until: this.absHour + effect.hours * (this.crownHas("barley") ? 1.5 : 1), dish };
   }
   /** Take a meal's Aretai back off when it ends (or is replaced). */
   endMeal(which: "aretai", keep?: string) {
@@ -239,6 +253,8 @@ export class GameState {
     if (m.aretai && m.aretai.until <= now) { out.push(`The ${m.aretai.ar} from your meal wears off.`); this.endMeal("aretai"); }
     if (m.favor && m.favor.until <= now) { out.push(`The nearness of ${m.favor.god} that came with your meal fades.`); m.favor = undefined; }
     if (this.data.draught && this.data.draught.until <= now) { out.push("The heat of the hero's draught goes out of you."); this.endDraught(); }
+    if (this.data.crown && this.data.crown.until <= now) { out.push("Your crown has wilted. Burn it with thanks, or give it back to the earth."); this.takeOffCrown(); this.crownChanged = true; }
+    if (this.data.wreath && this.data.wreath.until <= now) { out.push("The wreath over your door has withered."); this.data.wreath = null; }
     return out;
   }
 
@@ -469,7 +485,7 @@ export class GameState {
   doomed(god: string) { return this.favor(god) <= -12; }
   /** Favor tier, -4 to +4: what boons and penalties scale by. */
   boon(god: string) {
-    const f = this.favor(god) + this.mealFavor(god) + (this.songOn(`favor:${god}`) ? 2 : 0);
+    const f = this.favor(god) + this.mealFavor(god) + (this.songOn(`favor:${god}`) ? 2 : 0) + (this.crownGods.includes(god) ? 1 : 0); // a crown carries its god's blessing
     let b = boonOf(f);
     const o = this.data.omen;
     if (o && o.day === this.dayNumber && o.god === god) b += o.good ? 1 : -1; // today's omen, whether you read it or not
@@ -484,7 +500,25 @@ export class GameState {
   signThisYear(id: string) { const d = this.data.signs[id]; return d !== undefined && this.yearOf(d) === this.data.year && (this.data.lore.tier[id] ?? 0) >= 1; }
   yearOf(day: number) { const yd = MONTHS.reduce((n, m) => n + m.days, 0); return Math.floor((day - 1) / yd) + 1; }
   earn(c: Currency, n = 1, why = "") { this.data.currencies[c] += n; this.say(`+${n} ${c}${why ? `: ${why}` : ""}.`); }
-  blessed(id: string) { return !!this.data.blessing && this.data.blessing.id === id && this.dayNumber <= this.data.blessing.until; }
+  blessed(id: string) {
+    if (id === "dawn" && !this.isDay) return false; // the dawn's blessing lasts until sunset
+    return (this.data.blessings?.[id] ?? -1) >= this.dayNumber || (!!this.data.blessing && this.data.blessing.id === id && this.dayNumber <= this.data.blessing.until);
+  }
+  bless(id: string, days: number) { (this.data.blessings ??= {})[id] = this.dayNumber + days - 1; }
+  /** Is a crown of this material on your head (and not yet wilted)? A wreath of it over your door? */
+  crownHas(m: string) { const c = this.data.crown; return !!c && c.until > this.absHour && c.mats.includes(m); }
+  wreathHas(m: string) { const w = this.data.wreath; return !!w && w.until > this.absHour && w.mats.includes(m); }
+  /** Put on a crown (a new one replaces the old, whose Aretai go with it). */
+  wearCrown(mats: string[], gains: [string, number][], hours: number) {
+    this.takeOffCrown();
+    for (const [ar, n] of gains) this.data.aretai[ar] = (this.data.aretai[ar] ?? 3) + n;
+    this.data.crown = { mats, gains, until: this.absHour + hours };
+  }
+  takeOffCrown() {
+    const c = this.data.crown; if (!c) return;
+    for (const [ar, n] of c.gains) this.data.aretai[ar] = (this.data.aretai[ar] ?? 3) - n;
+    this.data.crown = null;
+  }
   toolLevel(id: string) { return this.data.tools[id] ?? 1; }
   lore(id: string) { return this.data.lore.tier[id] ?? 0; }
   get dateKey() { return `${this.data.year}-${this.data.month}-${this.data.day}`; }
@@ -577,7 +611,8 @@ export class GameState {
     const kinds = new Set<string>();
     for (const p of this.data.placed) if (p.where === "house" && COMFORT_KIND[p.id]) kinds.add(COMFORT_KIND[p.id]);
     const fr = this.data.friends ?? [];
-    return kinds.size + (this.grace("Hera") >= 4 ? 2 : 0) + (this.spouse ? 2 : 0) + (fr.some((f) => f.role !== "follow" && f.chore === "hearth") ? 1 : 0); // Hera keeps the house; a spouse makes it a home
+    const w = this.data.wreath, wreath = w && w.until > this.absHour ? w.mats.reduce((n, m) => n + (WREATH_COMFORT[m] ?? 0), 0) : 0; // a wreath over the door
+    return kinds.size + (this.grace("Hera") >= 4 ? 2 : 0) + (this.spouse ? 2 : 0) + (fr.some((f) => f.role !== "follow" && f.chore === "hearth") ? 1 : 0) + wreath + (this.blessed("hearth") ? 3 : 0); // Hera keeps the house; a spouse makes it a home; Hestia's blessing
   }
   /** How many people will throw in their lot with you: your Phoenix, less 2. */
   get friendCap() { return Math.max(0, (this.data.aretai.Phoenix ?? 3) - 2); }
@@ -599,8 +634,11 @@ export class GameState {
       else if (c === "hearth") { this.data.tendedHearthDay = this.dateKey; notes.push(`${f.name} swept the house and tended the hearth, with the first portion for Hestia.`); }
       else { const w = TRADE_WORK[f.trade]; if (w?.give) deliver(w.give[0], w.give[1], w.say); else if (w?.fatigue) { this.addFatigue(-w.fatigue); notes.push(`${f.name} ${w.say}.`); } }
       if (f.role === "spouse") { this.heal(this.vitalityMax / 4); notes.push(`${f.name} brings you warm bread and a cup of milk before the day begins.`); }
+      if (this.blessed("hearth") || this.wreathHas("myrtle")) this.npcRec(f.id).rel += 1; // a blessed hearth, a myrtle wreath: the household grows fonder
     }
   }
+  /** The gods whose plants are on your head. */
+  get crownGods(): string[] { const c = this.data.crown; return c && c.until > this.absHour ? c.mats.map((m) => CROWN_GOD[m]).filter(Boolean) : []; }
   /** A god's grace (graces.ts): 0, 4 or 7 (10 at the top, for taming). */
   grace(god: string): number { const f = this.favor(god); return f >= 10 ? 10 : f >= 7 ? 7 : f >= 4 ? 4 : 0; }
   sleep(collapsed = false, rough: boolean | "tent" = false) {
@@ -619,6 +657,7 @@ export class GameState {
     if (this.data.scene === "House" && !collapsed && !rough && this.grace("Hera") >= 7) this.heal(this.vitalityMax); // Hera's own bed
     this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")) * (1 + 0.05 * comfort) * (this.grace("Apollo") >= 7 ? 2 : 1));
     if (drugHeal) this.heal(this.vitalityMax);
+    if (this.crownHas("wheat") || (this.data.scene === "House" && this.wreathHas("wheat"))) this.heal((this.data.vitality - v0) * 0.5); // Demeter's wheat: health
     const healed = this.data.vitality - v0;
     this.data.clock = 0;
     this.data.day += 1;
@@ -648,7 +687,7 @@ export class GameState {
       const ripeAt = c.picks > 0 && def.regrow ? def.regrow : def.days;
       if (c.growth >= ripeAt) continue; // ripe: it waits for you
       if (this.data.ground[k] === "wet" || this.warded("Demeter")) { c.growth += this.grace("Demeter") >= 7 && Math.random() < 0.5 ? 2 : 1; c.growth = Math.min(c.growth, ripeAt); c.dryStreak = 0; } // Demeter's protection waters them; her blessing hastens them
-      else { c.dryNights++; c.dryStreak++; if (c.dryStreak >= DRY_LIMIT) { c.withered = true; withered++; } }
+      else { c.dryNights++; c.dryStreak++; if (c.dryStreak >= DRY_LIMIT + (this.blessed("crop") ? 2 : 0)) { c.withered = true; withered++; } }
     }
     if (withered) notes.push(`${withered} planting${withered > 1 ? "s" : ""} withered.`);
     notes.push(...this.divineDawn());

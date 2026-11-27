@@ -91,6 +91,14 @@ export const HERBS: Record<string, HerbDef> = {
   Henbane: { aspects: { sight: 2, venom: 2, sleep: 1 }, lore: "henbane", toxic: true },
   Hemlock: { aspects: { venom: 3, sleep: 1 }, lore: "hemlock", toxic: true },
   Poppy: { aspects: { sleep: 3, healing: 1 } },
+  // The crown-makers' plants (circlets.ts) have their uses in the mortar too.
+  Myrtle: { aspects: { love: 2, cleansing: 1 }, lore: "myrtle" },
+  Parsley: { aspects: { cleansing: 2 }, lore: "parsley" },
+  Celery: { aspects: { healing: 1, courage: 1 }, lore: "celery" },
+  Poplar: { aspects: { courage: 1, warding: 1 }, lore: "poplar" },
+  OakLeaves: { aspects: { courage: 1, warding: 1 } },
+  Barley: { aspects: { healing: 1 } },
+  Wheat: { aspects: { healing: 1 } },
   Garlic: { aspects: { warding: 2, healing: 1 } },
 };
 

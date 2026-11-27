@@ -70,11 +70,19 @@ export interface Art {
   requirement: string;
   cost: Partial<Record<Currency, number>>;
   checks: ArtCheck[];
-  components: { item: string; label: string }[];
+  /** Each component brought lowers every CR by 1. `item` may list alternatives; some are not items at all
+   *  ("@water": water in your jar or skin, "@springwater": the Naiad's water in your jar, "@blood": 2 Vitality,
+   *  "@pipes": reed pipes carried, "@dish": any cooked dish); `keep` ones are shown, not spent. */
+  components: { item: string | string[]; label: string; keep?: boolean }[];
+  /** Conditions that lower the CRs when they hold (rural.ts says when each does). */
   timing: { id: string; label: string; cr: number }[];
   location: { label: string; cr: number };
   effect: string; days: number;
   failure: { text: string; likelihood: number };
+  /** Where it can be done: at your hearth, in your fields, in the wild, outdoors anywhere, outdoors at dawn, under open sky by day. */
+  where?: "hearth" | "field" | "wild" | "outdoors" | "dawn" | "sky";
+  /** Its effect happens at once, not as a blessing that lasts. */
+  instant?: boolean;
 }
 
 export const ARTS: Record<string, Art> = {
@@ -100,6 +108,7 @@ export const ARTS: Record<string, Art> = {
       { id: "fullMoon", label: "Under the full moon", cr: -1 },
       { id: "hosted", label: "You have hosted a stranger in the last three days", cr: -2 },
     ],
+    where: "hearth",
     location: { label: "Your household hearth", cr: -1 },
     effect: "For 7 days, each chat warms a villager by 1 more, and hosting a stranger pleases the gods twice over.",
     days: 7,

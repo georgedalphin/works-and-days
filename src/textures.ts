@@ -3,6 +3,7 @@ import { CROPS, seedId, WHEEL } from "./data";
 import { DISH_IDS, NAMED } from "./cooking";
 import { FORAGE } from "./forage";
 import { ASPECTS, PHARM_ICON_IDS, type Aspect } from "./pharmakeia";
+import { CIRCLET_ICON_IDS } from "./circlets";
 import { VILLAGERS } from "./village";
 import { drawFurnIcon, makeHomeTextures } from "./home";
 import { WEAR, type Worn } from "./gear";
@@ -881,11 +882,11 @@ function drawGearIcon(c: Ctx, o: number, id: string): boolean {
 
 export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Kopis", "Club", "SilverDagger", "Cestus", "Sling", "Javelin", "FireArrow", "HealerKit", "Tackle", "Mirror", "Waterskin", "Tent", "Map", "Loadstone", "Scale", "Knife", "Pack", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
-  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish", ...PHARM_ICON_IDS];
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish", ...PHARM_ICON_IDS, ...CIRCLET_ICON_IDS];
 
 const CROP_COL: Record<string, [string, string]> = {
   Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
-  Poppy: ["#d83a3a", "#8aa070"], Garlic: ["#efe8d8", "#9ab07a"],
+  Poppy: ["#d83a3a", "#8aa070"], Garlic: ["#efe8d8", "#9ab07a"], Barley: ["#d8c070", "#b09a50"], Wheat: ["#e8c050", "#c09a38"],
 };
 
 function drawCrop(c: Ctx, o: number, id: string, st: number) {
@@ -914,6 +915,10 @@ function drawCrop(c: Ctx, o: number, id: string, st: number) {
       for (const x of [4, 8, 11]) { px(c, o + x, 5, 1, 9, "#8aa070"); px(c, o + x - 1, 11, 3, 1, "#7a9060"); }
       if (st === 3) for (const x of [4, 8, 11]) { px(c, o + x - 1, 2, 3, 3, b); px(c, o + x - 1, 2, 3, 1, "#6a8060"); px(c, o + x, 1, 1, 1, "#5a6a4a"); }
       else for (const x of [4, 8, 11]) { px(c, o + x - 1, 3, 3, 2, a); px(c, o + x, 4, 1, 1, "#2a1a1a"); }
+      break;
+    case "Barley": case "Wheat": // grain: bearded barley, golden wheat
+      for (const x of [3, 6, 9, 12]) { px(c, o + x, 5, 1, 9, st === 3 ? b : leaf); px(c, o + x - 1, 9, 1, 2, leafD); }
+      if (st === 3) for (const x of [3, 6, 9, 12]) { px(c, o + x - 1, 2, 2, 4, a); if (id === "Barley") { px(c, o + x - 2, 1, 1, 2, a); px(c, o + x + 1, 1, 1, 2, a); } else px(c, o + x, 1, 1, 1, a); }
       break;
     case "Garlic": // strap leaves, and the bulbs shouldering out of the soil when ripe
       for (const x of [4, 7, 10]) { px(c, o + x, 4, 1, 9, b); px(c, o + x + 1, 6, 1, 6, leafD); }
@@ -956,6 +961,12 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
     case "hellebore": px(c, o + 3, 8, 10, 6, "#2f4a34"); for (const [x, y] of [[4, 7], [9, 6], [11, 9]]) px(c, o + x, y, 3, 2, "#3f5a44"); break;
     case "henbane": px(c, o + 7, 5, 2, 9, "#6a7a4a"); for (const [x, y] of [[3, 9], [10, 8], [4, 12], [10, 12]]) px(c, o + x, y, 3, 2, "#7a8a54"); break;
     case "hemlock": for (const x of [5, 9]) { px(c, o + x, 4, 1, 10, "#7a8a5a"); for (const y of [6, 9, 12]) px(c, o + x, y, 1, 1, "#7a3a5a"); } for (const [x, y] of [[3, 7], [10, 6], [6, 10]]) px(c, o + x, y, 3, 1, "#8aa06a"); break;
+    // Plants for crowns and wreaths.
+    case "myrtle": px(c, o + 3, 6, 10, 8, "#3f6a3a"); px(c, o + 4, 5, 8, 2, "#4f7a4a"); for (const [x, y] of [[4, 8], [9, 7], [11, 10]]) px(c, o + x, y, 2, 1, "#6a9a5a"); px(c, o + 7, 13, 2, 2, "#6b4a2b"); break;
+    case "ivy": for (let i = 0; i < 10; i++) px(c, o + 3 + i, 12 - Math.round(Math.sin(i * 0.8) * 2) - (i >> 1), 1, 1, "#5a4a2a"); for (const [x, y] of [[3, 10], [6, 8], [9, 7], [12, 5], [5, 12]]) { px(c, o + x, y, 2, 2, "#2f5a2a"); px(c, o + x, y, 1, 1, "#4a7a3a"); } break;
+    case "poplar": px(c, o + 7, 8, 2, 7, "#a8a090"); px(c, o + 5, 1, 6, 9, "#7a9a6a"); px(c, o + 6, 0, 4, 2, "#8aaa7a"); for (const [x, y] of [[6, 3], [9, 5], [7, 7]]) px(c, o + x, y, 1, 1, "#e0e8e0"); break;
+    case "parsley": for (const [x, y] of [[4, 9], [7, 8], [10, 9], [5, 11], [9, 11]]) { px(c, o + x, y, 2, 2, "#5a9a3a"); px(c, o + x + 1, y, 1, 1, "#7aba4a"); } px(c, o + 4, 13, 8, 1, "#4a7a2a"); break;
+    case "celery": for (const x of [4, 7, 10]) { px(c, o + x, 6, 1, 8, "#8aa060"); px(c, o + x - 1, 4, 3, 2, "#6a9a3a"); } break;
   } else switch (id) {
     case "plum": for (const [x, y] of [[4, 6], [8, 5], [10, 8], [6, 9], [9, 11]]) { px(c, o + x, y, 2, 2, "#6a3a7a"); px(c, o + x, y, 1, 1, "#9a6aaa"); } break;
     case "cornel": for (const [x, y] of [[5, 4], [8, 6], [6, 8], [9, 10], [6, 11]]) { px(c, o + x, y, 2, 2, "#c0302a"); px(c, o + x, y, 1, 1, "#e06050"); } break;
@@ -987,10 +998,16 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
     case "hellebore": for (const [x, y] of [[5, 5], [10, 5]]) { px(c, o + x, y, 3, 2, "#c8d8a0"); px(c, o + x + 1, y, 1, 1, "#e8f0d0"); } break;
     case "henbane": for (const [x, y] of [[6, 4], [9, 5], [4, 8]]) { px(c, o + x, y, 2, 2, "#d8c890"); px(c, o + x, y + 1, 1, 1, "#6a3a5a"); } break;
     case "hemlock": for (const x of [4, 8]) px(c, o + x, 3, 3, 2, "#f2f0e8"); break;
+    case "myrtle": for (const [x, y] of [[5, 6], [9, 5], [7, 9], [11, 8]]) { px(c, o + x, y, 1, 1, "#f2f0e8"); px(c, o + x, y + 1, 1, 1, "#e8d870"); } break;
+    case "ivy": for (const [x, y] of [[6, 6], [10, 4]]) px(c, o + x, y, 2, 2, "#2a2a3a"); break;
+    case "poplar": for (const [x, y] of [[5, 2], [9, 3], [6, 6], [10, 7]]) px(c, o + x, y, 1, 1, "#f0f4f0"); break;
+    case "parsley": for (const [x, y] of [[5, 7], [9, 7]]) px(c, o + x, y, 2, 1, "#e8e8b0"); break;
+    case "celery": for (const x of [4, 7, 10]) px(c, o + x - 1, 3, 3, 1, "#e8e8c0"); break;
   }
 }
 const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel",
-  Sage: "sage", Yarrow: "yarrow", WillowBark: "willow", Dittany: "dittany", Wormwood: "wormwood", Squill: "squill", Laurel: "laurel", Asphodel: "asphodel", Cyclamen: "cyclamen", WildRose: "wildrose", SeaHolly: "seaholly", Mandrake: "mandrake", Hellebore: "hellebore", Henbane: "henbane", Hemlock: "hemlock" };
+  Sage: "sage", Yarrow: "yarrow", WillowBark: "willow", Dittany: "dittany", Wormwood: "wormwood", Squill: "squill", Laurel: "laurel", Asphodel: "asphodel", Cyclamen: "cyclamen", WildRose: "wildrose", SeaHolly: "seaholly", Mandrake: "mandrake", Hellebore: "hellebore", Henbane: "henbane", Hemlock: "hemlock",
+  Myrtle: "myrtle", Poplar: "poplar", Parsley: "parsley", Celery: "celery" };
 
 function drawIcon(c: Ctx, o: number, id: string) {
   if (drawFurnIcon(c, o, id)) return;
@@ -1026,6 +1043,14 @@ function drawIcon(c: Ctx, o: number, id: string) {
     px(c, o + 3, 7, 10, 2, col); px(c, o + 5, 6, 6, 1, col); px(c, o + 6, 7, 2, 1, "rgba(255,255,255,0.45)");
     if (named) { px(c, o + 7, 10, 2, 1, "#f2d27a"); } // a gold mark: a god's dish
     px(c, o + 6, 2, 1, 2, "rgba(255,255,255,0.5)"); px(c, o + 9, 1, 1, 3, "rgba(255,255,255,0.4)");
+    return;
+  }
+  if (id === "OliveSprig" || id === "OakLeaves" || id === "PineBoughs") { // a cut spray of leaves
+    for (let i = 0; i < 9; i++) px(c, o + 3 + i, 13 - i, 1, 1, "#6b4a2b");
+    const lf = id === "OliveSprig" ? ["#8a9a6a", "#b0c098"] : id === "OakLeaves" ? ["#4a6a2a", "#6a8a3a"] : ["#2f4a2a", "#4a6a3a"];
+    if (id === "PineBoughs") for (let i = 0; i < 8; i++) { px(c, o + 3 + i, 11 - i, 1, 3, lf[i % 2]); px(c, o + 5 + i, 13 - i, 1, 2, lf[(i + 1) % 2]); }
+    else for (const [x, y] of [[3, 9], [6, 9], [5, 6], [8, 6], [7, 3], [10, 4]]) { px(c, o + x, y, id === "OakLeaves" ? 3 : 2, 2, lf[0]); px(c, o + x, y, 1, 1, lf[1]); }
+    if (id === "OliveSprig") for (const [x, y] of [[9, 8], [5, 4]]) px(c, o + x, y, 1, 1, "#3a3a2a");
     return;
   }
   if (id === "Mortar") { px(c, o + 3, 8, 10, 5, "#a09888"); px(c, o + 4, 13, 8, 1, "#7a7266"); px(c, o + 4, 8, 8, 2, "#5a5448"); px(c, o + 5, 8, 6, 1, "#6a9a4a"); for (let i = 0; i < 6; i++) px(c, o + 8 + i, 7 - i, 2, 1, "#8a6a42"); return; }
@@ -1170,13 +1195,14 @@ export const POSE = { stand: 0, walk1: 1, walk2: 2, raise: 3, strike: 4, lookA: 
  * The player in 4 facings (down, left, right, up) x 7 poses: standing, two walking steps,
  * raising and striking with a tool, and a hand over the brow looking one way, then the other.
  */
-export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }, worn?: Worn) { makeFigureTexture(scene, "player", look, worn ? { gear: worn } : {}); }
+export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }, worn?: Worn, crown?: string[]) { makeFigureTexture(scene, "player", look, { ...(worn ? { gear: worn } : {}), ...(crown?.length ? { crown } : {}) }); }
 
 export interface FigureExtras { beard?: boolean; long?: boolean; veil?: string;
   /** A traveler's broad-brimmed hat (petasos), in this color. */ hat?: string;
   /** Something carried upright: a walking staff, a spear, a club, or a bow. */ pole?: "staff" | "spear" | "club" | "bow";
   /** A bundle on the back, in this color. */ pack?: string;
-  /** What they wear (gear.ts): drawn over the figure. */ gear?: Worn }
+  /** What they wear (gear.ts): drawn over the figure. */ gear?: Worn;
+  /** A crown of leaves (Wreaths and Crowns): its colors, leaf first, then any flowers. */ crown?: string[] }
 /** Any walking person: the player, villagers, the folk of the wild huts. Same 28 frames as the player. */
 export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tunic: string; hair: string; skin: string }, ex: FigureExtras = {}) {
   if (scene.textures.exists(key)) scene.textures.remove(key);
@@ -1240,6 +1266,12 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
           else if (side) { p(9, 3, 1, 1, eye); p(9, 4, 1, 2, look.skin); }
           p(f === 3 ? 6 : 6, 2, 1, 2, "#f0d890");
         }
+      }
+      // A crown of leaves around the brow (not over a helmet), dotted with its flowers.
+      if (ex.crown && !(gHead && gHead.look.kind !== "petasos")) {
+        const [lf, ...fl] = ex.crown;
+        if (side) { p(5, 1, 5, 1, lf); p(5, 0, 1, 1, lf); p(9, 0, 1, 1, lf); } else { p(5, 1, 6, 1, lf); p(5, 0, 1, 1, lf); p(10, 0, 1, 1, lf); p(7, 0, 2, 1, lf); }
+        fl.forEach((col, i) => p(side ? 6 + i * 2 : 6 + i * 3, 1, 1, 1, col));
       }
       // The pack on the back (drawn first on the back view, so it sits on the tunic).
       if (ex.pack) { if (f === 3) { p(5, 6, 6, 5, ex.pack); p(6, 7, 4, 1, "rgba(0,0,0,0.18)"); } else if (side) p(3, 6, 2, 5, ex.pack); else { p(6, 6, 1, 3, "#6b4a2b"); p(9, 6, 1, 3, "#6b4a2b"); } }
