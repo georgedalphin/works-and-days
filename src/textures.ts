@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { CROPS, seedId, WHEEL } from "./data";
 import { DISH_IDS, NAMED } from "./cooking";
 import { FORAGE } from "./forage";
+import { ASPECTS, PHARM_ICON_IDS, type Aspect } from "./pharmakeia";
 import { VILLAGERS } from "./village";
 import { drawFurnIcon, makeHomeTextures } from "./home";
 import { WEAR, type Worn } from "./gear";
@@ -880,10 +881,11 @@ function drawGearIcon(c: Ctx, o: number, id: string): boolean {
 
 export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Kopis", "Club", "SilverDagger", "Cestus", "Sling", "Javelin", "FireArrow", "HealerKit", "Tackle", "Mirror", "Waterskin", "Tent", "Map", "Loadstone", "Scale", "Knife", "Pack", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
-  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
+  ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish", ...PHARM_ICON_IDS];
 
 const CROP_COL: Record<string, [string, string]> = {
   Millet: ["#d9b25e", "#b38f48"], Chickpeas: ["#d8c48e", "#9aa04a"], Melon: ["#7aa04a", "#e8c86a"], Mint: ["#5e9f5a", "#3f7a3f"],
+  Poppy: ["#d83a3a", "#8aa070"], Garlic: ["#efe8d8", "#9ab07a"],
 };
 
 function drawCrop(c: Ctx, o: number, id: string, st: number) {
@@ -908,6 +910,15 @@ function drawCrop(c: Ctx, o: number, id: string, st: number) {
       px(c, o + 7, 6, 1, 8, leafD); for (const [x, y] of [[4, 7], [9, 6], [5, 10], [9, 10]]) px(c, o + x, y, 3, 2, st === 3 ? a : leaf);
       if (st === 3) { px(c, o + 6, 3, 3, 3, b); px(c, o + 7, 2, 1, 1, "#c9a0d8"); }
       break;
+    case "Poppy": // grey-green stems; red flowers while growing, then the swollen seed heads
+      for (const x of [4, 8, 11]) { px(c, o + x, 5, 1, 9, "#8aa070"); px(c, o + x - 1, 11, 3, 1, "#7a9060"); }
+      if (st === 3) for (const x of [4, 8, 11]) { px(c, o + x - 1, 2, 3, 3, b); px(c, o + x - 1, 2, 3, 1, "#6a8060"); px(c, o + x, 1, 1, 1, "#5a6a4a"); }
+      else for (const x of [4, 8, 11]) { px(c, o + x - 1, 3, 3, 2, a); px(c, o + x, 4, 1, 1, "#2a1a1a"); }
+      break;
+    case "Garlic": // strap leaves, and the bulbs shouldering out of the soil when ripe
+      for (const x of [4, 7, 10]) { px(c, o + x, 4, 1, 9, b); px(c, o + x + 1, 6, 1, 6, leafD); }
+      if (st === 3) for (const x of [4, 7, 10]) { px(c, o + x - 1, 12, 3, 2, a); px(c, o + x, 11, 1, 1, "#f8f4ec"); }
+      break;
   }
 }
 
@@ -929,6 +940,22 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
     case "mountaintea": for (const x of [4, 7, 10]) { px(c, o + x, 6, 2, 8, "#a8b098"); px(c, o + x - 1, 9, 4, 2, "#b8c0a8"); } break;
     case "thistle": px(c, o + 7, 6, 2, 8, "#6a8a5a"); for (const [x, y] of [[4, 9], [10, 8], [5, 12], [10, 12]]) px(c, o + x, y, 3, 1, "#7a9a6a"); break;
     case "fennel": for (const x of [5, 8, 11]) px(c, o + x, 4, 1, 10, "#7a9a4a"); for (const [x, y] of [[3, 6], [9, 5], [6, 8], [11, 9]]) px(c, o + x, y, 3, 1, "#9aba5a"); break;
+    // The herb-Art's plants.
+    case "sage": px(c, o + 3, 9, 10, 5, "#8a9a88"); for (const [x, y] of [[4, 7], [8, 6], [11, 8], [6, 10]]) px(c, o + x, y, 3, 2, "#a4b4a0"); break;
+    case "yarrow": for (const x of [4, 8, 11]) px(c, o + x, 6, 1, 8, "#6a8a4a"); for (const [x, y] of [[3, 10], [7, 9], [10, 11], [5, 12]]) px(c, o + x, y, 3, 1, "#7a9a5a"); break;
+    case "willow": px(c, o + 7, 6, 2, 9, "#6b5a3a"); px(c, o + 3, 2, 10, 4, "#8aa05a"); for (const x of [3, 5, 10, 12]) px(c, o + x, 5, 1, 7, "#9ab06a"); px(c, o + 4, 14, 8, 1, "rgba(0,0,0,0.2)"); break;
+    case "dittany": px(c, o + 2, 12, 12, 3, "#8a8478"); px(c, o + 3, 10, 4, 2, "#9a9488"); for (const [x, y] of [[4, 8], [8, 7], [11, 9]]) { px(c, o + x, y, 3, 3, "#b8c4a8"); px(c, o + x, y, 1, 1, "#d8e0c8"); } break;
+    case "wormwood": px(c, o + 3, 7, 10, 7, "#a8b0a0"); px(c, o + 5, 5, 6, 3, "#c0c8b8"); px(c, o + 6, 9, 1, 3, "#8a9080"); px(c, o + 10, 8, 1, 3, "#8a9080"); break;
+    case "squill": px(c, o + 4, 11, 8, 4, "#d8c8b0"); px(c, o + 5, 10, 6, 1, "#c8b8a0"); for (const x of [4, 7, 10]) px(c, o + x, 5, 2, 6, "#5a8a4a"); break;
+    case "laurel": px(c, o + 7, 10, 2, 5, "#6b4a2b"); px(c, o + 3, 3, 10, 8, "#3f6a34"); px(c, o + 4, 2, 8, 2, "#4f7a3c"); px(c, o + 5, 4, 2, 2, "#6a9a4a"); px(c, o + 10, 6, 2, 2, "#6a9a4a"); break;
+    case "asphodel": for (const x of [5, 10]) px(c, o + x, 4, 1, 10, "#7a8a5a"); px(c, o + 3, 12, 10, 2, "#6a7a4a"); break;
+    case "cyclamen": px(c, o + 2, 12, 12, 3, "#8a8478"); for (const [x, y] of [[4, 11], [8, 10], [11, 11]]) px(c, o + x, y, 3, 2, "#4a6a3a"); for (const x of [5, 9]) px(c, o + x, 7, 1, 4, "#6a5a4a"); break;
+    case "wildrose": px(c, o + 2, 6, 12, 8, "#4f6b2c"); px(c, o + 3, 5, 10, 2, "#5e7f34"); for (const [x, y] of [[3, 8], [12, 9], [7, 12]]) px(c, o + x, y, 1, 1, "#8a6a4a"); break;
+    case "seaholly": for (const [x, y] of [[3, 9], [6, 7], [9, 8], [12, 10], [7, 11]]) { px(c, o + x, y, 2, 3, "#8aa0b8"); px(c, o + x - 1, y + 1, 1, 1, "#a8bcd0"); } break;
+    case "mandrake": px(c, o + 2, 10, 12, 4, "#2f4a2a"); for (const [x, y] of [[3, 9], [6, 8], [10, 9], [12, 11]]) px(c, o + x, y, 3, 2, "#3f5a34"); break;
+    case "hellebore": px(c, o + 3, 8, 10, 6, "#2f4a34"); for (const [x, y] of [[4, 7], [9, 6], [11, 9]]) px(c, o + x, y, 3, 2, "#3f5a44"); break;
+    case "henbane": px(c, o + 7, 5, 2, 9, "#6a7a4a"); for (const [x, y] of [[3, 9], [10, 8], [4, 12], [10, 12]]) px(c, o + x, y, 3, 2, "#7a8a54"); break;
+    case "hemlock": for (const x of [5, 9]) { px(c, o + x, 4, 1, 10, "#7a8a5a"); for (const y of [6, 9, 12]) px(c, o + x, y, 1, 1, "#7a3a5a"); } for (const [x, y] of [[3, 7], [10, 6], [6, 10]]) px(c, o + x, y, 3, 1, "#8aa06a"); break;
   } else switch (id) {
     case "plum": for (const [x, y] of [[4, 6], [8, 5], [10, 8], [6, 9], [9, 11]]) { px(c, o + x, y, 2, 2, "#6a3a7a"); px(c, o + x, y, 1, 1, "#9a6aaa"); } break;
     case "cornel": for (const [x, y] of [[5, 4], [8, 6], [6, 8], [9, 10], [6, 11]]) { px(c, o + x, y, 2, 2, "#c0302a"); px(c, o + x, y, 1, 1, "#e06050"); } break;
@@ -945,9 +972,25 @@ function drawForage(c: Ctx, o: number, id: string, fruit: boolean) {
     case "mountaintea": for (const x of [4, 7, 10]) px(c, o + x, 5, 2, 2, "#e8d860"); break;
     case "thistle": px(c, o + 6, 4, 4, 3, "#a060c0"); px(c, o + 7, 3, 2, 1, "#c080e0"); px(c, o + 6, 7, 4, 1, "#6a8a5a"); break;
     case "fennel": for (const x of [4, 8, 11]) { px(c, o + x, 3, 3, 1, "#e8d040"); px(c, o + x + 1, 2, 1, 1, "#f0e070"); } break;
+    case "sage": for (const [x, y] of [[5, 5], [9, 4], [12, 6]]) px(c, o + x, y, 1, 2, "#9a7ad0"); break;
+    case "yarrow": for (const x of [3, 7, 10]) { px(c, o + x, 4, 3, 2, "#f2eee0"); px(c, o + x + 1, 3, 1, 1, "#ffffff"); } break;
+    case "willow": px(c, o + 6, 8, 4, 2, "#a07a52"); px(c, o + 7, 8, 2, 1, "#c09a6a"); break;
+    case "dittany": for (const [x, y] of [[5, 6], [9, 5]]) px(c, o + x, y, 2, 2, "#e8a0c8"); break;
+    case "wormwood": for (const [x, y] of [[5, 4], [9, 4], [7, 6]]) px(c, o + x, y, 1, 1, "#e0d070"); break;
+    case "squill": for (const x of [4, 7, 10]) px(c, o + x, 3, 2, 3, "#f2f0e0"); break;
+    case "laurel": for (const [x, y] of [[4, 4], [8, 3], [11, 6], [6, 8]]) px(c, o + x, y, 2, 1, "#8ac060"); break;
+    case "asphodel": for (const x of [5, 10]) { px(c, o + x - 1, 3, 3, 3, "#f0e8e0"); px(c, o + x, 4, 1, 1, "#c07a6a"); } break;
+    case "cyclamen": for (const x of [4, 8]) { px(c, o + x, 5, 3, 2, "#e070a8"); px(c, o + x + 1, 4, 1, 1, "#f0a0c8"); } break;
+    case "wildrose": for (const [x, y] of [[4, 6], [9, 5], [11, 9], [6, 9]]) { px(c, o + x, y, 2, 2, "#f0a0b8"); px(c, o + x, y, 1, 1, "#f8d0dc"); } break;
+    case "seaholly": for (const [x, y] of [[6, 5], [10, 6]]) { px(c, o + x, y, 2, 2, "#6a80d0"); px(c, o + x, y, 1, 1, "#9ab0f0"); } break;
+    case "mandrake": for (const [x, y] of [[5, 8], [9, 7]]) px(c, o + x, y, 2, 2, "#c8b060"); px(c, o + 7, 13, 2, 2, "#c8a888"); break;
+    case "hellebore": for (const [x, y] of [[5, 5], [10, 5]]) { px(c, o + x, y, 3, 2, "#c8d8a0"); px(c, o + x + 1, y, 1, 1, "#e8f0d0"); } break;
+    case "henbane": for (const [x, y] of [[6, 4], [9, 5], [4, 8]]) { px(c, o + x, y, 2, 2, "#d8c890"); px(c, o + x, y + 1, 1, 1, "#6a3a5a"); } break;
+    case "hemlock": for (const x of [4, 8]) px(c, o + x, 3, 3, 2, "#f2f0e8"); break;
   }
 }
-const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel" };
+const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "plum", Cornel: "cornel", Purslane: "purslane", Oats: "oats", Thyme: "thyme", Capers: "caper", Clay: "clay", Ochre: "ochre", Mushrooms: "mushrooms", SeaFennel: "seafennel", Saltbush: "saltbush", MountainTea: "mountaintea", Thistle: "thistle", Fennel: "fennel",
+  Sage: "sage", Yarrow: "yarrow", WillowBark: "willow", Dittany: "dittany", Wormwood: "wormwood", Squill: "squill", Laurel: "laurel", Asphodel: "asphodel", Cyclamen: "cyclamen", WildRose: "wildrose", SeaHolly: "seaholly", Mandrake: "mandrake", Hellebore: "hellebore", Henbane: "henbane", Hemlock: "hemlock" };
 
 function drawIcon(c: Ctx, o: number, id: string) {
   if (drawFurnIcon(c, o, id)) return;
@@ -983,6 +1026,22 @@ function drawIcon(c: Ctx, o: number, id: string) {
     px(c, o + 3, 7, 10, 2, col); px(c, o + 5, 6, 6, 1, col); px(c, o + 6, 7, 2, 1, "rgba(255,255,255,0.45)");
     if (named) { px(c, o + 7, 10, 2, 1, "#f2d27a"); } // a gold mark: a god's dish
     px(c, o + 6, 2, 1, 2, "rgba(255,255,255,0.5)"); px(c, o + 9, 1, 1, 3, "rgba(255,255,255,0.4)");
+    return;
+  }
+  if (id === "Mortar") { px(c, o + 3, 8, 10, 5, "#a09888"); px(c, o + 4, 13, 8, 1, "#7a7266"); px(c, o + 4, 8, 8, 2, "#5a5448"); px(c, o + 5, 8, 6, 1, "#6a9a4a"); for (let i = 0; i < 6; i++) px(c, o + 8 + i, 7 - i, 2, 1, "#8a6a42"); return; }
+  if (id.startsWith("pharm_")) {
+    const col = ASPECTS[id.slice(6) as Aspect]?.color ?? "#c9a35a";
+    switch (id) {
+      case "pharm_healing": case "pharm_love": // a little lidded pot of salve, or scent
+        px(c, o + 4, 6, 8, 8, "#c4703f"); px(c, o + 4, 13, 8, 1, "#9c5532"); px(c, o + 5, 7, 6, 3, col); px(c, o + 6, 7, 2, 1, "rgba(255,255,255,0.5)"); px(c, o + 3, 5, 10, 2, "#9c5532"); px(c, o + 7, 3, 2, 2, "#9c5532"); break;
+      case "pharm_sight": // a bound bundle of leaves for burning, smoking
+        for (let i = 0; i < 7; i++) px(c, o + 3 + i, 12 - i, 3, 2, i % 2 ? "#4f7a3c" : col); px(c, o + 6, 9, 2, 2, "#c41e1e"); px(c, o + 11, 3, 1, 2, "rgba(255,255,255,0.5)"); px(c, o + 12, 1, 1, 2, "rgba(255,255,255,0.35)"); break;
+      case "pharm_warding": // a herb-bag on a red cord
+        for (let i = 0; i < 8; i++) { px(c, o + 3 + i, 2 + Math.floor(i / 2), 1, 1, "#c41e1e"); } px(c, o + 5, 6, 7, 7, "#b8a070"); px(c, o + 5, 6, 7, 1, "#8a7450"); px(c, o + 7, 8, 3, 3, col); break;
+      default: // a stoppered flask: draughts, and the poison
+        px(c, o + 5, 7, 6, 7, col); px(c, o + 6, 4, 4, 3, col); px(c, o + 6, 2, 4, 2, "#8a6a42"); px(c, o + 5, 13, 6, 1, "rgba(0,0,0,0.3)"); px(c, o + 6, 8, 1, 3, "rgba(255,255,255,0.45)");
+        if (id === "pharm_venom") { px(c, o + 7, 9, 2, 2, "#2a3a1a"); px(c, o + 8, 11, 1, 1, "#2a3a1a"); }
+    }
     return;
   }
   if (FORAGE_ICON[id]) { drawForage(c, o, FORAGE_ICON[id], false); drawForage(c, o, FORAGE_ICON[id], true); return; }

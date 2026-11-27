@@ -60,6 +60,12 @@ export interface SaveData {
   /** People who have joined you (friends.ts), and each village household's big quest: when you took it on, the deed count then, done. */
   friends?: Friend[];
   folkQuest?: Record<string, { day: number; base?: number; done?: boolean }>;
+  /** Pharmakeia: whether you've been taught the Art, the herbs whose aspects you've found by trying them, the remedies you've made,
+   *  the day you last gathered each herb (fresh herbs work better), your poisoned shots left, and a draught's Aretai while it lasts. */
+  pharm?: { taught: boolean; tried: string[]; made: string[] };
+  fresh?: Record<string, number>;
+  venom?: { n: number; tier: number };
+  draught?: { gains: [string, number][]; until: number };
   companion?: { kind: string; name: string; since: number; riding?: boolean; stay?: { scene: string; wx: number; wy: number; x: number; y: number } } | null;
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
@@ -232,8 +238,26 @@ export class GameState {
     const now = this.absHour, out: string[] = [], m = this.data.meal;
     if (m.aretai && m.aretai.until <= now) { out.push(`The ${m.aretai.ar} from your meal wears off.`); this.endMeal("aretai"); }
     if (m.favor && m.favor.until <= now) { out.push(`The nearness of ${m.favor.god} that came with your meal fades.`); m.favor = undefined; }
+    if (this.data.draught && this.data.draught.until <= now) { out.push("The heat of the hero's draught goes out of you."); this.endDraught(); }
     return out;
   }
+
+  /** A draught that strengthens Aretai for a while (a new one replaces the old). */
+  drinkDraught(gains: [string, number][], hours: number) {
+    this.endDraught();
+    for (const [ar, n] of gains) this.data.aretai[ar] = (this.data.aretai[ar] ?? 3) + n;
+    this.data.draught = { gains, until: this.absHour + hours };
+  }
+  endDraught() {
+    const d = this.data.draught; if (!d) return;
+    for (const [ar, n] of d.gains) this.data.aretai[ar] = (this.data.aretai[ar] ?? 3) - n;
+    this.data.draught = undefined;
+  }
+  /** Pharmakeia's record, made on first use. */
+  get pharm() { return (this.data.pharm ??= { taught: false, tried: [], made: [] }); }
+  /** Was this herb gathered today? */
+  isFresh(id: string) { return (this.data.fresh ?? {})[id] === this.dayNumber; }
+  markFresh(id: string) { (this.data.fresh ??= {})[id] = this.dayNumber; }
 
   /** Something happened that Tiresias may ask after: count it. */
   note(ev: string, n = 1) { this.data.tir.ev[ev] = (this.data.tir.ev[ev] ?? 0) + n; }
@@ -586,11 +610,15 @@ export class GameState {
     const hera = !collapsed && !rough && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
     // A comfortable home (each kind of furnishing you've made for it) rests you a little better.
     const comfort = !collapsed && !rough && this.data.scene === "House" ? this.homeComfort : 0;
-    const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1) * (1 + 0.03 * comfort));
+    // A sleeping draught (Pharmakeia) taken tonight: you sleep like the dead, and wake wholly rested.
+    const drugged = !collapsed && this.songOn("hypnos"), drugHeal = drugged && this.songOn("hypnos3");
+    if (drugged) { this.data.songBuff.hypnos = -1; this.data.songBuff.hypnos3 = -1; }
+    const recovered = hera === 100 || drugged ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1) * (1 + 0.03 * comfort));
     this.data.fatigue -= recovered;
     const v0 = this.data.vitality;
     if (this.data.scene === "House" && !collapsed && !rough && this.grace("Hera") >= 7) this.heal(this.vitalityMax); // Hera's own bed
     this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")) * (1 + 0.05 * comfort) * (this.grace("Apollo") >= 7 ? 2 : 1));
+    if (drugHeal) this.heal(this.vitalityMax);
     const healed = this.data.vitality - v0;
     this.data.clock = 0;
     this.data.day += 1;
@@ -601,6 +629,7 @@ export class GameState {
     }
     this.essence = { ...this.essenceMax };
     const notes: string[] = [];
+    if (drugged) notes.push(drugHeal ? "The poppy's sleep held you all night, deep and dreamless. You wake wholly rested, and whole." : "The poppy's sleep held you all night, deep and dreamless. You wake wholly rested.");
     if (comfort >= 3) notes.push(comfort >= 8 ? "Your home is warm and full of good things, and you wake deeply rested." : comfort >= 5 ? "Your home is snug, and you wake well rested." : "Your home is getting cozy, and you sleep a little better for it.");
     // Requests not met in time lapse, and the asker is a little let down.
     for (const q of [...this.data.requests]) if (this.dayNumber > q.due) {
