@@ -183,6 +183,10 @@ async def main():
             for road in ["true", "false"]:
                 r = await pg.evaluate(f"(()=>{{const s={Wd}; const n={{}}; let k=0; for(let i=0;i<600;i++){{ for(const g of [...s.ways]) s.dropWay(g); s.monster=undefined; s.rec.roads={ '[\"N\"]' if road=='true' else '[]'}; s.setupWayfarers(); for(const g of s.ways){{n[g.def.id]=(n[g.def.id]||0)+1;k++;}} }} for(const g of [...s.ways]) s.dropWay(g); return k+' '+JSON.stringify(n); }})()")
                 print("road" if road=="true" else "no road", "600 arrivals ->", r)
+            for wx in [1, 2, 3, 4, 6]:
+                for roads in ['["N"]', '["N","S"]', '[]']:
+                    r = await pg.evaluate(f"(()=>{{const s={Wd}; G.data.wx={wx}; G.data.wy=0; let k=0, all=0; for(let i=0;i<600;i++){{ for(const g of [...s.ways]) s.dropWay(g); s.monster=undefined; s.rec.roads={roads}; s.setupWayfarers(); for(const g of s.ways){{all++; if(g.def.id==='brigands') k++;}} }} for(const g of [...s.ways]) s.dropWay(g); return (k/6).toFixed(1)+'% brigands, '+(all/6).toFixed(1)+'% anyone'; }})()")
+                    print(f"  {wx} out, roads {roads}:", r)
             print("ERRORS:", errs); await pg.close()
         await b.close()
 

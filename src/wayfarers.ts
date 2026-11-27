@@ -145,8 +145,6 @@ export const theTitle = (t: string) => (/^an? /i.test(t) ? t.replace(/^an? /i, "
 
 /**
  * Who you meet, if anyone, on arriving: a d12 roll, more likely on a road, rarer at night (when most folk keep to fires
- * and roofs). Brigands are about one meeting in twenty, a little more at night and far out.
- */
 /**
  * How likely someone is about, on a wild screen: people keep near the farms and the village, and to the roads.
  * `near` is how many screens it is from your farm or the village (whichever is closer); `roads` how many of its
@@ -158,11 +156,27 @@ export function wayChance(near: number, roads: number): number {
   const road = roads <= 0 ? 0.35 : roads === 1 ? 0.8 : roads === 2 ? 1.1 : 1.3;
   return 0.45 * prox * road;
 }
-export function rollWayfarers(r: () => number, o: { terrain: number; road: boolean; depth: number; day: boolean; water: boolean; monster: boolean; hutHere: boolean; only?: (w: WayDef) => boolean; chance?: number }): WayDef | null {
+/**
+ * How likely brigands are lying in wait on a road: they keep away from the farms and the village, where they'd be
+ * known and hunted, and work the long empty roads where travelers are alone. None next to home; about one road in
+ * six out past the fourth ring, more where roads meet, more at night. Off the roads they are only the rare chance
+ * meeting of the ordinary roll.
+ */
+export function brigandChance(near: number, roads: number, day: boolean): number {
+  if (roads <= 0 || near <= 1) return 0;
+  const far = near === 2 ? 0.03 : near === 3 ? 0.07 : near === 4 ? 0.12 : 0.16;
+  return far * (roads === 1 ? 1 : roads === 2 ? 1.2 : 1.4) * (day ? 1 : 1.5);
+}
+export function rollWayfarers(r: () => number, o: { terrain: number; road: boolean; depth: number; day: boolean; water: boolean; monster: boolean; hutHere: boolean; only?: (w: WayDef) => boolean; chance?: number; ambush?: number }): WayDef | null {
   if (o.monster || o.depth < 1) return null;
+  // On a road, brigands have their own roll (by distance from home); in the ordinary roll there, they don't come up.
+  if (o.road && o.ambush !== undefined) {
+    const b = WAYFARERS.find((w) => w.id === "brigands");
+    if (b && (!o.only || o.only(b)) && o.depth >= (b.minDepth ?? 1) && r() < o.ambush) return b;
+  }
   const chance = (o.chance ?? (o.road ? 0.36 : 0.18)) * (o.day ? 1 : 0.4);
   if (r() >= chance) return null;
-  const pool = WAYFARERS.filter((w) => (!o.only || o.only(w)) && (!w.terrains.length || w.terrains.includes(o.terrain)) && (!w.water || o.water) && o.depth >= (w.minDepth ?? 1)
+  const pool = WAYFARERS.filter((w) => (!o.only || o.only(w)) && !(w.hostile && o.road && o.ambush !== undefined) && (!w.terrains.length || w.terrains.includes(o.terrain)) && (!w.water || o.water) && o.depth >= (w.minDepth ?? 1)
     && (w.when === "any" || (w.when === "day") === o.day) && !(o.hutHere && (w.id === "herbwoman" || w.id === "woodcutter")));
   const wt = (w: WayDef) => w.weight * (o.road ? w.road ?? 1 : 1) * (w.hostile ? (o.day ? 1 : 2.5) * Math.min(2, 1 + (o.depth - 2) * 0.15) : 1) * (w.id === "camp" && !o.day ? 6 : 1);
   const total = pool.reduce((n, w) => n + wt(w), 0);
