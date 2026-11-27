@@ -392,6 +392,13 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, 3, 3, 24, 8, "#7a5a33"); px(c, 1, 2, 28, 2, "#9c7445"); px(c, 1, 2, 28, 1, "#b88d58"); px(c, 5, 4, 20, 5, "#4a3220");
     px(c, 2, 10, 26, 2, "#5e4026"); px(c, 13, 4, 4, 5, "#7a5a33"); px(c, 0, 8, 6, 1, "#c4a070"); px(c, 24, 8, 6, 1, "#c4a070");
   });
+  canvasTex(scene, "slingStone", 4, 4, (c) => { px(c, 1, 0, 2, 4, "#8d877b"); px(c, 0, 1, 4, 2, "#8d877b"); px(c, 1, 1, 1, 1, "#b5afa2"); });
+  canvasTex(scene, "pl_Tent", 24, 18, (c) => {
+    px(c, 1, 16, 22, 2, "rgba(0,0,0,0.25)");
+    for (let y = 0; y < 16; y++) { const half = 1 + Math.round(y * 0.68); px(c, 12 - half, y + 1, half * 2, 1, y % 4 === 0 ? "#a08458" : "#b89a6a"); px(c, 12 - half, y + 1, 1, 1, "#8a6c48"); }
+    px(c, 11, 0, 2, 2, "#6b4a2b"); px(c, 10, 8, 4, 9, "#3a2a1a"); px(c, 9, 10, 1, 7, "#d8c8a8"); px(c, 14, 10, 1, 7, "#d8c8a8"); // the flap tied back
+    px(c, 0, 16, 2, 1, "#6b4a2b"); px(c, 22, 16, 2, 1, "#6b4a2b");
+  });
   canvasTex(scene, "pl_Chest", 16, 14, (c) => {
     px(c, 1, 12, 14, 2, "rgba(0,0,0,0.22)");
     px(c, 1, 3, 14, 10, "#7a5a33"); px(c, 1, 2, 14, 3, "#9c7445"); px(c, 1, 2, 14, 1, "#b88d58");
@@ -720,7 +727,7 @@ export function makeTextures(scene: Phaser.Scene) {
   }
 
   // Darkness: a black field with a soft hole of light, small without a torch, larger with one.
-  for (const [key, r] of [["dark0", 30], ["dark1", 78], ["dark2", 112]] as [string, number][]) {
+  for (const [key, r] of [["dark0", 30], ["dark1", 78], ["dark2", 112], ["dark3", 142]] as [string, number][]) {
     canvasTex(scene, key, 640, 640, (c) => {
       const g = c.createRadialGradient(320, 320, r * 0.4, 320, 320, r);
       g.addColorStop(0, "rgba(8,6,4,0)"); g.addColorStop(1, "rgba(8,6,4,0.97)");
@@ -820,6 +827,31 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
+/** Icons for weapons and tools from the Core Rules' tables. */
+function drawEquipIcon(c: Ctx, o: number, id: string): boolean {
+  const diag = (x0: number, y0: number, n: number, col: string, w = 1) => { for (let i = 0; i < n; i++) px(c, o + x0 + i, y0 - i, w, w, col); };
+  switch (id) {
+    case "Kopis": diag(2, 13, 4, "#6b4a2b", 2); px(c, o + 5, 9, 3, 1, "#c8a050"); for (let i = 0; i < 8; i++) px(c, o + 6 + i, 8 - i + (i > 4 ? (i - 4) : 0), 2, 2 + (i > 3 ? 1 : 0), "#c8c0b0"); px(c, o + 12, 2, 2, 4, "#e0d8c8"); return true;
+    case "Club": diag(2, 14, 6, "#8a6440", 2); px(c, o + 7, 3, 6, 6, "#6b4a2b"); px(c, o + 8, 2, 4, 1, "#8a6440"); px(c, o + 9, 5, 1, 1, "#4a3220"); px(c, o + 11, 7, 1, 1, "#4a3220"); return true;
+    case "SilverDagger": diag(3, 13, 3, "#4a3220", 2); px(c, o + 5, 9, 3, 2, "#9a9aa8"); diag(7, 9, 7, "#e8e8f0", 2); px(c, o + 13, 2, 1, 1, "#ffffff"); return true;
+    case "Cestus": for (const x of [2, 9]) { px(c, o + x, 4, 5, 9, "#a8804e"); for (let y = 5; y < 13; y += 2) px(c, o + x, y, 5, 1, "#6b4a2b"); px(c, o + x + 1, 3, 3, 1, "#c99a72"); } return true;
+    case "Sling": px(c, o + 6, 9, 5, 4, "#8a6440"); px(c, o + 7, 10, 3, 2, "#9c968a"); diag(2, 8, 5, "#c9b48f"); for (let i = 0; i < 6; i++) px(c, o + 10 + (i >> 1), 8 - i, 1, 1, "#c9b48f"); px(c, o + 1, 9, 2, 2, "#c9b48f"); return true;
+    case "Javelin": for (const dx of [0, 3, 6]) { diag(1 + dx, 14, 10, "#8a6440"); px(c, o + 10 + dx, 3, 2, 2, "#9c968a"); } return true;
+    case "FireArrow": diag(2, 14, 9, "#8a6440"); px(c, o + 2, 12, 2, 2, "#e9e1cf"); px(c, o + 10, 4, 4, 3, "#e0702a"); px(c, o + 11, 2, 3, 3, "#f2a03a"); px(c, o + 12, 1, 2, 2, "#fbe39a"); return true;
+    case "HealerKit": px(c, o + 2, 5, 12, 9, "#8a6440"); px(c, o + 2, 5, 12, 2, "#a8804e"); px(c, o + 7, 7, 2, 6, "#e9e1cf"); px(c, o + 5, 9, 6, 2, "#e9e1cf"); px(c, o + 6, 3, 4, 2, "#6b4a2b"); return true;
+    case "Tackle": for (const [x, y] of [[3, 3], [8, 2], [12, 4]]) { px(c, o + x, y, 1, 7, "#c8a050"); px(c, o + x - 2, y + 7, 3, 1, "#c8a050"); px(c, o + x - 2, y + 5, 1, 2, "#c8a050"); } px(c, o + 2, 13, 12, 1, "#e0d8c8"); px(c, o + 6, 12, 3, 3, "#7a7a80"); return true;
+    case "Mirror": px(c, o + 4, 1, 8, 9, "#c8a050"); px(c, o + 3, 2, 10, 7, "#c8a050"); px(c, o + 5, 2, 6, 7, "#f0e0a0"); px(c, o + 6, 3, 2, 3, "#ffffff"); px(c, o + 7, 10, 2, 5, "#8a6a2a"); px(c, o + 5, 14, 6, 1, "#8a6a2a"); return true;
+    case "Waterskin": px(c, o + 3, 5, 10, 9, "#8a6440"); px(c, o + 4, 4, 8, 1, "#8a6440"); px(c, o + 6, 1, 3, 4, "#6b4a2b"); px(c, o + 5, 7, 3, 3, "#a8804e"); px(c, o + 3, 13, 10, 1, "#6b4a2b"); return true;
+    case "Tent": px(c, o + 7, 2, 2, 2, "#6b4a2b"); for (let i = 0; i < 10; i++) px(c, o + 7 - Math.round(i * 0.6), 3 + i, 2 + Math.round(i * 1.2), 1, i % 3 ? "#b89a6a" : "#a08458"); px(c, o + 7, 8, 2, 6, "#3a2a1a"); return true;
+    case "Map": px(c, o + 1, 3, 14, 10, "#d8c8a0"); px(c, o + 1, 3, 1, 10, "#b8a880"); px(c, o + 14, 3, 1, 10, "#b8a880"); px(c, o + 3, 5, 4, 3, "#6fae52"); px(c, o + 8, 6, 5, 4, "#3a6a8a"); px(c, o + 4, 9, 3, 2, "#9c8a6a"); px(c, o + 7, 5, 1, 6, "#b0412f"); return true;
+    case "Loadstone": px(c, o + 4, 5, 8, 7, "#3a3640"); px(c, o + 3, 6, 10, 5, "#3a3640"); px(c, o + 5, 6, 3, 2, "#5a5660"); px(c, o + 7, 2, 2, 3, "#b0412f"); px(c, o + 7, 12, 2, 2, "#6a7ab0"); return true;
+    case "Scale": px(c, o + 7, 2, 2, 11, "#8a6a2a"); px(c, o + 2, 3, 12, 1, "#c8a050"); px(c, o + 1, 6, 4, 2, "#c8a050"); px(c, o + 11, 6, 4, 2, "#c8a050"); px(c, o + 2, 4, 1, 2, "#a8a090"); px(c, o + 13, 4, 1, 2, "#a8a090"); px(c, o + 5, 13, 6, 2, "#6b4a2b"); return true;
+    case "Knife": diag(3, 13, 4, "#6b4a2b", 2); diag(7, 9, 6, "#c8a050", 2); px(c, o + 12, 3, 1, 1, "#f0d890"); return true;
+    case "Pack": px(c, o + 3, 3, 10, 11, "#8a6440"); px(c, o + 3, 3, 10, 3, "#6b4a2b"); px(c, o + 7, 6, 2, 2, "#c8a050"); px(c, o + 4, 9, 8, 1, "#6b4a2b"); px(c, o + 2, 5, 1, 7, "#4a3220"); px(c, o + 13, 5, 1, 7, "#4a3220"); return true;
+  }
+  return false;
+}
+
 /** Icons for the things you wear. */
 function drawGearIcon(c: Ctx, o: number, id: string): boolean {
   const tunic = (col: string, long = false) => { px(c, o + 4, 3, 8, long ? 12 : 10, col); px(c, o + 2, 3, 3, 4, col); px(c, o + 11, 3, 3, 4, col); px(c, o + 6, 2, 4, 2, "rgba(0,0,0,0.25)"); };
@@ -847,7 +879,7 @@ function drawGearIcon(c: Ctx, o: number, id: string): boolean {
 }
 
 export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Kopis", "Club", "SilverDagger", "Cestus", "Sling", "Javelin", "FireArrow", "HealerKit", "Tackle", "Mirror", "Waterskin", "Tent", "Map", "Loadstone", "Scale", "Knife", "Pack", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -920,6 +952,7 @@ const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "pl
 function drawIcon(c: Ctx, o: number, id: string) {
   if (drawFurnIcon(c, o, id)) return;
   if (drawGearIcon(c, o, id)) return;
+  if (drawEquipIcon(c, o, id)) return;
   if (id === "rod") { for (let i = 0; i < 12; i++) px(c, o + 2 + i, 13 - i, 1, 1, "#8a5a2a"); px(c, o + 13, 1, 1, 9, "rgba(230,230,220,0.7)"); px(c, o + 12, 10, 2, 2, "#d8402a"); return; }
   const FISHC: Record<string, [string, string, number]> = { Chub: ["#8a8a6a", "#c8c8a8", 9], Perch: ["#6a8a3a", "#c8d070", 9], Trout: ["#7a8a7a", "#e0a0a0", 10], Mullet: ["#8a9098", "#d8dce0", 10],
     Sardine: ["#5a7a9a", "#e0e8f0", 7], Bream: ["#8a9aa8", "#f0d060", 10], RedMullet: ["#c85a50", "#f0b0a0", 9], Tuna: ["#2a3a5a", "#a0b0c8", 12] };

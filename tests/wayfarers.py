@@ -65,8 +65,8 @@ async def main():
                     if wid == "camp": await choose(pg, "Sit by"); await choose(pg, "Share"); print("   camp:", await pg.evaluate("G.favor('Zeus')"))
                     if wid == "rhapsode": await choose(pg, "Give him"); print("   song:", await pg.evaluate("G.data.songs.join(',')"))
                     if wid == "quarrel": await pg.evaluate("G.data.aretai.Logos=12"); await choose(pg, "Hear them"); print("   judged:", await log(pg,2))
-                    if wid == "wounded": await choose(pg, "Give him"); print("   helped:", await log(pg,2)); await pg.wait_for_timeout(3500); print("   standing & leaving:", await pg.evaluate(f"{G0} ? [{G0}.people[0].lying, !!{G0}.leaving] : 'gone'"))
-                    if wid == "parched": await choose(pg, "Give him"); print("   water:", await log(pg,1), await pg.evaluate("G.data.jarWater"))
+                    if wid == "wounded": await choose(pg, "Give h"); print("   helped:", await log(pg,2)); await pg.wait_for_timeout(3500); print("   standing & leaving:", await pg.evaluate(f"{G0} ? [{G0}.people[0].lying, !!{G0}.leaving] : 'gone'"))
+                    if wid == "parched": await choose(pg, "Give h"); print("   water:", await log(pg,1), await pg.evaluate("G.data.jarWater"))
                     if wid == "pilgrim": print("   journal ok:", await pg.evaluate(f"(()=>{{ {U}.closeTalk(); {U}.openJournal(); return {U}.talkPanel ? 'yes':'no'; }})()"))
                     if wid in ("woodcutter","fisher","camp","quarrel","herbwoman","wounded"):
                         await pg.evaluate(f"{U}.closeTalk()"); await pg.evaluate(f"(()=>{{const s={Wd}, g={G0}; if(!g) return; const w=g.people[0]; s.player.setPosition(w.sprite.x-36, w.sprite.y+10); }})()"); await pg.wait_for_timeout(900)

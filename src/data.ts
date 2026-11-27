@@ -156,6 +156,24 @@ export const ITEMS: Record<string, ItemDef> = {
   Lamp: { id: "Lamp", value: 10, name: "Clay lamp", greek: "lychnos", kind: "material", desc: "A little lamp burning beeswax. Carried, it lights caves wider than a torch, and never burns out." },
   Cloth: { id: "Cloth", value: 6, name: "Linen cloth", greek: "othone", kind: "material", desc: "A bolt of plain linen from your loom." },
   Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "wear", desc: "A thick traveler's cloak pinned at the shoulder." },
+  // Weapons and tools from the Core Rules' Belongings tables.
+  Kopis: { id: "Kopis", value: 45, name: "Kopis", greek: "kopis", kind: "tool", desc: "A heavy forward-curved blade that hacks like an axe. Hits harder than the xiphos (4), but leaves you open: blows you take land 1 harder while you hold it." },
+  Club: { id: "Club", value: 3, name: "Club", greek: "rhopalon", kind: "tool", desc: "A knotted club of olive wood, Heracles' weapon. A crushing blow (it breaks bone, which shrugs off blades), and it knocks a beast back." },
+  SilverDagger: { id: "SilverDagger", value: 50, name: "Silver dagger", greek: "argyromachaira", kind: "tool", desc: "A slim blade of silver. It cuts what bronze cannot: it wounds the dead, and bites deeper into monsters." },
+  Cestus: { id: "Cestus", value: 8, name: "Cestus", greek: "himantes", kind: "tool", desc: "Ox-hide thongs wound round the fists, as boxers wear them. Hold them to punch harder and surer." },
+  Sling: { id: "Sling", value: 4, name: "Sling", greek: "sphendone", kind: "tool", desc: "A pouch on two cords. Hold it, aim (hold Space), and loose a stone from your pack. Less sure than a bow, but stones are everywhere, and they break bone." },
+  Javelin: { id: "Javelin", value: 4, name: "Javelin", greek: "akontion", kind: "material", desc: "A light throwing spear. Hold it and keep the button down to aim, release to throw; tap to thrust. Carried in threes; some bend and are lost." },
+  FireArrow: { id: "FireArrow", value: 5, name: "Fire arrow", greek: "pyrphoros oistos", kind: "material", desc: "Pitch-wrapped, lit as it's loosed. Hold these (with a bow in your pack) to shoot them: they strike harder, and fire touches the dead." },
+  HealerKit: { id: "HealerKit", value: 25, name: "Healer's kit", greek: "iatreion", kind: "tool", desc: "Linen bandages, a bronze probe, honey and herbs. Once a day, use it to clean and bind your wounds (heals Vitality; better with Gnosis)." },
+  Tackle: { id: "Tackle", value: 8, name: "Fishing tackle", greek: "ankistra", kind: "material", desc: "Bronze hooks, lines and sinkers. Carried, fish bite sooner." },
+  Mirror: { id: "Mirror", value: 20, name: "Bronze mirror", greek: "katoptron", kind: "tool", desc: "A polished bronze disc. Carried in a cave, it throws your light further; held up, it shows things as they truly are (Space)." },
+  Waterskin: { id: "Waterskin", value: 4, name: "Waterskin", greek: "askos", kind: "tool", desc: "A goatskin bag. Fill it at water (Space, facing a well, spring, river or the sea), and drink from it anywhere: it eases weariness and keeps off the desert heat a while." },
+  Tent: { id: "Tent", value: 10, name: "Tent and bedroll", greek: "skene", kind: "place", desc: "Hides on poles, and a fleece to lie on. Pitch it anywhere and sleep in it: nearly a bed's rest, rain or shine. You wake where you pitched it." },
+  Map: { id: "Map", value: 15, name: "Map", greek: "pinax", kind: "tool", desc: "A painted map of the lands you've walked. Hold it and press Space to look at it." },
+  Loadstone: { id: "Loadstone", value: 40, name: "Loadstone", greek: "magnetis lithos", kind: "find", desc: "A dark stone that turns to the north when floated on water. Carried, you always know which way home lies." },
+  Scale: { id: "Scale", value: 15, name: "Merchant's scale", greek: "stathmos", kind: "material", desc: "A beam scale with bronze weights. Carried, nobody cheats you: the miller pays you a sixth more." },
+  Knife: { id: "Knife", value: 5, name: "Bronze knife", greek: "encheiridion", kind: "material", desc: "A short blade for every small job. Carried, you skin what you hunt cleanly: an extra hide from any beast that gives one." },
+  Pack: { id: "Pack", value: 12, name: "Traveler's pack", greek: "pera", kind: "material", desc: "A weatherproofed leather pack on a frame. Use it (Space) to sling it on: ten more places in your pack, for good." },
   // Things to wear (gear.ts says what each does).
   Chiton: { id: "Chiton", value: 5, name: "Chiton", greek: "chiton", kind: "wear", desc: "A plain linen tunic, belted." },
   Exomis: { id: "Exomis", value: 6, name: "Exomis", greek: "exomis", kind: "wear", desc: "A short tunic fastened on one shoulder, for working in." },
@@ -204,7 +222,7 @@ export const ITEMS: Record<string, ItemDef> = {
   Pearl: { id: "Pearl", value: 40, name: "Pearl", greek: "margarites", kind: "find", desc: "A sea-pearl, round and moon-pale. Aphrodite's, who rose from the foam." },
   Moly: { id: "Moly", value: 30, name: "Moly", greek: "moly", kind: "find", desc: "Black at the root, milk-white in flower: the herb Hermes gave Odysseus. Carried, no song or spell can bend your will." },
   Clew: { id: "Clew", value: 5, name: "Ariadne's thread", greek: "klôsma", kind: "find", desc: "A ball of red thread from Ariadne. Carried into the Labyrinth, it pays out behind you, so you can find your way back." },
-  Labrys: { id: "Labrys", value: 60, name: "Golden labrys", greek: "labrys", kind: "find", desc: "A little double axe of gold, the sign of the palace of the Labyrinth. It was offered to a goddess older than the Olympians." },
+  Labrys: { id: "Labrys", value: 60, name: "Golden labrys", greek: "labrys", kind: "find", desc: "A double axe of gold, the sign of the palace of the Labyrinth, once offered to a goddess older than the Olympians. It is a weapon too: it strikes hard (4), crushes bone, and gives a beast pause while you hold it (+1 Intimidation)." },
   Thunderstone: { id: "Thunderstone", value: 60, name: "Thunderstone", greek: "keraunia", kind: "find", desc: "Black iron fallen from the sky where Zeus' bolt struck. Carried, Zeus' favor sits heavier on you." },
   HeliadTear: { id: "HeliadTear", value: 50, name: "Tear of the Heliades", greek: "dakry Heliadon", kind: "find", desc: "Amber that holds a faint light: a sister of Phaethon wept it. Carried, Apollo's aim is yours." },
   SeaFennel: { id: "SeaFennel", value: 3, name: "Sea fennel", greek: "krithmon", kind: "material", desc: "Salty shore greens, good pickled." },
@@ -402,8 +420,20 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Basket", qty: 1, needs: [["Fiber", 4]], desc: "A wool basket for the corner." },
   { out: "Sandals", qty: 1, needs: [["Hide", 1], ["Fiber", 1]], desc: "Leather sandals." },
   { out: "Petasos", qty: 1, needs: [["Fiber", 5]], desc: "A broad straw hat against the sun." },
+  { out: "Club", qty: 1, needs: [["Wood", 3]], desc: "A knotted club: crushes bone." },
+  { out: "Sling", qty: 1, needs: [["Fiber", 3], ["Hide", 1]], desc: "A sling: stones for shot." },
+  { out: "Cestus", qty: 1, needs: [["Hide", 2]], desc: "Boxer's hand-wraps: punches land harder." },
+  { out: "FireArrow", qty: 3, needs: [["Arrow", 3], ["OliveOil", 1]], desc: "Arrows wrapped in oiled fiber, to be lit as they fly." },
+  { out: "FireArrow", qty: 3, needs: [["Arrow", 3], ["Wax", 1]], desc: "Arrows wrapped in waxed fiber." },
+  { out: "HealerKit", qty: 1, needs: [["Cloth", 1], ["Honey", 1], ["Thyme", 2]], desc: "Bandages, honey and thyme: bind your wounds once a day." },
+  { out: "Waterskin", qty: 1, needs: [["Hide", 2], ["Fiber", 1]], desc: "A skin for water." },
+  { out: "Map", qty: 1, needs: [["Cloth", 1], ["Ochre", 1]], desc: "Paint what you know of the land: a map of everywhere you've been." },
+  { out: "Knife", qty: 1, needs: [["Obsidian", 1], ["Wood", 1]], desc: "An obsidian blade in a wooden haft: skins cleanly." },
   // Armor at the workbench.
   { out: "Kynee", qty: 1, needs: [["Hide", 2]], desc: "A leather cap: head armor 1.", at: "workbench" },
+  { out: "Javelin", qty: 3, needs: [["Wood", 3], ["Stone", 2]], desc: "Three stone-tipped javelins.", at: "workbench" },
+  { out: "Tent", qty: 1, needs: [["Hide", 4], ["Wood", 3], ["Fiber", 2]], desc: "A tent and bedroll: sleep anywhere, nearly as well as at home.", at: "workbench" },
+  { out: "Pack", qty: 1, needs: [["Hide", 4], ["Fiber", 3], ["Wood", 1]], desc: "A traveler's pack: ten more places to carry things.", at: "workbench" },
   { out: "LeatherShirt", qty: 1, needs: [["Hide", 3]], desc: "A leather jerkin: torso armor 1.", at: "workbench" },
   { out: "Boots", qty: 1, needs: [["Hide", 3]], desc: "High boots, for long roads.", at: "workbench" },
   { out: "TuskHelm", qty: 1, needs: [["Tusk", 4], ["Hide", 2]], desc: "A boar's-tusk helmet: head armor 2.", at: "workbench" },
@@ -416,6 +446,13 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   // At the forge.
   { out: "Arrow", qty: 8, needs: [["Copper", 1], ["Wood", 2]], desc: "Cast bronze arrowheads, a whole quiver's worth.", at: "forge" },
   { out: "Greaves", qty: 1, needs: [["Copper", 3]], desc: "Bronze greaves: leg armor 2.", at: "forge" },
+  { out: "Kopis", qty: 1, needs: [["Copper", 4], ["Wood", 1]], desc: "A heavy curved blade.", at: "forge" },
+  { out: "SilverDagger", qty: 1, needs: [["OldCoin", 3], ["Copper", 1]], desc: "Melt old silver coins into a blade that wounds the dead.", at: "forge" },
+  { out: "Javelin", qty: 4, needs: [["Copper", 1], ["Wood", 3]], desc: "Four bronze-tipped javelins.", at: "forge" },
+  { out: "Knife", qty: 1, needs: [["Copper", 1]], desc: "A bronze knife: skins cleanly.", at: "forge" },
+  { out: "Tackle", qty: 1, needs: [["Copper", 1], ["Fiber", 2]], desc: "Bronze hooks and lines: fish bite sooner.", at: "forge" },
+  { out: "Mirror", qty: 1, needs: [["Copper", 3]], desc: "A polished bronze mirror.", at: "forge" },
+  { out: "Scale", qty: 1, needs: [["Copper", 2], ["Wood", 1]], desc: "A merchant's beam scale.", at: "forge" },
   { out: "Corinthian", qty: 1, needs: [["Copper", 5]], desc: "A Corinthian helmet: head armor 3.", at: "forge" },
   { out: "ScaleCuirass", qty: 1, needs: [["Copper", 4], ["Hide", 2]], desc: "A scale cuirass: torso armor 3.", at: "forge" },
   { out: "Cuirass", qty: 1, needs: [["Copper", 8]], desc: "A bronze cuirass: torso armor 4.", at: "forge" },
@@ -450,11 +487,11 @@ export const PEACE_FOOD: Record<string, string[]> = {
   jackal: ["Meat"], bear: ["Honey", "Meat"], crab: [], scorpion: [], // the bear: "an offering of food left and abandoned"
 };
 /** Melee damage by what's in hand (hits needed: boar 3, wolf 2). */
-export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1, spear: 2, sword: 3 };
+export const MELEE: Record<string, number> = { axe: 2, mattock: 2, sickle: 1, spear: 2, sword: 3, Kopis: 4, Club: 2, Labrys: 4, SilverDagger: 2, Javelin: 1 };
 /** How far a blow reaches, in pixels from you to the creature (26 for anything not listed). */
-export const MELEE_REACH: Record<string, number> = { spear: 42, sword: 24 };
+export const MELEE_REACH: Record<string, number> = { spear: 42, sword: 24, Kopis: 24, SilverDagger: 20, Javelin: 34 };
 /** Weapons are made for fighting: +1 to land a blow. */
-export const WEAPONS = ["spear", "sword"];
+export const WEAPONS = ["spear", "sword", "Kopis", "Club", "Labrys", "SilverDagger", "Javelin"];
 /** The thrown spear: shorter range than the bow, a heavier blow, and only the one. */
 export const SPEAR_THROW = { range: 120, speed: 210, damage: 3, holdMs: 220 };
 /** The smith forges a sword to order. */

@@ -50,6 +50,8 @@ export interface SaveData {
   slots: (Slot | null)[]; // INVENTORY_SIZE slots; 0-9 are the hotbar
   selected: number; // hotbar index 0-9
   jarWater: number;
+  /** The waterskin's drinks (0-4); when you last drank from it (absolute hour); the day you last used the healer's kit. */
+  skin?: number; drankAt?: number; kitDay?: number;
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
   treeHits: Record<string, number>;
@@ -527,9 +529,9 @@ export class GameState {
     for (const p of this.data.placed) if (p.where === "house" && COMFORT_KIND[p.id]) kinds.add(COMFORT_KIND[p.id]);
     return kinds.size;
   }
-  sleep(collapsed = false, rough = false) {
+  sleep(collapsed = false, rough: boolean | "tent" = false) {
     const hoursSlept = this.sleepHours;
-    const credit = collapsed ? 0.5 : rough ? (this.gear.blanket ? 0.75 : 0.5) : 1; // a collapse, or the hard ground by a campfire: half the rest (wrapped in a cloak, three quarters)
+    const credit = collapsed ? 0.5 : rough === "tent" ? (this.gear.blanket ? 0.95 : 0.85) : rough ? (this.gear.blanket ? 0.75 : 0.5) : 1; // a collapse, or the hard ground by a campfire: half the rest (wrapped in a cloak, three quarters)
     // Hera keeps the house: at +12 sleep there restores you wholly; at -12 it gives you half the rest.
     const hera = !collapsed && !rough && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
     // A comfortable home (each kind of furnishing you've made for it) rests you a little better.
