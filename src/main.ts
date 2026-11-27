@@ -1389,7 +1389,7 @@ abstract class PlayScene extends Phaser.Scene {
     const how: Record<string, string> = { boar: "lowers its tusks and charges", wolf: "bares its teeth and comes for you", fox: "snarls and darts at you", deer: "lowers its antlers and charges",
       centaur: "throws back its head, laughs, and comes on at the gallop", jackal: "yips and darts in", scorpion: "raises its tail", bear: "rears up roaring and comes on", crab: "snaps its claws at you",
       lion: "flattens its ears and charges", stymphalian: "screams, bronze feathers rattling, and stoops at you", strix: "shrieks and drops out of the dark at you", sphinx: "springs from the rock", skeleton: "lifts its corroded blade and marches at you", empousa: "shows her true face, a grin too wide for any mouth, and springs at you" };
-    const what = a.kind === "skeleton" ? "Run, or break it." : a.kind === "empousa" ? `Run, fight, or ${G.lore("empousa") >= 1 ? "mock her" : "do something"} (E).` : isMonster(a.kind) && !MONSTERS[a.kind].calm ? "Run, or fight." : "Run, fight, or calm it (E).";
+    const what = a.kind === "skeleton" ? "Run, or break it." : a.kind === "empousa" ? `Run, fight, or ${G.lore("empousa") >= 1 ? "mock her" : "do something"} (E).` : isMonster(a.kind) && !MONSTERS[a.kind].calm ? "Run, or fight." : d.temper === "defender" ? "Back away and it may let you go; or fight, or calm it (E)." : "Run, fight, or calm it (E).";
     G.say(`${name[0].toUpperCase() + name.slice(1)} ${how[a.kind] ?? "comes at you"}! (d12 ${roll}${G.lore(a.kind) >= 2 ? `, Aggression ${agg}` : ""}) ${what}`);
     return true;
   }
@@ -2028,6 +2028,7 @@ abstract class PlayScene extends Phaser.Scene {
     // If something else set its pace since last frame (a bolt, a knock-back, a wall), take that as what it means to go.
     if (Math.abs(v.x - a.gApplied.x) > 0.01 || Math.abs(v.y - a.gApplied.y) > 0.01) { a.gBase.x = v.x; a.gBase.y = v.y; }
     const w = this.depthAt(s.x, s.y + 5);
+    if (!BREATHLESS.has(a.kind)) this.steer(a, w, dt);
     const f = this.groundFactorAt(s.x, s.y + 4);
     s.setVelocity(a.gBase.x * f, a.gBase.y * f); a.gApplied.x = v.x; a.gApplied.y = v.y;
     if (w !== a.wet) { a.wet = w; if (w) s.setCrop(0, 0, s.width, s.height - (w === 2 ? 7 : 3)); else s.setCrop(); }
@@ -2054,6 +2055,58 @@ abstract class PlayScene extends Phaser.Scene {
     const w = this.depthAt(s.x, s.y + 5), wet = (s as unknown as { wet?: number }).wet ?? 0;
     if (w !== wet) { (s as unknown as { wet?: number }).wet = w; if (w) s.setCrop(0, 0, s.width, s.height - (w === 2 ? 7 : 3)); else s.setCrop(); }
     return [vx, vy];
+  }
+  /** A defending beast lets you go once you back away. */
+  brokeOff(a: Animal) {
+    if (Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) > 200) return;
+    const how: Record<string, string> = { boar: "snorts, tosses its tusks, and trots off", bear: "huffs, drops to all fours, and lumbers away", deer: "stamps once and turns away",
+      fox: "gives a last yap and slinks off", ibex: "shakes its horns and bounds away", crab: "sidles off", scorpion: "lowers its tail and scuttles off", myrmex: "clicks its jaws and goes back to its work", lampad: "dims, and drifts away" };
+    G.say(`The ${beast(a.kind)} ${how[a.kind] ?? "breaks off and goes its way"}: you're leaving, and that is all it wanted.`);
+  }
+  /**
+   * Steering by the water: a creature knows how long it can hold its breath. Coming to deep water it will swim
+   * a stretch it can cross on one breath; a wider one it turns along the bank to go around (keeping to one side
+   * until clear). Caught out of its depth with its breath running short, it makes for the nearest shallows.
+   */
+  steer(a: Animal, w: number, dt: number): void {
+    const sp = Math.hypot(a.gBase.x, a.gBase.y); if (sp < 1) return;
+    const s = a.sprite, fx = s.x, fy = s.y + 5, swim = sp * 0.25;
+    const ol = this.objLayer(), mw = ol?.tilemap.widthInPixels ?? 0, mh = ol?.tilemap.heightInPixels ?? 0;
+    // Before going in it wants a margin; once swimming it holds to its course if its breath will just last.
+    const left = w === 2 ? Math.max(0, 8 - a.breath) : 8 * 0.85;
+    // How much deep water lies along a heading: from here if swimming, else only if it starts just ahead.
+    const run = (ang: number, near = 14) => {
+      const cx = Math.cos(ang), cy = Math.sin(ang); let start = -1;
+      for (let d = 4; d <= 300; d += 4) {
+        const px = fx + cx * d, py = fy + cy * d;
+        if (px < 0 || py < 0 || px >= mw || py >= mh) return start < 0 ? 0 : 9999; // the map's edge is no shore
+        const deep = this.depthAt(px, py) === 2;
+        if (deep && start < 0) start = w === 2 ? 0 : d;
+        if (!deep && start >= 0) return d - start;
+        if (start < 0 && d > near) return 0;
+      }
+      return start < 0 ? 0 : 9999;
+    };
+    const ok = (L: number) => L === 0 || L / swim < left;
+    const head = Math.atan2(a.gBase.y, a.gBase.x);
+    if ((a.steerT -= dt) <= 0) a.steerSide = 0;
+    const L0 = run(head);
+    if (ok(L0)) return;
+    const go = (ang: number) => { a.gBase.x = Math.cos(ang) * sp; a.gBase.y = Math.sin(ang) * sp; };
+    if (w === 2) { // out of its depth: the nearest way out
+      let best = head, bestL = L0;
+      for (let i = 0; i < 16; i++) { const ang = (i / 16) * Math.PI * 2, L = run(ang); if (L < bestL) { bestL = L; best = ang; } }
+      go(best); return;
+    }
+    // Along the bank, keeping to the side it chose.
+    const sides = a.steerSide ? [a.steerSide] : Math.random() < 0.5 ? [1, -1] : [-1, 1];
+    for (const off of [0.45, 0.9, 1.35, 1.8, 2.3, 2.8]) for (const side of sides) {
+      const ang = head + off * side;
+      if (ok(run(ang, 26))) { a.steerSide = side; a.steerT = 1.2; go(ang); return; } // a longer look, so it keeps clear of the edge
+    }
+    if (a.steerSide) { a.steerSide = 0; return this.steer(a, w, 0); } // boxed in on that side: try the other
+    a.gBase.x = 0; a.gBase.y = 0; // nowhere to go but the water: it stops at the edge
+    if (a.state === "walk") { a.state = "idle"; a.timer = 1; }
   }
   /** A creature (or a brigand) that stayed too long in deep water goes under, and is not seen again. */
   drowned(a: Animal) {
@@ -2831,7 +2884,7 @@ abstract class PlayScene extends Phaser.Scene {
   updateAnimals(dt: number) {
     const running = this.dashLvl > 0.3 && this.player.body!.velocity.length() > 80;
     const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.stealthNow(this.scene.key === "Wild") - 4));
-    for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
+    for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); a.retreats ??= (x) => this.brokeOff(x); }
     const lights = this.animals.some((a) => a.kind === "eidolon") ? this.fireLights() : [];
     if (!this.paused) for (const a of this.animals) {
       if (this.lured(a)) { // it smells the food in your hand, and comes to see
@@ -8382,7 +8435,8 @@ class UIScene extends Phaser.Scene {
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
       "Far out lie citadels of the heroes' age, three screens by three, walled with Cyclopean stone; and off the coasts, row on into the open sea to find its isles. Both go in your journal's Places.",
       "Somewhere out there are Delphi, where the Pythia speaks Apollo's oracles to the clean, once a month, and Knossos, Minos' palace, with the Labyrinth beneath it. Take a torch, and Ariadne's thread.",
-      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. Beasts, brigands and folk are slowed and drowned by the same ground and water (birds, shades and sea creatures aside); companions wade with you but wait at the edge of deep water. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
+      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. Beasts, brigands and folk are slowed and drowned by the same ground and water (birds, shades and sea creatures aside); companions wade with you but wait at the edge of deep water. Creatures swim only a stretch they can cross on one breath, and go around wider water. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
+      "Some creatures only defend themselves (boar, bear, deer, fox): back away and they break off. Hunters (wolves, jackals, lions, and the monsters and the dead) keep after you until you are well away, or across water they can't swim.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "The dead walk at night at crossroads and graveyards; on Noumenia, the first of the month, they gather.",

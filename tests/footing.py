@@ -35,7 +35,7 @@ async def main():
         await pg.evaluate(f"(()=>{{const d=window._d; d.sprite.setPosition({x},{y}); d.bolt({{x:{x}-30,y:{y}}}); }})()"); await pg.wait_for_timeout(250)
         a1 = await pg.evaluate("Math.round(window._d.sprite.body.velocity.length())"); await pg.wait_for_timeout(250)
         a2 = await pg.evaluate("Math.round(window._d.sprite.body.velocity.length())")
-        print("bolting through the shallows (flee 110 → 55):", a1, a2, "| state", await pg.evaluate("window._d.state"), flush=True)
+        print("bolting through the shallows (flee 110 → 55, or 0 if it was headed into the deep sea and stopped at the edge):", a1, a2, "| state", await pg.evaluate("window._d.state"), flush=True)
         # drowning: held out of its depth
         x, y = spots["w2"]
         await pg.evaluate(f"(()=>{{const d=window._d; d.sprite.setPosition({x},{y}); d.state='idle'; d.timer=99; d.home=new Phaser.Geom.Rectangle({x}-4,{y}-4,8,8); d.breath=7; {Wd}.player.setPosition({x},{y}-32); }})()")
