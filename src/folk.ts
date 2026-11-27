@@ -114,7 +114,11 @@ export class Walker {
       const dx = this.tx - s.x, dy = this.ty - s.y, d = Math.hypot(dx, dy);
       this.wait -= dt;
       if (d < 4 || this.wait <= 0) { s.setVelocity(0, 0); this.doing = this.doing === "home" ? "home" : "idle"; this.wait = 2 + Math.random() * 5; }
-      else { s.setVelocity((dx / d) * this.speed, (dy / d) * this.speed); moving = true; this.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0; }
+      else {
+        // Mud, sand, brush and water slow folk as they slow you (the scene knows its ground).
+        const g = (this.scene as unknown as { groundFactorAt?: (x: number, y: number) => number }).groundFactorAt?.(s.x, s.y + 4) ?? 1;
+        s.setVelocity((dx / d) * this.speed * g, (dy / d) * this.speed * g); moving = true; this.facing = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+      }
     } else { s.setVelocity(0, 0); this.wait -= dt; }
     if (this.doing === "talk" && this.talkWith) {
       const o = this.talkWith.sprite, dx = o.x - s.x, dy = o.y - s.y;
@@ -124,7 +128,11 @@ export class Walker {
     const pose = moving ? [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(this.walkT / 0.14) % 4] : POSE.stand;
     s.setFrame(this.facing * POSES + pose);
     s.setDepth(s.y);
+    // Wading or swimming, only the upper part shows above the water.
+    const w = (this.scene as unknown as { depthAt?: (x: number, y: number) => number }).depthAt?.(s.x, s.y + 5) ?? 0;
+    if (w !== this.wet) { this.wet = w; if (w) s.setCrop(0, 0, 16, w === 2 ? 9 : 13); else s.setCrop(); }
   }
+  wet = 0;
   /** A little speech bubble over the head. */
   say(text: string) {
     const t = this.scene.add.text(this.sprite.x, this.sprite.y - 12, text, { fontFamily: FONT, fontSize: "6px", color: "#2a1d14", backgroundColor: "#f2e6c9", padding: { x: 2, y: 1 }, wordWrap: { width: 90 } })

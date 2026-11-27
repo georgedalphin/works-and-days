@@ -4,7 +4,7 @@ U="game.scene.getScene('UI')"; Wd="game.scene.getScene('Wild')"
 SHOT="/home/claude/test/"
 async def setup(b, terrain, clock, wx=3, wy=0, feature="Stone outcrop"):
     pg = await b.new_page(viewport={"width":960,"height":640})
-    errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
+    errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)+" @ "+(e.stack or "")[:600]))
     await pg.goto("file:///home/claude/works-and-days/dist/index.html"); await pg.wait_for_timeout(1200)
     await pg.mouse.click(480,320); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1500)
     if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)

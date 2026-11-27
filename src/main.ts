@@ -28,7 +28,7 @@ import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROU
   CROPS, seedId, QUALITY, QUALITY_MULT, money, TERRAINS, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, MELEE_REACH, WEAPONS, SPEAR_THROW, SWORD_ORDER, START_LIFE_THREAD, SLICE_TERRAINS } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
-import { Animal, SPECIES, type Species } from "./animals";
+import { Animal, SPECIES, SURE_FOOTED, BREATHLESS, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { artCondition, artWhere, RURAL_TEACHERS, type ArtCtx } from "./rural";
 import { MATERIALS, material, weaveBonuses, weaveDays, type Material, type WeaveCtx } from "./circlets";
@@ -2003,9 +2003,65 @@ abstract class PlayScene extends Phaser.Scene {
   creatureEvent(_a: Animal, _what: "slain" | "appeased") {}
   /** How the ground underfoot slows you (mud in the marsh, sand on the shore). */
   /** What water is under your feet: 0 none, 1 shallows, 2 deep. */
-  underfoot(): number {
+  underfoot(): number { return this.depthAt(this.player.x, this.player.y + 5); }
+  /** Water at a point: 0 dry, 1 shallows (wading), 2 deep (swimming). */
+  depthAt(x: number, y: number): number {
     const o = this.objLayer(); if (!o) return 0;
-    return waterKind(o.getTileAtWorldXY(this.player.x, this.player.y + 5)?.index);
+    return waterKind(o.getTileAtWorldXY(x, y)?.index);
+  }
+  /** The bare ground at a point (mud, sand): 1 where it doesn't slow. The wild has soils; other places don't. */
+  soilAt(_x: number, _y: number, _shod = 0): number { return 1; }
+  /** How the footing at a point slows anyone crossing it, as it slows you unshod: water, brush, reeds, thorns, mud, sand. */
+  groundFactorAt(x: number, y: number): number {
+    const w = this.depthAt(x, y + 1);
+    if (w === 1) return 0.5; if (w === 2) return 0.25;
+    const b = BUSHES[this.objLayer()?.getTileAtWorldXY(x, y + 1)?.index ?? -1];
+    return (b ?? 1) * this.soilAt(x, y);
+  }
+  /**
+   * Other beings and the ground: after each creature has chosen where to go, mud, brush and water slow it as they slow you;
+   * in deep water it swims, and if it stays under too long it drowns. Fliers, shades and creatures of the water go as they please.
+   */
+  footing(a: Animal, dt: number) {
+    if (a.state === "dead" || a.state === "gone" || !a.sprite.active || a.def.flies || SURE_FOOTED.has(a.kind)) return;
+    const s = a.sprite, v = (s.body as Phaser.Physics.Arcade.Body).velocity;
+    // If something else set its pace since last frame (a bolt, a knock-back, a wall), take that as what it means to go.
+    if (Math.abs(v.x - a.gApplied.x) > 0.01 || Math.abs(v.y - a.gApplied.y) > 0.01) { a.gBase.x = v.x; a.gBase.y = v.y; }
+    const w = this.depthAt(s.x, s.y + 5);
+    const f = this.groundFactorAt(s.x, s.y + 4);
+    s.setVelocity(a.gBase.x * f, a.gBase.y * f); a.gApplied.x = v.x; a.gApplied.y = v.y;
+    if (w !== a.wet) { a.wet = w; if (w) s.setCrop(0, 0, s.width, s.height - (w === 2 ? 7 : 3)); else s.setCrop(); }
+    if (w !== 2 || BREATHLESS.has(a.kind)) { a.breath = Math.max(0, a.breath - dt * 2); return; }
+    // Out of its depth: it can hold its breath about as long as you can, then the water takes it a little at a time.
+    a.breath += dt;
+    if (a.breath < 8) return;
+    if ((a.drownT -= dt) > 0) return;
+    a.drownT = 1.5;
+    if (a.hp < 0) a.hp = QUARRY[a.kind]?.hp ?? 2;
+    a.hp -= 1; s.setTint(0x8ab0d0); this.time.delayedCall(200, () => s.active && a.state !== "dead" && s.clearTint());
+    if (a.hp <= 0) this.drowned(a);
+  }
+  /**
+   * A companion's step: the ground slows them as it slows you, and they wade the shallows with you,
+   * but won't follow you out of your depth; they wait at the water's edge (if they are already in deep water, they swim for it).
+   */
+  companionStep(s: Phaser.GameObjects.Sprite, vx: number, vy: number, dt: number): [number, number] {
+    const f = this.groundFactorAt(s.x, s.y + 4); vx *= f; vy *= f;
+    const nx = s.x + vx * dt, ny = s.y + vy * dt;
+    const here = this.depthAt(s.x, s.y + 5);
+    if (here < 2 && this.depthAt(nx, ny + 5) === 2) { vx = 0; vy = 0; }
+    else { s.x = nx; s.y = ny; }
+    const w = this.depthAt(s.x, s.y + 5), wet = (s as unknown as { wet?: number }).wet ?? 0;
+    if (w !== wet) { (s as unknown as { wet?: number }).wet = w; if (w) s.setCrop(0, 0, s.width, s.height - (w === 2 ? 7 : 3)); else s.setCrop(); }
+    return [vx, vy];
+  }
+  /** A creature (or a brigand) that stayed too long in deep water goes under, and is not seen again. */
+  drowned(a: Animal) {
+    a.state = "dead"; a.sprite.setVelocity(0, 0);
+    const near = Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 220;
+    if (near) G.say(`The ${a.kind === "brigand" ? "brigand" : beast(a.kind)} goes under, and drowns.`);
+    this.creatureEvent?.(a, "slain");
+    this.tweens.add({ targets: a.sprite, alpha: 0, y: a.sprite.y + 4, duration: 1400, onComplete: () => { a.sprite.destroy(); const i = this.animals.indexOf(a); if (i >= 0) this.animals.splice(i, 1); } });
   }
   swimming = false; drownT = 0;
   /** Seconds you've stood still; the clock-hour of your last splash in the shallows; whether you've been told about resting. */
@@ -2428,12 +2484,12 @@ abstract class PlayScene extends Phaser.Scene {
         else this.petBite(goal, tm?.bite ?? 1);
       }
     } else if (c.stay) { vx = 0; vy = 0; }
-    else if (dist > 260) { s.setPosition(this.player.x - 14, this.player.y + 6); }
+    else if (dist > 260 && this.depthAt(this.player.x - 14, this.player.y + 11) < 2) { s.setPosition(this.player.x - 14, this.player.y + 6); }
     else if (dist > 22) {
       const sp = Math.min(160, Math.max(def.walk * 2.5, 70) * (dist > 80 ? 1.8 : 1));
       vx = (this.player.x - s.x) / dist * sp; vy = (this.player.y + 4 - s.y) / dist * sp;
     }
-    s.x += vx * dt; s.y += vy * dt;
+    [vx, vy] = this.companionStep(s, vx, vy, dt);
     const moving = Math.abs(vx) + Math.abs(vy) > 1;
     if (moving) { p.animT += dt * def.frameRate; s.setFrame(Math.floor(p.animT) % 2); if (Math.abs(vx) > 1) s.setFlipX(vx < 0); } else s.setFrame(0);
     s.setDepth(s.y);
@@ -2531,7 +2587,7 @@ abstract class PlayScene extends Phaser.Scene {
           const ang = (this.facing === 1 ? 0 : this.facing === 2 ? Math.PI : this.facing === 3 ? Math.PI / 2 : -Math.PI / 2) + (k % 2 ? 0.7 : -0.7);
           const gx = this.player.x + Math.cos(ang) * (22 + 8 * Math.floor(k / 2)), gy = this.player.y + 4 + Math.sin(ang) * (16 + 6 * Math.floor(k / 2));
           const d = Math.hypot(gx - s.x, gy - s.y);
-          if (d > 260) s.setPosition(gx, gy);
+          if (d > 260 && this.depthAt(gx, gy + 5) < 2) s.setPosition(gx, gy);
           else if (d > 6) { const sp = Math.min(150, d > 60 ? 120 : 75); vx = (gx - s.x) / d * sp; vy = (gy - s.y) / d * sp; }
         }
         k++;
@@ -2545,7 +2601,7 @@ abstract class PlayScene extends Phaser.Scene {
           else { m.tx = Phaser.Math.Clamp(s.x + (Math.random() - 0.5) * 90, 3 * TILE, 45 * TILE); m.ty = Phaser.Math.Clamp(s.y + (Math.random() - 0.5) * 60, 12 * TILE, 28 * TILE); }
         }
       }
-      s.x += vx * dt; s.y += vy * dt;
+      [vx, vy] = this.companionStep(s, vx, vy, dt);
       const moving = Math.abs(vx) + Math.abs(vy) > 1;
       if (moving) { m.animT += dt; m.facing = Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 1 : 2) : vy < 0 ? 3 : 0; }
       const pose = moving ? [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(m.animT / 0.14) % 4] : POSE.stand;
@@ -2792,6 +2848,7 @@ abstract class PlayScene extends Phaser.Scene {
       }
       // The dead shrink from fire: they come at you, but will not cross into the light of a campfire or a torch.
       if (a.kind === "eidolon" && a.state !== "dead" && a.state !== "gone") this.shunLight(a, lights);
+      this.footing(a, dt);
     }
     else for (const a of this.animals) a.sprite.setVelocity(0, 0);
   }
@@ -5958,9 +6015,11 @@ class WildScene extends PlayScene {
     const w = this.underfoot();
     if (w === 1) return 0.5; // wading
     if (w === 2) return 0.25; // swimming
-    const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE);
-    const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
-    const shod = G.gear.feet;
+    return this.soilAt(this.player.x, this.player.y + 4, G.gear.feet);
+  }
+  soilAt(x: number, y: number, shod = 0) {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(x, y)?.index;
     return t === T.MUD ? [0.7, 0.75, 0.85][shod] : t === T.SAND ? [0.88, 0.92, 0.96][shod] : 1;
   }
   onRoad() { const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE); return (this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index) === T.PATH; }
@@ -8323,7 +8382,7 @@ class UIScene extends Phaser.Scene {
       "Each land has a landmark: things to find (restocked each season), often a cache to search, and its own dangers.",
       "Far out lie citadels of the heroes' age, three screens by three, walled with Cyclopean stone; and off the coasts, row on into the open sea to find its isles. Both go in your journal's Places.",
       "Somewhere out there are Delphi, where the Pythia speaks Apollo's oracles to the clean, once a month, and Knossos, Minos' palace, with the Labyrinth beneath it. Take a torch, and Ariadne's thread.",
-      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
+      "Shallows: wade at half pace. Deep water: swim at a quarter, and every stroke costs Air; when it's gone you drown. Beasts, brigands and folk are slowed and drowned by the same ground and water (birds, shades and sea creatures aside); companions wade with you but wait at the edge of deep water. A boat (workbench) rows in strokes, and along rivers and coasts from map to map. Rivers usually have a ford.",
       "Far out, monsters wander rarely. Caves need a torch or lamp (dark: every action -3).",
       "A Naiad's spring and a satyr band are out there: appease them on separate days.",
       "The dead walk at night at crossroads and graveyards; on Noumenia, the first of the month, they gather.",

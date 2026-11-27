@@ -68,6 +68,11 @@ const rand = (a: number, b: number) => a + Math.random() * (b - a);
  * and (if wild) bolts when the player comes too close. Birds take flight together
  * and settle somewhere else a little later.
  */
+/** Creatures that fly, float or belong to the water: the ground does not slow them, and they do not drown. */
+export const SURE_FOOTED = new Set<string>(["eidolon", "lampad", "bat", "strix", "stymphalian", "siren", "crab"]);
+/** Things that do not breathe: slowed by the water, but it cannot drown them. */
+export const BREATHLESS = new Set<string>(["skeleton", "minotaur"]);
+
 export class Animal {
   sprite: Phaser.Physics.Arcade.Sprite;
   state: "idle" | "walk" | "flee" | "gone" | "dead" | "charge" | "recoil" = "idle";
@@ -83,6 +88,8 @@ export class Animal {
   decide?: (a: Animal) => void;
   strikes?: (a: Animal) => void;
   hp = -1; // set from the quarry table on the first hit
+  /** Footing: the pace it means to go (before mud, brush or water slows it), what was last applied, and its breath in deep water. */
+  gBase = { x: 0, y: 0 }; gApplied = { x: 0, y: 0 }; breath = 0; drownT = 0; wet = 0;
   timer: number;
   tx = 0; ty = 0;
   animT = 0;
