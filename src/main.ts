@@ -4122,7 +4122,7 @@ class HouseScene extends PlayScene {
     this.clock += dt;
     const dn = this.dayness(), grey = G.data.weather === "rain" ? 0.12 : G.data.weather === "cloudy" ? 0.06 : 0, t = this.clock;
     const rt = this.dark;
-    rt.clear(); rt.fill(0x120904, Math.min(0.84, 0.16 + (1 - dn) * 0.66 + grey * dn));
+    rt.clear(); rt.fill(0x120904, Math.min(0.62, 0.05 + (1 - dn) * 0.55 + grey * dn)); // light by day, warm and dim (not black) by night, as outdoors
     const cut = (x: number, y: number, r: number, a: number) => { if (a > 0.02) rt.stamp("softLight", undefined, x, y, { scale: r / 64, alpha: Math.min(1, a), erase: true }); };
     const fl = 1 + 0.05 * Math.sin(t * 7.3) + 0.03 * Math.sin(t * 13.1) + 0.03 * (Math.random() - 0.5);
     cut(HEARTH.x, HEARTH.y + 6, 104 * fl, 0.9); cut(HEARTH.x, HEARTH.y + 4, 56 * fl, 1);

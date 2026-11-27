@@ -74,59 +74,54 @@ const sh = (c: Ctx, x: number, y: number, w: number, a = 0.22) => { px(c, x + 1,
 function drawRoom(c: Ctx) {
   const PW = HOME.W * 16, PH = HOME.H * 16, img = c.createImageData(PW, PH), d = img.data;
   const put = (x: number, y: number, [r, g, b]: number[], k = 1) => { const i = (y * PW + x) * 4; d[i] = Math.max(0, Math.min(255, r * k)); d[i + 1] = Math.max(0, Math.min(255, g * k)); d[i + 2] = Math.max(0, Math.min(255, b * k)); d[i + 3] = 255; };
-  const earth = hex("#9a7450"), earthHi = hex("#ad8660"), earthLo = hex("#86643f"), plaster = hex("#e2d2b0"), thatch = hex("#6e5532"), wallTop = hex("#b7a27c"), stone = hex("#a39b8a");
+  const earth = hex("#9a7450"), earthHi = hex("#a47c56"), plaster = hex("#e2d2b0"), thatch = hex("#6e5532"), wallTop = hex("#b7a27c"), stone = hex("#a39b8a");
   const doorX = HOME.DOOR * 16;
+  // Flat colors, like the tiles outdoors: a few calm tones, no grain.
   for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
-    const n = hsh(x, y, 1), n2 = hsh(x >> 2, y >> 2, 2);
     const side = x < 16 || x >= PW - 16, front = y >= PH - 16 && !(x >= doorX && x < doorX + 16);
-    if (side || front) { // wall tops, seen from above: mudbrick under a skin of plaster
-      const course = ((y >> 2) + ((x >> 3) & 1)) & 1;
-      put(x, y, wallTop, 0.92 + n * 0.12 - (course ? 0.03 : 0) - ((y & 3) === 0 ? 0.05 : 0));
+    if (side || front) { // wall tops, seen from above: plastered mudbrick, in courses
+      put(x, y, wallTop, (y & 7) === 0 ? 0.9 : 1);
     } else if (y < 10) { // the reed thatch above, in shadow
-      const stripe = Math.sin(x * 0.9 + n2 * 3) > 0.55 ? 1.18 : 1;
-      put(x, y, thatch, (0.55 + y * 0.05) * stripe * (0.9 + n * 0.2));
+      put(x, y, thatch, (x + (y >> 1)) % 6 === 0 ? 0.62 : 0.7);
     } else if (y < 48) { // the back wall: plaster
-      put(x, y, plaster, 0.95 + n * 0.06 + (n2 - 0.5) * 0.06 - Math.max(0, (16 - y) * 0.012));
+      put(x, y, plaster, y < 14 ? 0.9 : 1);
     } else if (y >= PH - 16) { // the doorway: daylight on the threshold
-      put(x, y, hex("#d6c49a"), 0.9 + n * 0.12);
-    } else { // the floor: packed earth, worn smooth between the door and the hearth
-      const worn = Math.max(0, 1 - Math.abs(x - (doorX + 8)) / 30) * (y > 80 ? 1 : 0.4) + Math.max(0, 1 - Math.hypot(x - 52, y - 84) / 26) * 0.6;
-      const col = n2 > 0.72 ? earthLo : n2 < 0.18 ? earthHi : earth;
-      let k = 0.94 + n * 0.12 + worn * 0.08;
-      k -= Math.max(0, (56 - y)) * 0.022; // the back wall's shadow
-      k -= Math.max(0, 22 - x) * 0.014 + Math.max(0, x - (PW - 22)) * 0.014; // and the side walls'
-      k -= Math.max(0, y - (PH - 22)) * 0.012;
-      put(x, y, col, k);
+      put(x, y, hex("#d6c49a"), 1);
+    } else { // the floor: packed earth, one flat tone like the paths outside, a little darker along the walls, worn lighter from door to hearth
+      const edge = y < 52 || x < 20 || x >= PW - 20 ? 0.9 : 1;
+      const worn = Math.abs(x - (doorX + 8)) < 10 && y > 100;
+      put(x, y, worn ? earthHi : earth, edge);
     }
   }
   c.putImageData(img, 0, 0);
-  // Flagstones before the hearth.
-  for (let y = 48; y < 96; y += 9) for (let x = 112 + ((y / 9) & 1 ? 0 : 5); x < 192; x += 11) {
-    const w = 9 + Math.floor(hsh(x, y, 3) * 3), h = 7 + Math.floor(hsh(x, y, 4) * 2), fade = y > 84 ? 0.75 : 1;
-    if (Math.hypot(x + w / 2 - 152, (y + h / 2 - 60) * 1.5) > 46) continue;
-    px(c, x, y, w, h, `rgba(120,112,98,${fade})`); px(c, x + 1, y + 1, w - 2, h - 2, `rgba(${158 + Math.floor(hsh(x, y, 5) * 16)},${150 + Math.floor(hsh(x, y, 5) * 14)},${134 + Math.floor(hsh(x, y, 5) * 12)},${fade})`);
-    px(c, x + 1, y + 1, w - 2, 1, `rgba(190,182,166,${fade * 0.7})`);
-  }
-  // Straw and rushes scattered on the floor.
-  for (let i = 0; i < 70; i++) {
-    const x = 20 + Math.floor(hsh(i, 7, 6) * (PW - 40)), y = 52 + Math.floor(hsh(i, 8, 6) * (PH - 72)), l = 2 + Math.floor(hsh(i, 9, 6) * 3);
+  // Specks of grit and a few pebbles, sparse as the specks in the grass outside.
+  for (let i = 0; i < 90; i++) {
+    const x = 20 + Math.floor(hsh(i, 3, 7) * (PW - 40)), y = 54 + Math.floor(hsh(i, 4, 7) * (PH - 74));
     if (x > 110 && x < 196 && y < 92) continue;
-    const col = hsh(i, 1, 6) < 0.5 ? "rgba(214,188,112,0.8)" : "rgba(184,154,88,0.7)";
-    if (hsh(i, 2, 6) < 0.5) px(c, x, y, l, 1, col); else for (let k = 0; k < l; k++) px(c, x + k, y + (k >> 1), 1, 1, col);
+    px(c, x, y, 1, 1, hsh(i, 5, 7) < 0.5 ? "#86643f" : "#b08a64");
+  }
+  // Flagstones before the hearth: plain, even slabs.
+  for (let y = 50; y < 94; y += 10) for (let x = 112 + ((y / 10) & 1 ? 0 : 6); x < 192; x += 12) {
+    if (Math.hypot(x + 5 - 152, (y + 4 - 60) * 1.5) > 46) continue;
+    px(c, x, y, 11, 9, "#857c6c"); px(c, x + 1, y + 1, 9, 7, "#a39a88"); px(c, x + 1, y + 1, 9, 1, "#b8b09e");
+  }
+  // A little straw strewn by the bed and the door.
+  for (let i = 0; i < 12; i++) {
+    const x = 24 + Math.floor(hsh(i, 7, 6) * (PW - 48)), y = 60 + Math.floor(hsh(i, 8, 6) * (PH - 84));
+    if (x > 110 && x < 196 && y < 92) continue;
+    px(c, x, y, 3, 1, "#c8aa66");
   }
   // The wall: red-ochre dado, a stone socle, timber posts, the ceiling beam, a crack or two.
   px(c, 16, 35, PW - 32, 1, "#7e3a24"); px(c, 16, 36, PW - 32, 3, "#9c4a2e"); px(c, 16, 39, PW - 32, 1, "#7e3a24");
-  for (let x = 16; x < PW - 16; x++) if (hsh(x, 36, 9) < 0.18) px(c, x, 36 + Math.floor(hsh(x, 1, 9) * 3), 1, 1, "#b06040");
   for (let x = 16, k = 0; x < PW - 16; k++) {
     const w = 7 + Math.floor(hsh(k, 1, 10) * 6);
-    px(c, x, 40, w, 8, "#8f8676"); px(c, x + 1, 40, w - 1, 7, `rgb(${160 + Math.floor(hsh(k, 2, 10) * 18)},${152 + Math.floor(hsh(k, 2, 10) * 16)},${136 + Math.floor(hsh(k, 2, 10) * 14)})`);
+    px(c, x, 40, w, 8, "#8f8676"); px(c, x + 1, 40, w - 1, 7, k % 2 ? "#a49c8a" : "#aca492");
     px(c, x + 1, 40, w - 1, 1, "#c2baa8"); x += w;
   }
   px(c, 16, 47, PW - 32, 1, "#6e665a");
   for (const x of [88, 184, 250]) { px(c, x - 2, 10, 5, 30, "#5e4026"); px(c, x - 2, 10, 1, 30, "#7a5a33"); px(c, x + 2, 10, 1, 30, "#4a3220"); px(c, x - 3, 38, 7, 2, "#4a3220"); }
   px(c, 16, 8, PW - 32, 5, "#5e4026"); px(c, 16, 8, PW - 32, 1, "#7f5c38"); px(c, 16, 12, PW - 32, 1, "#3e2a18");
   for (let x = 30; x < PW - 20; x += 34) { px(c, x, 0, 6, 8, "#4a3220"); px(c, x, 0, 1, 8, "#5e4026"); } // rafters going back
-  for (const [x, y, l] of [[118, 18, 6], [270, 24, 5], [40, 26, 4]] as number[][]) for (let k = 0; k < l; k++) px(c, x + (k % 2), y + k, 1, 1, "#b8a888");
   // Side walls: their inner edge, and the corners where they meet the back wall.
   for (const x of [15, PW - 16]) { px(c, x, 0, 1, PH - 16, "#8a7a5c"); }
   px(c, 16, 10, 2, 38, "rgba(0,0,0,0.12)"); px(c, PW - 18, 10, 2, 38, "rgba(0,0,0,0.12)");
