@@ -85,7 +85,7 @@ function laborCost(effort: number, aretai: string): [keyof typeof G.essence, num
 }
 /**
  * Pay for a piece of work: Essence from the element of the Aretai it tests, cheaper the more skilled you are
- * and in the matching hour, plus Fatigue. When the element runs dry you must wait for it to refill.
+ * and in the matching hour, plus Energy. When the element runs dry you must wait for it to refill.
  */
 function labor(effort: number, fatigue: number, aretai: string): string | null {
   if (G.exhausted) { G.say("You are too exhausted to work. Rest."); return null; }
@@ -238,7 +238,7 @@ function eatHeld() {
   s.qty--; if (s.qty <= 0) G.data.slots[i] = null;
   const v0 = G.data.vitality; G.heal(3 + 3 * q);
   G.eatMeal(id, e); G.addFatigue(-(4 + 4 * q)); SOUND.sfx("pickup");
-  G.say(`${named ? named.eaten : `You eat the ${ITEMS[id].name.toLowerCase()}.`} (${effectText(e)}; ${G.data.vitality > v0 ? `Vitality +${Math.round(G.data.vitality - v0)}, ` : ""}Fatigue −${4 + 4 * q}.)`);
+  G.say(`${named ? named.eaten : `You eat the ${ITEMS[id].name.toLowerCase()}.`} (${effectText(e)}; ${G.data.vitality > v0 ? `Vitality +${Math.round(G.data.vitality - v0)}, ` : ""}Energy +${4 + 4 * q}.)`);
 }
 
 function give(id: string, qty: number, q?: number): string {
@@ -708,13 +708,13 @@ abstract class PlayScene extends Phaser.Scene {
   campSleep() {
     const hours = G.sleepHours, rec = Math.min(G.data.fatigue, hours * 12 * 0.5);
     const early = G.isDay && G.data.clock < G.daylight - 2 ? "\nIt is still day: the rest of today will pass, and only the night's sleep counts." : "";
-    ui(this).choose(`Sleep here by the fire until dawn?${early}\n\nThe ground is hard: about ${hours.toFixed(1)} hours of rough sleep, clearing ${Math.round(rec)} Fatigue (half what a bed gives). You will wake here.`, () => ui(this).sleep(this, false, undefined, true));
+    ui(this).choose(`Sleep here by the fire until dawn?${early}\n\nThe ground is hard: about ${hours.toFixed(1)} hours of rough sleep, restoring ${Math.round(rec)} Energy (half what a bed gives). You will wake here.`, () => ui(this).sleep(this, false, undefined, true));
   }
   /** Sleep in your tent: nearly a bed's rest (all of it with a cloak for a blanket), and you wake here. */
   tentSleep() {
     const hours = G.sleepHours, credit = G.gear.blanket ? 0.95 : 0.85, rec = Math.min(G.data.fatigue, hours * 12 * credit);
     const early = G.isDay && G.data.clock < G.daylight - 2 ? "\nIt is still day: the rest of today will pass, and only the night's sleep counts." : "";
-    ui(this).choose(`Crawl into the tent and sleep until dawn?${early}\n\nAbout ${hours.toFixed(1)} hours of sleep on the bedroll, clearing ${Math.round(rec)} Fatigue. You will wake here.`, () => ui(this).sleep(this, false, undefined, "tent"));
+    ui(this).choose(`Crawl into the tent and sleep until dawn?${early}\n\nAbout ${hours.toFixed(1)} hours of sleep on the bedroll, restoring ${Math.round(rec)} Energy. You will wake here.`, () => ui(this).sleep(this, false, undefined, "tent"));
   }
   /** A snare set for at least a night has had its chance: d12 ≤ Oikos + 2, and Artemis' favor. */
   resolveSnare(p: Placed) {
@@ -878,7 +878,7 @@ abstract class PlayScene extends Phaser.Scene {
       break;
     }
   }
-  /** Harm from no creature (lightning, fever, falling rocks): Fatigue, and if spent, you fall. */
+  /** Harm from no creature (lightning, fever, falling rocks): Energy lost, and if spent, you fall. */
   harm(dmg: number, what: string, cause: string, body = false) {
     if (this.leaving) return;
     this.stillT = 0; // no catching your breath while something is biting you
@@ -892,7 +892,7 @@ abstract class PlayScene extends Phaser.Scene {
       return;
     }
     G.addFatigue(dmg); // fevers, chills, malaise: they wear you down
-    G.say(`${what} (+${dmg} Fatigue)`);
+    G.say(`${what} (−${dmg} Energy)`);
     if (G.data.fatigue >= 100) this.struckDown(cause);
   }
   /** Hades holds back the shears: at +12 always, or once after you've called on him. */
@@ -1123,12 +1123,12 @@ abstract class PlayScene extends Phaser.Scene {
       case "healing": {
         if (G.data.vitality >= G.vitalityMax && tier < 3) { G.say("You have no wounds that need it."); return; }
         use(); const v0 = G.data.vitality; G.heal(tier === 3 ? G.vitalityMax : Math.ceil(G.vitalityMax * tier / 3)); if (tier === 3) G.addFatigue(-20);
-        G.say(`You smear the salve into your wounds. It stings, then soothes. (Vitality +${Math.round(G.data.vitality - v0)}${tier === 3 ? ", Fatigue −20" : ""})`);
+        G.say(`You smear the salve into your wounds. It stings, then soothes. (Vitality +${Math.round(G.data.vitality - v0)}${tier === 3 ? ", Energy +20" : ""})`);
         return;
       }
       case "cleansing": {
         use(); const h = [12, 24, 48][tier - 1]; buff.pure = until(h); if (tier === 3) G.addFatigue(-15);
-        G.say(`You drink it down: bitter, cold, clean. You are pure for the rites for ${h} hours: offerings please the gods 1 more, and the Arts come easier (CR −2).${tier === 3 ? " (Fatigue −15)" : ""}`);
+        G.say(`You drink it down: bitter, cold, clean. You are pure for the rites for ${h} hours: offerings please the gods 1 more, and the Arts come easier (CR −2).${tier === 3 ? " (Energy +15)" : ""}`);
         return;
       }
       case "sleep": {
@@ -1168,7 +1168,7 @@ abstract class PlayScene extends Phaser.Scene {
       case "courage": {
         use(); const gains: [string, number][] = tier === 1 ? [["Thymos", 1]] : tier === 2 ? [["Thymos", 2]] : [["Thymos", 2], ["Kratos", 1]];
         G.drinkDraught(gains, tier === 1 ? 6 : 12); if (tier === 3) G.addFatigue(-15);
-        G.say(`You drink the hero's draught. Fire goes down your throat and into your arms. (${gains.map(([a, n]) => `${a} +${n}`).join(", ")} for ${tier === 1 ? 6 : 12} hours${tier === 3 ? "; Fatigue −15" : ""})`);
+        G.say(`You drink the hero's draught. Fire goes down your throat and into your arms. (${gains.map(([a, n]) => `${a} +${n}`).join(", ")} for ${tier === 1 ? 6 : 12} hours${tier === 3 ? "; Energy +15" : ""})`);
         return;
       }
       case "venom": {
@@ -1220,8 +1220,8 @@ abstract class PlayScene extends Phaser.Scene {
       case "dawn": {
         G.addFatigue(-25); const ctx = this.artCtx(); G.data.dawnSpot = ctx.spotKey;
         const st = (G.data.dawnStreak ??= { n: 0, last: -9 }); st.n = st.last === G.dayNumber - 1 ? st.n + 1 : 1; st.last = G.dayNumber;
-        if (st.n % 7 === 0) { const v = G.addFavor("Apollo", 1, 6); return `Fatigue −25. Seven mornings running: Apollo, the sun, knows your face now. (Apollo ${v >= 0 ? "+" : ""}${v})`; }
-        return `Fatigue −25. (${st.n} morning${st.n > 1 ? "s" : ""} running.)`;
+        if (st.n % 7 === 0) { const v = G.addFavor("Apollo", 1, 6); return `Energy +25. Seven mornings running: Apollo, the sun, knows your face now. (Apollo ${v >= 0 ? "+" : ""}${v})`; }
+        return `Energy +25. (${st.n} morning${st.n > 1 ? "s" : ""} running.)`;
       }
       case "panic": {
         let n = 0;
@@ -1399,7 +1399,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.tweens.add({ targets: t, y: t.y - 8, alpha: 0, duration: 900, onComplete: () => t.destroy() });
   }
 
-  /** A creature lands a blow: Fatigue, a knock back, and if you were already spent, you fall. */
+  /** A creature lands a blow: Energy lost, a knock back, and if you were already spent, you fall. */
   struck(a: Animal) {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
@@ -1521,7 +1521,7 @@ abstract class PlayScene extends Phaser.Scene {
     const until = (h: number) => G.absHour + h, buff = G.data.songBuff;
     const ghost = (a: Animal) => a.kind === "eidolon" || a.kind === "lampad";
     switch (id) {
-      case "work": { const f = strong ? 18 : 10; G.addFatigue(-f); G.essence.Earth = G.essenceMax.Earth; return `The work goes easier. (Fatigue −${f}, Earth restored.)`; }
+      case "work": { const f = strong ? 18 : 10; G.addFatigue(-f); G.essence.Earth = G.essenceMax.Earth; return `The work goes easier. (Energy +${f}, Earth restored.)`; }
       case "shepherd": {
         const calmed = this.near(strong ? 220 : 150, (a) => !isMonster(a.kind) && !ghost(a) && SPECIES[a.kind].aggression > 0 && !a.appeased);
         for (const a of calmed) this.quiet(a);
@@ -1560,7 +1560,7 @@ abstract class PlayScene extends Phaser.Scene {
         if (G.count("jar")) G.data.jarWater = jarCap(); G.essence.Water = G.essenceMax.Water;
         return "Water answers the song: your jar is full, and your Water restored.";
       }
-      case "revel": { G.essence.Fire = G.essenceMax.Fire; G.essence.Air = G.essenceMax.Air; G.addFatigue(-15); buff["favor:Dionysus"] = until(strong ? 8 : 4); return `Joy runs through you like wine: Fire and Air full, weariness gone (Fatigue −15), and Dionysus near you for ${strong ? 8 : 4} hours.`; }
+      case "revel": { G.essence.Fire = G.essenceMax.Fire; G.essence.Air = G.essenceMax.Air; G.addFatigue(-15); buff["favor:Dionysus"] = until(strong ? 8 : 4); return `Joy runs through you like wine: Fire and Air full, weariness gone (Energy +15), and Dionysus near you for ${strong ? 8 : 4} hours.`; }
       case "nightingale": buff.charm = until(12); return "Something sweet lingers about you: for half a day, people will warm to you more (+1 when you chat or give).";
       case "lark": buff.lark = until(strong ? 6 : 3); return `Your feet feel light: running costs half the breath for ${strong ? 6 : 3} hours.`;
       case "cicadas": buff.muse = until(strong ? 6 : 3); return `The Muses lean close: for ${strong ? 6 : 3} hours every song comes easier (+2).`;
@@ -1769,7 +1769,7 @@ abstract class PlayScene extends Phaser.Scene {
     picked[s.k] = G.dayNumber; G.markFresh(d.item);
     // The mandrake screams as it comes up: the root-cutters dig it by night, and stop their ears.
     if (d.id === "mandrake") {
-      if (G.isDay) { G.addFatigue(15); SOUND.sfx("hurt"); G.say("The root comes up screaming, a thin, terrible shriek that goes through your skull. (+15 Fatigue) The root-cutters dig it by night."); }
+      if (G.isDay) { G.addFatigue(15); SOUND.sfx("hurt"); G.say("The root comes up screaming, a thin, terrible shriek that goes through your skull. (−15 Energy) The root-cutters dig it by night."); }
       else { const v = G.addFavor("Hecate", 1, 4); G.say(`You dig it by night, as the root-cutters do, and its scream is only a whisper in the dark. (Hecate ${v >= 0 ? "+" : ""}${v})`); }
     }
     G.say(`You gather from the ${name}: ${give(d.item, d.qty + mastery(d.id))}${b}`);
@@ -4193,7 +4193,7 @@ class HouseScene extends PlayScene {
     const hours = G.sleepHours;
     const rec = Math.min(G.data.fatigue, hours * 12);
     const early = G.isDay && G.data.clock < G.daylight - 2 ? "\nIt is still day: the rest of today will pass, and only the night's sleep counts." : "";
-    ui(this).choose(`Sleep until dawn?${early}\n\nAbout ${hours.toFixed(1)} hours of real sleep, which would clear ${Math.round(rec)} Fatigue.`, () => ui(this).sleep(this, false));
+    ui(this).choose(`Sleep until dawn?${early}\n\nAbout ${hours.toFixed(1)} hours of real sleep, which would restore ${Math.round(rec)} Energy.`, () => ui(this).sleep(this, false));
   }
 
   tendHearth() {
@@ -5209,7 +5209,7 @@ class WildScene extends PlayScene {
     const opts: { label: string; fn: () => void }[] = [];
     if (s.marks!.rest !== today) opts.push({ label: "Rest in her grotto", fn: () => {
       s.marks!.rest = today; G.addFatigue(-100); G.heal(99); G.essence = { ...G.essenceMax };
-      again("You sleep on fleeces by a fire of cedar and citron-wood, and wake whole. (Rested: Fatigue, Vitality and Essence restored)");
+      again("You sleep on fleeces by a fire of cedar and citron-wood, and wake whole. (Rested: Energy, Vitality and Essence restored)");
     } });
     if (!s.treasury) opts.push({ label: "Ask her for a parting gift", fn: () => {
       s.treasury = true;
@@ -5220,7 +5220,7 @@ class WildScene extends PlayScene {
       s.marks!.cup = today;
       if (G.count("Moly") > 0 || G.crownHas("laurel")) { G.earn("Kleos", 1, "you drank Circe's cup unchanged"); const v = G.addFavor("Hermes", 1, 6); again(`You drink. Nothing happens. She stares at you, then at the moly at your belt, and laughs, delighted. "Hermes' doing! Well. You must be the clever one they told me of." (Hermes ${v >= 0 ? "+" : ""}${v})`); return; }
       u.closeTalk(); G.addFatigue(40); G.data.clock = Math.min(G.data.clock + 3, 23.5);
-      G.say("The wine is sweet, and then the world tilts. You come to yourself hours later, on all fours in her sty, rooting among the acorns, with a nose too short and a voice that won't make words. Then it passes. She is laughing. (Time passes; +40 Fatigue. Moly, they say, protects against her.)");
+      G.say("The wine is sweet, and then the world tilts. You come to yourself hours later, on all fours in her sty, rooting among the acorns, with a nose too short and a voice that won't make words. Then it passes. She is laughing. (Time passes; −40 Energy. Moly, they say, protects against her.)");
     } });
     if (who === "Calypso") opts.push({ label: "Ask her the way home", fn: () => again(`"Home! Always home. I could make you deathless, and you'd still sit on the shore and weep for a stony farm." She sighs. "East, and then the way you came."`) });
     const greet = who === "Circe" ? `A woman with heavy braided hair sits weaving at a loom in the grotto's mouth, singing. Wolves and lions lie about her like dogs. "A guest! Come in, sit, drink."`
@@ -5871,7 +5871,7 @@ class WildScene extends PlayScene {
     if (hut.hosted !== today) opts.push({ label: "Accept their hospitality", fn: () => {
       hut.hosted = today;
       G.data.fatigue = Math.max(0, G.data.fatigue - 30); G.essence = { ...G.essenceMax };
-      u.showTalk(kind.title, names, "They sit you by the fire and put bread, olives and something warm in front of you. You eat, and rest a while. (Fatigue -30, Essence full.)", [{ label: "Back", fn: again }]);
+      u.showTalk(kind.title, names, "They sit you by the fire and put bread, olives and something warm in front of you. You eat, and rest a while. (Energy +30, Essence full.)", [{ label: "Back", fn: again }]);
     } });
     const held = G.selectedItem;
     const food = held && (ITEMS[held.id].kind === "crop" || ["Milk", "Honey", "Meat", "Grapes", "Wine", "WildGrapes", "Plum", "Cornel", "Mint", "Thyme"].includes(held.id));
@@ -6192,7 +6192,7 @@ class WildScene extends PlayScene {
     opts.push({ label: "Wrestle him for honor (Kratos)", fn: () => {
       const k = G.data.aretai.Kratos ?? 3, roll = 1 + Math.floor(Math.random() * 12);
       if (roll <= k) { G.earn("Kleos", 1, "you threw a centaur"); leave(`You catch him off balance and throw him on his flank! ${name} roars with laughter and gives you the win (d12 ${roll}, needed 1–${k}).`); }
-      else { G.addFatigue(15); leave(`${name} lifts you off your feet and drops you in the bracken, laughing (d12 ${roll}, needed 1–${k}; +15 Fatigue). "Another day, little two-legs."`); }
+      else { G.addFatigue(15); leave(`${name} lifts you off your feet and drops you in the bracken, laughing (d12 ${roll}, needed 1–${k}; −15 Energy). "Another day, little two-legs."`); }
     } });
     opts.push({ label: "Nod, and let him go his way", fn: () => leave(`${name} tosses his head and canters off among the trees.`) });
     u.showTalk(G.lore("centaur") >= 1 ? "A centaur" : "A horse-man", "Half man, half stallion, sharp-eyed and half-amused",
@@ -6223,7 +6223,7 @@ class WildScene extends PlayScene {
     G.addFatigue(20); G.heal(-8);
     this.tweens.add({ targets: a.sprite, alpha: 0, duration: 800, onComplete: () => { a.state = "dead"; a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1); } });
     this.cameras.main.flash(500, 120, 20, 30);
-    G.say(`You wake alone among the trampled flowers, cold and weak, with two small wounds at your throat. (−8 Vitality, +20 Fatigue)${G.lore("empousa") < 1 ? "" : " An empousa."}`);
+    G.say(`You wake alone among the trampled flowers, cold and weak, with two small wounds at your throat. (−8 Vitality, −20 Energy)${G.lore("empousa") < 1 ? "" : " An empousa."}`);
     if (G.data.vitality <= 0) this.struckDown(a);
   }
 
@@ -7055,7 +7055,7 @@ class WildScene extends PlayScene {
           const tl = (G.data.aretai.Logos ?? 3) + 2 + G.boon("Athena");
           opts.push({ label: "Hear them both out, and judge (Logos)", fn: () => {
             const r = G.grace("Zeus") >= 7 ? 1 : d12(); // the Lawgiver's word carries
-            if (r > tl) { G.addFatigue(5); again(`You listen, and ask, and listen, and by the end they are both shouting at you instead of each other. (d12 ${r}, needed 1–${tl}; +5 Fatigue)`); return; }
+            if (r > tl) { G.addFatigue(5); again(`You listen, and ask, and listen, and by the end they are both shouting at you instead of each other. (d12 ${r}, needed 1–${tl}; −5 Energy)`); return; }
             g.done.judged = today; const v = G.addFavor("Zeus", 1, 6); G.data.silver += 5; G.earn("Kleos", 1, "you judged a boundary quarrel");
             u.closeTalk(); G.say(`You walk the line with them, find the old hole where the stone stood, and set it back. They grumble, and then they shake hands, and press 5 silver on you for your trouble. (d12 ${r}, needed 1–${tl}; Zeus of boundaries ${v >= 0 ? "+" : ""}${v}; +5 silver)`);
             this.time.delayedCall(2000, () => { if (!g.gone) this.wayLeave(g); });
@@ -7073,7 +7073,7 @@ class WildScene extends PlayScene {
       case "camp": {
         if (g.done.sat !== today) opts.push({ label: "Sit by their fire a while", fn: () => {
           g.done.sat = today; G.addFatigue(-20); G.heal(4); G.essence = { ...G.essenceMax };
-          again(`They make room for you on the log. Someone hands you bread and a cup; someone else tells a story about a one-eyed giant that you're fairly sure isn't true. (Fatigue −20, Vitality +4, Essence full)`);
+          again(`They make room for you on the log. Someone hands you bread and a cup; someone else tells a story about a one-eyed giant that you're fairly sure isn't true. (Energy +20, Vitality +4, Essence full)`);
         } });
         share("Zeus", 6, "You add your share to the common pot, as a guest should. Zeus Xenios sees it.");
         if (G.data.songs.length && g.done.sang === undefined) opts.push({ label: "Sing them a song", fn: () => {
@@ -8218,7 +8218,7 @@ class UIScene extends Phaser.Scene {
     this.patron = this.add.text(24, 70, "", { ...font, fontSize: "13px", color: "#e0d2b4", wordWrap: { width: 380 } });
     this.place = this.add.text(16, 110, "", { ...font, fontSize: "14px", color: "#f2e6c9", stroke: "#1f1712", strokeThickness: 4 });
 
-    // Fatigue and Essence, top right.
+    // Energy and Essence, top right.
     this.add.rectangle(W - 312, 12, 300, 108, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
     this.bars = this.add.graphics();
     this.thread = this.add.text(W - 16, 146, "", { ...font, fontSize: "13px", color: "#e8c0b0", stroke: "#1f1712", strokeThickness: 4 }).setOrigin(1, 0);
@@ -8286,7 +8286,7 @@ class UIScene extends Phaser.Scene {
       "",
       "PACING",
       "Every action draws Essence from its Aretai's element: fighting and heavy labor burn Fire; field work, making and calming use Earth; study and wit Water; aim, song and running Air. Skill makes each act cheaper, and so does the matching god's hour. An empty bar refills in about 12 seconds (slower when weary).",
-      "Work builds Fatigue; each hour of sleep clears about 12%. Stay up past the second watch and you collapse. A campfire (12 Fiber, 4 Stone, by hand) lets you sleep out for half a bed's rest. Your life is saved each dawn.",
+      "Work spends Energy; each hour of sleep restores about 12% of it. Stay up past the second watch, or run your Energy dry, and you collapse. A campfire (12 Fiber, 4 Stone, by hand) lets you sleep out for half a bed's rest. Your life is saved each dawn.",
       "",
       "FIGHTING AND HUNTING",
       "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
@@ -8453,7 +8453,8 @@ class UIScene extends Phaser.Scene {
     const vt = `${Math.ceil(G.data.vitality)} / ${G.vitalityMax}`;
     this.vitText ??= this.add.text(x + 175, y0 - 1, "", { fontFamily: FONT, fontSize: "10px", color: "#fff4e8", stroke: "#1f1712", strokeThickness: 3 }).setOrigin(0.5, 0);
     if (this.vitText.text !== vt) this.vitText.setText(vt);
-    bar("Fatigue", y0 + 16, G.data.fatigue / 100, G.exhausted ? 0xb02a3a : 0xc98e62);
+    const energy = 1 - G.data.fatigue / 100; // shown as Energy, full when rested (the save keeps fatigue: 0 is rested)
+    bar("Energy", y0 + 16, energy, energy <= 0.25 ? 0xd0503a : 0xe0b048); // gold, turning red when it runs low
     bar("Earth", y0 + 32, G.essence.Earth / G.essenceMax.Earth, 0x6fae52);
     bar("Water", y0 + 48, G.essence.Water / G.essenceMax.Water, 0x3fa9a0);
     bar("Air", y0 + 64, G.essence.Air / G.essenceMax.Air, 0xc9c4e8);
@@ -8665,7 +8666,7 @@ class UIScene extends Phaser.Scene {
     const rec = festRec(f), held = G.selectedItem, opts: { label: string; fn: () => void }[] = [];
     if (!rec.rite) opts.push({ label: "Join the rite and the procession", fn: () => {
       rec.rite = 1; G.addFatigue(-10); const after = G.addFavor(f.god, 1, 6); G.note("festRite");
-      this.festivalMenu(f, `${f.rite} You walk with the village, and sing, and the god is honored. (${f.god} ${after >= 0 ? "+" : ""}${after}; Fatigue −10.)`);
+      this.festivalMenu(f, `${f.rite} You walk with the village, and sing, and the god is honored. (${f.god} ${after >= 0 ? "+" : ""}${after}; Energy +10.)`);
     } });
     const edible = held && (INGREDIENTS[held.id] || ITEMS[held.id].kind === "meal" || ["Flowers", "Wine", "Grapes"].includes(held.id));
     if (!rec.feast) opts.push({ label: edible ? `Bring your ${ITEMS[held!.id].name.toLowerCase()} to the feast` : `Bring something to the feast (best: ${f.feastWord})`, fn: () => {
@@ -8918,7 +8919,7 @@ class UIScene extends Phaser.Scene {
         "\"The best treasure a man has is a sparing tongue.\"",
         "\"When the Pleiades rise, reap. When they set, plough.\"",
       ];
-      this.talkTiresias(`You sit with him a while in the sun. Neither of you says much. Then:\n\n${says[(today + t.step) % says.length]}\n\n(You rest: Fatigue −6.)`);
+      this.talkTiresias(`You sit with him a while in the sun. Neither of you says much. Then:\n\n${says[(today + t.step) % says.length]}\n\n(You rest: Energy +6.)`);
     } });
     if (!step && t.ev.counsel !== today) opts.push({ label: "Ask what tomorrow brings", fn: () => {
       t.ev.counsel = today;
@@ -9342,7 +9343,7 @@ class UIScene extends Phaser.Scene {
     };
     const boon = (boons[st.god] ?? boons.Zeus)();
     G.earn("Kleos", 1, `you hosted ${st.god} unknowing`);
-    this.talkToStranger(`As you set the food before them, the stranger straightens, and grows tall, and the light changes. It is ${st.god}! ${boon}\n\n(Favor with ${st.god} +${2 * twice}, with Zeus +${twice}. Your Fatigue eases and your Essence fills.)`);
+    this.talkToStranger(`As you set the food before them, the stranger straightens, and grows tall, and the light changes. It is ${st.god}! ${boon}\n\n(Favor with ${st.god} +${2 * twice}, with Zeus +${twice}. Your Energy returns and your Essence fills.)`);
     G.data.stranger = { ...st, god: "", hosted: true }; // the god departs; the bench is empty in spirit
   }
 
@@ -9402,7 +9403,7 @@ class UIScene extends Phaser.Scene {
         const odds = `(d12 ${roll}, needed 1–${target})`;
         if (roll <= target) this.appeaseMyth(id, id === "naiad" ? `You sit by the water and pray without words. After a long while she sits beside you. ${odds}` : `You leap into the ring and somehow keep the step. The satyrs roar with delight. ${odds}`);
         else if (id === "naiad") { m.gone = today; this.closeTalk(); G.say(`Your prayer stumbles, and when you look up she is gone beneath the water. ${odds}`); }
-        else { G.addFatigue(8); m.last = today; this.talkToMyth(id, `You trip over a hoof and land in the grass. The satyrs howl with laughter and won't stop. (+8 Fatigue) ${odds}`); }
+        else { G.addFatigue(8); m.last = today; this.talkToMyth(id, `You trip over a hoof and land in the grass. The satyrs howl with laughter and won't stop. (−8 Energy) ${odds}`); }
       } });
     }
     if (id === "satyrs" && rung >= 2 && !G.data.arts.includes("panic")) opts.push({ label: "Ask them about Pan's terror", fn: () => {
@@ -9410,7 +9411,7 @@ class UIScene extends Phaser.Scene {
       this.talkToMyth(id, `They go quiet, which is frightening in itself. Then ${m.name} grins. "The goat-foot's own trick! When something hunts you in the wild, be the thing that hunts. Pipes at your belt, a fistful of wild herbs, and all your fear thrown outward at once. Best at noon, far from any house. But Pan's terror goes where it likes." They all shudder happily.\n\n(You learn Wild Panic. Press R for the Arts. It costs Hubris.)`);
     } });
     if (rung >= 3 && m.gift !== today) {
-      if (id === "naiad") opts.push({ label: "Bathe in the spring", fn: () => { m.gift = today; G.addFatigue(-40); this.talkToMyth(id, "You bathe in the cold, clear water, and come out feeling new. (-40 Fatigue)"); } });
+      if (id === "naiad") opts.push({ label: "Bathe in the spring", fn: () => { m.gift = today; G.addFatigue(-40); this.talkToMyth(id, "You bathe in the cold, clear water, and come out feeling new. (+40 Energy)"); } });
       else opts.push({ label: "Share their feast", fn: () => {
         m.gift = today;
         const gifts: [string, number][] = [["WildGrapes", 3], ["Honey", 1], ["Ivy", 2]];
@@ -9607,7 +9608,7 @@ class UIScene extends Phaser.Scene {
     const stat = (y: number, label: string, val: string, color = "#f2e6c9") => { root.add(this.add.text(x0 + 24, y, label, { ...font, fontSize: "12px", color: "#c9b48f" })); root.add(this.add.text(x0 + 218, y, val, { ...font, fontSize: "13px", color }).setOrigin(1, 0)); };
     let sy = y0 + 270;
     stat(sy, "Vitality", `${Math.ceil(G.data.vitality)} / ${G.vitalityMax}`, "#e8a090"); sy += 18;
-    stat(sy, "Fatigue", `${Math.round(G.data.fatigue)} / 100`); sy += 18;
+    stat(sy, "Energy", `${Math.round(100 - G.data.fatigue)} / 100`); sy += 18;
     stat(sy, "Life Thread", `${G.data.lifeThread} of ${START_LIFE_THREAD}`, "#e8c0b0"); sy += 18;
     stat(sy, "Health · Stealth", `${G.data.health} · ${G.data.stealth}${G.gear.stealth ? ` (${G.stealthNow(false)} in your gear)` : ""}`); sy += 18;
     stat(sy, "Essence (E W A F)", (["Earth", "Water", "Air", "Fire"] as const).map((k) => Math.round(G.essenceMax[k])).join(" · ")); sy += 18;
@@ -10193,7 +10194,7 @@ class UIScene extends Phaser.Scene {
     const learnt = newHerbs.length ? ` You learn what ${newHerbs.map((id) => ITEMS[id].name.toLowerCase()).join(", ")} ${newHerbs.length > 1 ? "do" : "does"}: ${newHerbs.map((id) => `${ITEMS[id].name} (${UIScene.aspectText(id)})`).join("; ")}.` : "";
     if (!tier) {
       let fumes = "";
-      if (b.toxic && d12() <= 4) { G.addFatigue(15); G.heal(-2); fumes = " Bitter fumes come off the mess and make your head swim. (+15 Fatigue, −2 Vitality)"; }
+      if (b.toxic && d12() <= 4) { G.addFatigue(15); G.heal(-2); fumes = " Bitter fumes come off the mess and make your head swim. (−15 Energy, −2 Vitality)"; }
       SOUND.sfx("hurt");
       G.say(`The brew goes wrong: it turns muddy and smells of nothing good. You throw it out. (${shown})${fumes}${learnt}`);
     } else {
@@ -10526,7 +10527,7 @@ class UIScene extends Phaser.Scene {
       `Dawn. ${G.dateLabel()}`,
       `${G.moon}`,
       "",
-      `${hoursSlept.toFixed(1)} hours of sleep${collapsed || camp === true ? " (poor rest: less of it counts)" : camp === "tent" ? " (in the tent)" : ""}, ${Math.round(recovered)} Fatigue cleared${healed >= 1 ? `, ${Math.round(healed)} Vitality healed` : ""}.`,
+      `${hoursSlept.toFixed(1)} hours of sleep${collapsed || camp === true ? " (poor rest: less of it counts)" : camp === "tent" ? " (in the tent)" : ""}, ${Math.round(recovered)} Energy restored${healed >= 1 ? `, ${Math.round(healed)} Vitality healed` : ""}.`,
       ...notes,
       saved ? "Your life is saved." : "(This browser would not let the game save.)",
       "",

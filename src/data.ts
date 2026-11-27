@@ -82,7 +82,7 @@ export const ELEMENT_OF: Record<string, "Earth" | "Water" | "Air" | "Fire"> = {
  * Pacing. Every action tests one Aretai and draws on that Aretai's element. Its Essence cost is its effort,
  * scaled by your skill: 9 / (Aretai + 6), so effort 3 costs 3 at Aretai 3, 2.25 at 6 and 1.5 at 12.
  * Your pool (the sum of the element's three Aretai) holds a few actions; it refills from empty in
- * ESSENCE.refillSeconds, more slowly as Fatigue mounts.
+ * ESSENCE.refillSeconds, more slowly as Energy runs low.
  */
 export const ESSENCE = { refillSeconds: 12, tiredSlowdown: 0.4, runPerSecond: 2, runPerTap: 0.8 };
 export const EFFORT = {
@@ -110,7 +110,7 @@ export function essencePools(a: Record<string, number>) {
 export const DAYLIGHT_REAL_SECONDS = 600;
 // Night is divided into three watches; the player collapses at the end of the second.
 export const NIGHT_WATCHES_PLAYABLE = 2;
-// Sleep clears this share of Fatigue per clock hour slept.
+// Sleep restores this share of Energy (clears this much fatigue) per clock hour slept.
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----

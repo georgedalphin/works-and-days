@@ -179,10 +179,10 @@ for (const id of ["Poppy", "Garlic"]) {
 export interface RemedyDef { id: string; aspect: Aspect; name: string; greek: string; verb: string; desc: string; tiers: [string, string, string] }
 export const REMEDIES: Record<Aspect, RemedyDef> = {
   healing: { id: "pharm_healing", aspect: "healing", name: "Healing salve", greek: "malagma", verb: "Smear it on your wounds",
-    desc: "A salve of wound-herbs in honey.", tiers: ["Vitality +⅓", "Vitality +⅔", "All Vitality back, and Fatigue −20"] },
+    desc: "A salve of wound-herbs in honey.", tiers: ["Vitality +⅓", "Vitality +⅔", "All Vitality back, and Energy +20"] },
   cleansing: { id: "pharm_cleansing", aspect: "cleansing", name: "Purifying draught", greek: "katharmos", verb: "Drink it",
     desc: "Bitter and clean: it washes miasma from body and soul, as is proper before the rites.",
-    tiers: ["Pure for half a day: offerings please the gods 1 more, and Arts' CRs are 2 lower", "Pure for a day", "Pure for two days, and Fatigue −15"] },
+    tiers: ["Pure for half a day: offerings please the gods 1 more, and Arts' CRs are 2 lower", "Pure for a day", "Pure for two days, and Energy +15"] },
   sleep: { id: "pharm_sleep", aspect: "sleep", name: "Sleeping draught", greek: "hypnotikon", verb: "Drink it, or blow it in a creature's face",
     desc: "Poppy-tears and sleep-roots. Drunk before bed, you sleep deep; blown at a beast close by, it lies down and sleeps.",
     tiers: ["Sleep tonight rests you wholly; a beast near you sleeps", "As before; a larger beast too", "As before; even a monster sleeps, and sleep tonight heals you wholly"] },
@@ -196,7 +196,7 @@ export const REMEDIES: Record<Aspect, RemedyDef> = {
     desc: "Rose and sweet roots: not to force anyone's heart, but to open it a little. People warm to you.",
     tiers: ["For 12 hours: +1 when you chat or give", "For a day: +1, and gifts +1 more", "For two days: +2, and gifts +1 more"] },
   courage: { id: "pharm_courage", aspect: "courage", name: "Hero's draught", greek: "pharmakon thymou", verb: "Drink it",
-    desc: "Strong, hot and herbal. Fear goes out of you.", tiers: ["Thymos +1 for 6 hours", "Thymos +2 for 12 hours", "Thymos +2 and Kratos +1 for 12 hours, Fatigue −15"] },
+    desc: "Strong, hot and herbal. Fear goes out of you.", tiers: ["Thymos +1 for 6 hours", "Thymos +2 for 12 hours", "Thymos +2 and Kratos +1 for 12 hours, Energy +15"] },
   venom: { id: "pharm_venom", aspect: "venom", name: "Arrow poison", greek: "toxikon", verb: "Coat your arrows and javelins with it",
     desc: "The word toxic comes from it: the archers' poison. A poisoned beast weakens and falls. (Brewing it is no light thing: +1 Hubris.)",
     tiers: ["Your next 6 shots are poisoned: a hit costs the beast one more wound, soon after", "The next 10 shots", "The next 16 shots, and each poisoned wound hurts twice"] },

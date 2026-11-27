@@ -116,9 +116,9 @@ ARTS.dawn = {
     { id: "sameSpot", label: "The place you greeted it last time", cr: -2 },
   ],
   location: { label: "Outdoors at sunrise", cr: 0 },
-  effect: "You begin the day blessed: yesterday's weariness gone (Fatigue −25), and today's work tires you less. Seven mornings running, and Apollo, who is the sun here, notices (+1).",
+  effect: "You begin the day blessed: yesterday's weariness gone (Energy +25), and today's work tires you less. Seven mornings running, and Apollo, who is the sun here, notices (+1).",
   days: 1,
-  failure: { text: "Groggy despite the early hour: Fatigue +15.", likelihood: 3 },
+  failure: { text: "Groggy despite the early hour: Energy −15.", likelihood: 3 },
 };
 
 ARTS.panic = {
@@ -144,7 +144,7 @@ ARTS.panic = {
   location: { label: "The wild", cr: 0 },
   effect: "Panic: every creature near you, beast, monster or man, breaks and flees, and those that were coming for you won't come back. (+1 Hubris)",
   days: 0,
-  failure: { text: "The terror takes you too: you bolt in blind fright (Fatigue +20), and whatever was coming for you is not frightened at all.", likelihood: 5 },
+  failure: { text: "The terror takes you too: you bolt in blind fright (Energy −20), and whatever was coming for you is not frightened at all.", likelihood: 5 },
 };
 
 ARTS.solar = {

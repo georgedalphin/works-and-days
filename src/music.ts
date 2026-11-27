@@ -44,7 +44,7 @@ export type SongSource = "taught" | "heard";
 export interface Melody { id: string; name: string; mode: number; notes: number[]; god: string; source: SongSource; teacher: string; desc: string; hard: number }
 export const MELODIES: Melody[] = [
   // Taught by people.
-  { id: "work", name: "Work song", mode: 0, notes: [1, 3, 1, 3, 5, 3], god: "Demeter", source: "taught", teacher: "Lykos the smith, who keeps time with his hammer", desc: "A song to keep time by. It eases Fatigue and refills your Earth.", hard: 0 },
+  { id: "work", name: "Work song", mode: 0, notes: [1, 3, 1, 3, 5, 3], god: "Demeter", source: "taught", teacher: "Lykos the smith, who keeps time with his hammer", desc: "A song to keep time by. It restores Energy and refills your Earth.", hard: 0 },
   { id: "shepherd", name: "Shepherd's call", mode: 5, notes: [5, 3, 5, 3, 1], god: "Hermes", source: "taught", teacher: "shepherds and goatherds in the wild", desc: "Animals settle at it: angry beasts nearby calm, and your goats grow fonder of you.", hard: 0 },
   { id: "lullaby", name: "Lullaby", mode: 2, notes: [5, 4, 3, 2, 1, 2, 1], god: "Aphrodite", source: "taught", teacher: "Theron the miller, who sang his grandson to sleep", desc: "Calms an angry creature that has come for you, as Orpheus calmed the beasts.", hard: 0 },
   { id: "rowers", name: "Rowers' chant", mode: 0, notes: [1, 1, 5, 1, 1, 5], god: "Poseidon", source: "taught", teacher: "Eudora the innkeeper, who hears the sailors sing it, and fisher folk", desc: "Keeps the stroke: rowing is swifter for a few hours.", hard: 0 },
