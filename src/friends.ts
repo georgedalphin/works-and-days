@@ -18,6 +18,8 @@ export interface Friend {
   with?: boolean;
   chore?: Chore;
   since: number;
+  /** People of the road follow you only a while: the day they'll go back to the road (gone if they settle with you). */
+  until?: number;
 }
 export type Chore = "fields" | "goats" | "forage" | "hearth" | "trade";
 export const CHORE_NAME: Record<Chore, string> = {
@@ -89,5 +91,7 @@ export const TRADE_WORK: Record<string, { give?: [string, number]; fatigue?: num
 /** What someone foraging nearby might bring in, by season. */
 export const NEAR_FORAGE: Record<string, string[]> = { Spring: ["Purslane", "Flowers", "Mint"], Summer: ["Thyme", "Capers", "Plum"], Autumn: ["Mushrooms", "WildGrapes", "Cornel"], Winter: ["Mushrooms", "Thyme", "Fiber"] };
 
+/** How many days someone of the road walks with you before the road calls them back: 3, longer with more Phoenix (up to 7). */
+export const roadDays = (phoenix: number) => Math.min(7, 3 + Math.floor(Math.max(0, phoenix - 3) / 2));
 /** Closeness needed: to be asked for help (close friend), to marry (beloved). */
 export const FRIEND_REL = 8, MARRY_REL = 12;

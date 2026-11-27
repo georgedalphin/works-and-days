@@ -3,7 +3,7 @@ import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } fro
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
 import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, knossosLayoutGrand, creteAt, pickKnossosScreen, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
 import { GRACES, TAMABLE, PET_NAMES } from "./graces";
-import { FOLK_TASTES, BIG_QUESTS, ROAD_ASKS, CHORE_NAME, FRIEND_REL, MARRY_REL, type Friend, type Chore } from "./friends";
+import { FOLK_TASTES, BIG_QUESTS, ROAD_ASKS, CHORE_NAME, FRIEND_REL, MARRY_REL, roadDays, type Friend, type Chore } from "./friends";
 import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary, type WearSlot } from "./gear";
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
@@ -2286,9 +2286,10 @@ abstract class PlayScene extends Phaser.Scene {
     if (list.length >= cap) { u.showTalk(fr.name, "would come, if you could keep them", `${fr.name} looks at you a long time. "I'd come. But you've people enough depending on you already."\n\n(How many will follow you is your Phoenix less 2: ${cap}${cap === 1 ? " person" : " people"}. You have ${list.length}.)`, [{ label: "I understand", fn: () => onNo() }]); return; }
     const finish = (role: "follow" | "home", chore?: Chore) => {
       fr.role = role; fr.chore = chore; fr.with = role === "follow"; fr.since = G.dayNumber;
+      fr.until = fr.from === "road" && role === "follow" ? G.dayNumber + roadDays(G.data.aretai.Phoenix ?? 3) : undefined;
       list.push(fr); G.npcRec(fr.id).rel = Math.max(G.rel(fr.id), 10);
       onJoin(); u.closeTalk(); this.matesDone = false; for (const m of this.mates) { m.s.destroy(); this.targets = this.targets.filter((t) => t !== m.t); } this.mates = [];
-      G.say(role === "follow" ? `${fr.name} shoulders a pack and falls in beside you. "Lead on." (Talk to ${fr.female ? "her" : "him"} to send ${fr.female ? "her" : "him"} home to your farm, or to change ${fr.female ? "her" : "his"} mind.)` : `${fr.name} will come to your homestead tomorrow and settle in: ${CHORE_NAME[chore!].toLowerCase()}. You'll find ${fr.female ? "her" : "him"} about the farm by day.`);
+      G.say(role === "follow" ? `${fr.name} shoulders a pack and falls in beside you. "Lead on."${fr.until !== undefined ? ` (People of the road don't stay long: ${fr.female ? "she" : "he"}'ll walk with you ${fr.until - G.dayNumber} days, unless ${fr.female ? "she" : "he"} settles on your farm.)` : ""} (Talk to ${fr.female ? "her" : "him"} to send ${fr.female ? "her" : "him"} home to your farm, or to change ${fr.female ? "her" : "his"} mind.)` : `${fr.name} will come to your homestead tomorrow and settle in: ${CHORE_NAME[chore!].toLowerCase()}. You'll find ${fr.female ? "her" : "him"} about the farm by day.`);
     };
     const choose = () => u.showTalk(fr.name, "what should they do?", `"What would you have me do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c], fn: () => finish("home", c) })));
     const opts: { label: string; fn: () => void }[] = [];
@@ -2384,15 +2385,15 @@ abstract class PlayScene extends Phaser.Scene {
     if (f.role === "follow") {
       if (f.with) opts.push({ label: "Go back to the farm and rest", fn: () => { f.with = false; u.closeTalk(); respawn(); G.say(`${f.name} heads off toward your farm. You'll find ${him} there.`); } });
       else opts.push({ label: "Come with me", fn: () => { f.with = true; u.closeTalk(); respawn(); G.say(`${f.name} takes up ${f.female ? "her" : "his"} spear. "Where to?"`); } });
-      opts.push({ label: "Live at the homestead and help instead", fn: () => u.showTalk(f.name, "what should they do?", `"Gladly. What should I do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c], fn: () => { f.role = "home"; f.chore = c; f.with = false; u.closeTalk(); respawn(); G.say(`${f.name} will see to it: ${CHORE_NAME[c].toLowerCase()}.`); } }))) });
+      opts.push({ label: "Live at the homestead and help instead", fn: () => u.showTalk(f.name, "what should they do?", `"Gladly. What should I do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c], fn: () => { f.role = "home"; f.chore = c; f.with = false; f.until = undefined; u.closeTalk(); respawn(); G.say(`${f.name} will see to it: ${CHORE_NAME[c].toLowerCase()}.${f.from === "road" ? ` ${f.female ? "She" : "He"} sets down ${f.female ? "her" : "his"} pack for good: the road can do without ${f.female ? "her" : "him"}.` : ""}`); } }))) });
     } else {
       opts.push({ label: `Change what ${he} does around the homestead`, fn: () => u.showTalk(f.name, "what should they do?", `"What would you have me do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c] + (f.chore === c ? " (now)" : ""), fn: () => { f.chore = c; again(`"I'll see to it." (${CHORE_NAME[c]})`); } }))) });
-      if (f.role === "home" && f.age === "adult") opts.push({ label: "Travel with me instead", fn: () => { f.role = "follow"; f.with = true; f.chore = undefined; u.closeTalk(); respawn(); G.say(`${f.name} puts down ${f.female ? "her" : "his"} work and takes up a spear. "At last."`); } });
+      if (f.role === "home" && f.age === "adult") opts.push({ label: "Travel with me instead", fn: () => { f.role = "follow"; f.with = true; f.chore = undefined; if (f.from === "road") f.until = G.dayNumber + roadDays(G.data.aretai.Phoenix ?? 3); u.closeTalk(); respawn(); G.say(`${f.name} puts down ${f.female ? "her" : "his"} work and takes up a spear. "At last."`); } });
     }
     // Marriage: to someone who is beloved to you, with a garland.
     if (f.role !== "spouse" && !G.spouse && G.rel(f.id) >= MARRY_REL) opts.push({ label: `Ask ${f.name} to marry you${held?.id === "Garland" ? " (offer the garland)" : " (you'll want a garland)"}`, fn: () => {
       if (held?.id !== "Garland") { again(`You open your mouth, and close it again. You can't ask with empty hands: a wedding wants a garland. (Hold a garland, and ask.)`); return; }
-      G.removeItem("Garland", 1); f.role = "spouse"; f.with = false; f.chore = f.chore ?? "hearth";
+      G.removeItem("Garland", 1); f.role = "spouse"; f.with = false; f.chore = f.chore ?? "hearth"; f.until = undefined;
       const h = G.addFavor("Hera", 2, 10), a = G.addFavor("Aphrodite", 1, 10); G.earn("Pathos", 1, "you were married");
       u.closeTalk(); respawn();
       u.showTalk(`${f.name}`, f.female ? "your wife" : "your husband", `${f.name} takes the garland, and laughs, and cries a little, and says yes.\n\nThe village comes out for the wedding: the torches at dusk, the songs on the road, the cart to your door. Hera, who keeps marriages, is glad of it. ${f.name} lives with you now, and keeps the house with you.\n\n(Hera ${h >= 0 ? "+" : ""}${h}, Aphrodite ${a >= 0 ? "+" : ""}${a}, +1 Pathos. Your house counts two more comforts, and ${he} brings you breakfast every morning.)`, []);
@@ -2402,8 +2403,9 @@ abstract class PlayScene extends Phaser.Scene {
       if (f.role === "spouse") G.addFavor("Hera", -3);
       u.changeRel(f.id, -2); respawn(); G.say(`${f.name} gathers ${f.female ? "her" : "his"} things and goes.`);
     }) });
-    const role = f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you: ${CHORE_NAME[f.chore ?? "trade"].toLowerCase()}` : f.with ? "travels with you" : "your companion, resting at the farm";
-    const line = said ?? (f.role === "spouse" ? pick([`"There you are."`, `"Come and sit a while."`, `"The house is quiet without you."`]) : f.role === "home" ? pick([`"Plenty to do around here. I like it."`, `"Good day to you."`, `"The goats are fat and the jars are full."`]) : pick([`"Ready when you are."`, `"Where to?"`, `"I'm with you."`]));
+    const left = f.until !== undefined ? f.until - G.dayNumber : -1;
+    const role = (f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you: ${CHORE_NAME[f.chore ?? "trade"].toLowerCase()}` : f.with ? "travels with you" : "your companion, resting at the farm") + (left >= 0 ? ` · moves on ${left <= 1 ? "tomorrow" : `in ${left} days`}` : "");
+    const line = said ?? (f.role === "spouse" ? pick([`"There you are."`, `"Come and sit a while."`, `"The house is quiet without you."`]) : f.role === "home" ? pick([`"Plenty to do around here. I like it."`, `"Good day to you."`, `"The goats are fat and the jars are full."`]) : (f.until !== undefined && f.until - G.dayNumber <= 1 ? `"The road's calling me again. I'll be gone by morning, I think. Unless you'd have me stay and work your land."` : pick([`"Ready when you are."`, `"Where to?"`, `"I'm with you."`])));
     u.showTalk(f.name, `${f.title} · ${role} · ${relLabel(G.rel(f.id))} (${G.rel(f.id) >= 0 ? "+" : ""}${G.rel(f.id)})`, line, opts);
   }
   /** Blood-Blessed (Ares' grace): the wound bleeds, and a moment later it costs the creature another blow's worth. */
@@ -8786,7 +8788,7 @@ class UIScene extends Phaser.Scene {
     });
     for (const f of G.data.foretold ?? []) places.push(`• Foretold by the Pythia: ${f.text}`);
     const fr = G.data.friends ?? [], cap = G.friendCap;
-    const friendLines = fr.map((f) => `• ${f.name}, ${f.title}: ${f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you (${CHORE_NAME[f.chore ?? "trade"].toLowerCase()})` : f.with ? "travels with you" : "resting at your farm"}.`);
+    const friendLines = fr.map((f) => `• ${f.name}, ${f.title}: ${f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you (${CHORE_NAME[f.chore ?? "trade"].toLowerCase()})` : f.with ? "travels with you" : "resting at your farm"}${f.until !== undefined ? `; goes back to the road ${f.until - G.dayNumber <= 1 ? "tomorrow" : `in ${f.until - G.dayNumber} days`}` : ""}.`);
     const hh = villageHouseholds(G.data.seed);
     for (const [id, q] of Object.entries(G.data.folkQuest ?? {})) {
       if (q.done) continue; const h = hh.find((x) => x.members.some((m) => m.id === id)), m = h?.members.find((x) => x.id === id), bq = h ? BIG_QUESTS[h.trade.id] : undefined; if (!m || !bq) continue;

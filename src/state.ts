@@ -560,6 +560,11 @@ export class GameState {
   get spouse() { return (this.data.friends ?? []).find((f) => f.role === "spouse"); }
   /** The household's work, done before you wake: by the people who live with you. */
   chores(notes: string[]) {
+    // People of the road walk with you only a while, then the road calls them back.
+    for (const f of [...(this.data.friends ?? [])]) if (f.from === "road" && f.role === "follow" && f.until !== undefined && this.dayNumber >= f.until) {
+      this.data.friends = (this.data.friends ?? []).filter((x) => x !== f);
+      notes.push(`${f.name} was gone at first light, back to the road, as wanderers go. ${f.female ? "She" : "He"} left a word for you with the morning: luck on your road.`);
+    }
     for (const f of this.data.friends ?? []) {
       if (f.role === "follow") continue;
       const c = f.chore ?? (f.role === "spouse" ? "hearth" : "trade");
