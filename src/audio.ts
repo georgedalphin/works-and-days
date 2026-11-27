@@ -154,6 +154,73 @@ export class SoundScape {
     const o = osc("sine", freq * 2, g); o.frequency.setValueAtTime(freq * 1.9, t); o.frequency.exponentialRampToValueAtTime(freq * 2.15, t + dur * 0.4); o.frequency.exponentialRampToValueAtTime(freq * 2, t + dur);
     env(0.02, 0.08 * vol, dur * 0.5);
   }
+  // ---------------------------------------------------------------- the opening theme (the title screen)
+  theme?: GainNode; themeUntil = 0;
+  /** Reed pipes, scheduled: a nearly pure tone with breath around it and a slow vibrato. */
+  pipe(freq: number, when: number, dur: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!, g = ctx.createGain(), lp = ctx.createBiquadFilter();
+    lp.type = "lowpass"; lp.frequency.value = freq * 3; lp.connect(g); g.connect(dest);
+    const os = [ctx.createOscillator(), ctx.createOscillator()];
+    os[0].type = "sine"; os[0].frequency.value = freq; os[1].type = "triangle"; os[1].frequency.value = freq * 2;
+    const og = ctx.createGain(); og.gain.value = 0.08; os[0].connect(lp); os[1].connect(og); og.connect(lp);
+    const v = ctx.createOscillator(), vg = ctx.createGain(); v.frequency.value = 4.5; vg.gain.setValueAtTime(0, when); vg.gain.linearRampToValueAtTime(freq * 0.006, when + Math.min(0.6, dur)); v.connect(vg); for (const o of os) vg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(vol, when + 0.07); g.gain.setValueAtTime(vol, when + Math.max(0.08, dur - 0.2)); g.gain.linearRampToValueAtTime(0.0001, when + dur);
+    for (const o of [...os, v]) { o.start(when); o.stop(when + dur + 0.05); }
+    this.noiseHit(when, freq * 2, Math.min(0.25, dur), vol * 0.25, dest, "bandpass", 3); // the breath at the start
+  }
+  /** A held drone: two soft sines under the music, swelling in and fading. */
+  droneNote(freq: number, when: number, dur: number, vol: number, dest: AudioNode) {
+    const ctx = this.ctx!, g = ctx.createGain(), lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 600; lp.connect(g); g.connect(dest);
+    for (const [m, t, l] of [[1, "sine", 1], [1.5, "sine", 0.45], [2, "triangle", 0.12]] as [number, OscillatorType, number][]) {
+      const o = ctx.createOscillator(), og = ctx.createGain(); o.type = t; o.frequency.value = freq * m * (1 + rand(-0.001, 0.001)); og.gain.value = l; o.connect(og); og.connect(lp); o.start(when); o.stop(when + dur + 0.1);
+    }
+    g.gain.setValueAtTime(0.0001, when); g.gain.linearRampToValueAtTime(vol, when + Math.min(3, dur / 3)); g.gain.setValueAtTime(vol, when + dur * 0.7); g.gain.linearRampToValueAtTime(0.0001, when + dur);
+  }
+  /**
+   * The opening theme: about twenty-five seconds in the old mode the lyre always plays in (E, with F and C
+   * natural: what the ancients called the Dorian). A drone and the wind; a rolled lyre chord; then the reed pipes
+   * sing three short phrases over plucked chords, the last falling home; a frame drum, a last chord, and quiet.
+   */
+  overture() {
+    if (!this.ctx || this.ctx.state !== "running" || !this.musicOn) return;
+    const ctx = this.ctx, t0 = ctx.currentTime + 0.15, b = 0.78; // seventy-odd beats a minute
+    this.stopOverture(true);
+    const out = (this.theme = this.bus(0.95));
+    const at = (beat: number) => t0 + beat * b;
+    const roll = (notes: number[], beat: number, vol: number, len = 3.2) => notes.forEach((n, i) => this.pluck(midi(n), at(beat) + i * 0.07, vol, out, len));
+    // The drone, and the first chord.
+    this.droneNote(midi(40), at(0), b * 32, 0.07, out);
+    roll([40, 47, 52, 55, 59, 64], 1, 0.16, 4);
+    // The tune: [note, beats], three phrases.
+    const tune: [number, number][] = [
+      [64, 1], [67, 1], [69, 1.5], [67, 0.5], [65, 1], [64, 2], [0, 1],
+      [64, 1], [67, 1], [69, 1], [71, 1], [72, 1.5], [71, 0.5], [69, 2], [0, 1],
+      [71, 1], [69, 0.5], [67, 0.5], [65, 1], [67, 1], [64, 3.5],
+    ];
+    let beat = 4;
+    for (const [n, d] of tune) { if (n) this.pipe(midi(n + 12), at(beat), d * b * 0.98, 0.075, out); beat += d; }
+    const end = beat;
+    // The lyre under it: a chord's notes, picked out on each beat (E, then A, C, E; then D, E).
+    const chords: [number, number[]][] = [[4, [40, 52, 55, 59]], [8, [45, 52, 57, 60]], [12, [48, 55, 60, 64]], [16, [45, 57, 60, 64]], [20, [50, 57, 62, 65]], [24, [40, 52, 55, 59]]];
+    for (const [cb, notes] of chords) for (let k = 0; k < 4; k++) if (cb + k < end) this.pluck(midi(notes[k % notes.length]), at(cb + k), k === 0 ? 0.13 : 0.08, out, 2.4);
+    // A frame drum to close, and the last chord ringing out.
+    for (const [db, v] of [[end - 2, 0.12], [end - 1, 0.16], [end - 0.5, 0.1]] as [number, number][]) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = at(db);
+      o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.25); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+      o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.55); this.noiseHit(t, 1500, 0.06, v * 0.25, out);
+    }
+    roll([40, 47, 52, 59, 64, 71, 76], end, 0.15, 5);
+    this.themeUntil = at(end) + 5;
+  }
+  /** Fade the theme out (leaving the title), or cut it at once. */
+  stopOverture(now = false) {
+    const th = this.theme; if (!th || !this.ctx) return;
+    th.gain.setTargetAtTime(0, this.ctx.currentTime, now ? 0.02 : 0.6);
+    setTimeout(() => th.disconnect(), now ? 100 : 3000);
+    this.theme = undefined; this.themeUntil = 0;
+  }
+  get themePlaying() { return !!this.ctx && this.ctx.currentTime < this.themeUntil; }
+
   /** Quiet the background music while you sing or play. */
   duck(on: boolean) { if (this.music && this.ctx) this.music.gain.setTargetAtTime(this.musicOn ? (on ? 0.25 : 0.9) : 0, this.ctx.currentTime, 0.2); }
   /** A frame drum (tympanon): a low thump that drops in pitch, with a slap of skin. */
@@ -181,7 +248,7 @@ export class SoundScape {
   update(dt: number, st: SoundState) {
     if (!this.ctx || this.ctx.state !== "running") return;
     this.st = st;
-    const now = this.ctx.currentTime, out = ["Farm", "Wild", "Village", "Gym"].includes(st.scene), rain = st.weather === "rain";
+    const now = this.ctx.currentTime, out = ["Farm", "Wild", "Village", "Gym", "Title"].includes(st.scene), rain = st.weather === "rain";
     const windy = st.weather === "wind" || [7, 10, 12, 9].includes(st.terrain);
     // Beds.
     this.fade("wind", out ? (windy ? 0.22 : 0.07) : st.scene === "House" ? 0.02 : 0);
@@ -220,7 +287,7 @@ export class SoundScape {
 
     // The calm lyre: a short phrase, then a long quiet; slower and lower by night; silent in danger.
     if (st.festival && st.scene === "Village" && st.day && this.dangerLevel < 0.3) { this.festivalMusic(now); return; }
-    if (this.dangerLevel < 0.3) tick("phrase", st.day ? [8, 18] : [12, 24], () => this.calmPhrase(now + 0.05, st));
+    if (this.dangerLevel < 0.3 && !this.themePlaying) tick("phrase", st.day ? [8, 18] : [12, 24], () => this.calmPhrase(now + 0.05, st));
   }
 
   /** A few notes wandering stepwise in the old mode, now and then a held drone note under them. */

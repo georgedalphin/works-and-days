@@ -2803,44 +2803,212 @@ class BootScene extends Phaser.Scene {
   create() { makeTextures(this); this.scene.start("Title"); }
 }
 
+/** Lines of Hesiod for the title screen (Works and Days, tr. H. G. Evelyn-White, 1914). */
+const HESIOD = [
+  "When the Pleiades, daughters of Atlas, are rising, begin your harvest, and your ploughing when they are going to set.",
+  "Work is no disgrace: it is idleness which is a disgrace.",
+  "First of all, get a house, and a woman and an ox for the plough.",
+  "Observe due measure: moderation is best in all things.",
+];
+const HORIZON = 330;
+
 class TitleScene extends Phaser.Scene {
   starting = false;
+  menu?: Phaser.GameObjects.Container;
+  gate?: Phaser.GameObjects.Text;
+  farewell?: Phaser.GameObjects.Container;
   constructor() { super("Title"); }
-  create() {
-    this.starting = false;
-    const save = GameState.load();
-    this.cameras.main.setBackgroundColor("#1f2a3a");
-    const g = this.add.graphics();
-    g.fillStyle(0xc4703f); // a meander border, after Greek pottery
-    for (const y of [40, H - 56]) for (let x = 0; x < W; x += 24) { g.fillRect(x, y, 20, 4); g.fillRect(x + 16, y, 4, 16); g.fillRect(x + 4, y + 12, 16, 4); g.fillRect(x + 4, y + 6, 4, 10); }
-    this.add.text(W / 2, 200, "Works & Days", { fontFamily: FONT, fontSize: "64px", color: "#f2e6c9" }).setOrigin(0.5);
-    this.add.text(W / 2, 260, "a vertical slice · Milestone 1.1: tools and belongings", { fontFamily: FONT, fontSize: "18px", color: "#c9b48f" }).setOrigin(0.5);
 
+  /** Paint the still layers once: the dawn sky, and the land (hills, temple, sea, fields, olives) over it. */
+  paint() {
+    if (this.textures.exists("titleSky")) return;
+    const sky = this.textures.createCanvas("titleSky", W, H)!, c = sky.getContext();
+    const g = c.createLinearGradient(0, 0, 0, HORIZON + 20);
+    g.addColorStop(0, "#141a33"); g.addColorStop(0.35, "#2e3560"); g.addColorStop(0.62, "#7a5a78"); g.addColorStop(0.82, "#d88a6a"); g.addColorStop(1, "#f6d08e");
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 70; i++) { const y = Math.random() * 150, a = (1 - y / 150) * 0.8; c.fillStyle = `rgba(255,248,230,${a.toFixed(2)})`; c.fillRect(Math.random() * W, y, Math.random() < 0.15 ? 2 : 1, 1); } // the last stars
+    sky.refresh();
+
+    const sun = this.textures.createCanvas("titleSun", 220, 220)!, sc = sun.getContext(), sg = sc.createRadialGradient(110, 110, 0, 110, 110, 110);
+    sg.addColorStop(0, "rgba(255,250,225,1)"); sg.addColorStop(0.16, "rgba(255,236,170,1)"); sg.addColorStop(0.2, "rgba(255,210,140,0.55)"); sg.addColorStop(0.5, "rgba(255,180,110,0.18)"); sg.addColorStop(1, "rgba(255,160,100,0)");
+    sc.fillStyle = sg; sc.fillRect(0, 0, 220, 220); sun.refresh();
+
+    const cl = this.textures.createCanvas("titleCloud", 180, 50)!, cc = cl.getContext();
+    for (const [x, y, r] of [[40, 30, 18], [70, 22, 22], [105, 26, 20], [135, 32, 15], [85, 34, 18]]) { const rg = cc.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, "rgba(255,214,190,0.55)"); rg.addColorStop(1, "rgba(255,214,190,0)"); cc.fillStyle = rg; cc.fillRect(0, 0, 180, 50); }
+    cl.refresh();
+
+    const land = this.textures.createCanvas("titleLand", W, H)!, l = land.getContext();
+    const ridge = (pts: [number, number][], fill: string) => { l.fillStyle = fill; l.beginPath(); l.moveTo(0, H); for (const [x, y] of pts) l.lineTo(x, y); l.lineTo(W, H); l.closePath(); l.fill(); };
+    // Far mountains, blue with distance, and a nearer range.
+    ridge([[0, 270], [70, 238], [140, 262], [230, 214], [310, 250], [390, 232], [470, 262], [560, 226], [650, 256], [740, 218], [820, 246], [900, 228], [960, 252]], "#6a6290");
+    ridge([[0, 300], [90, 284], [180, 300], [260, 282], [350, 304], [440, 290], [520, 306], [600, 296], [700, 300], [960, 304]], "#4e5079");
+    // The sea, catching the dawn, along the left.
+    const sea = l.createLinearGradient(0, HORIZON - 14, 0, HORIZON + 30); sea.addColorStop(0, "#d8a07a"); sea.addColorStop(1, "#5a5a80");
+    l.fillStyle = sea; l.fillRect(0, HORIZON - 14, 620, 44); // runs on under the hill's shoulder
+    // The hill on the right with its temple on top.
+    ridge([[470, 336], [560, 300], [650, 262], [720, 246], [800, 250], [880, 274], [960, 290]], "#3b3f62");
+    const tx = 690, ty = 246; l.fillStyle = "#2c2f4c";
+    l.fillRect(tx, ty - 4, 76, 5); l.fillRect(tx - 3, ty - 7, 82, 4); // steps
+    for (let k = 0; k < 6; k++) l.fillRect(tx + 3 + k * 13, ty - 30, 5, 24); // columns
+    l.fillRect(tx - 2, ty - 35, 80, 5); // architrave
+    l.beginPath(); l.moveTo(tx - 4, ty - 35); l.lineTo(tx + 38, ty - 50); l.lineTo(tx + 80, ty - 35); l.closePath(); l.fill(); // pediment
+    l.fillStyle = "rgba(255,200,140,0.35)"; for (let k = 0; k < 6; k++) l.fillRect(tx + 3 + k * 13, ty - 30, 1, 24); // dawn light on the columns
+    // The fields: the near land, ploughed in long furrows running away to the hills.
+    const field = l.createLinearGradient(0, HORIZON, 0, H); field.addColorStop(0, "#5a5a3a"); field.addColorStop(0.3, "#6a5a34"); field.addColorStop(1, "#2e2818");
+    l.fillStyle = field; l.beginPath(); l.moveTo(0, HORIZON + 30); l.lineTo(470, 336); l.lineTo(960, 300); l.lineTo(W, H); l.lineTo(0, H); l.closePath(); l.fill();
+    l.strokeStyle = "rgba(30,22,12,0.35)"; l.lineWidth = 1;
+    for (let k = -14; k <= 30; k++) { l.beginPath(); l.moveTo(560 + k * 6, 318); l.lineTo(560 + k * 70, H); l.stroke(); }
+    l.fillStyle = "rgba(255,210,150,0.06)"; l.fillRect(0, HORIZON + 30, W, 40); // the low sun across the field
+    // Olive trees, dark against the dawn: grey-green crowns on twisted trunks.
+    const olive = (x: number, y: number, s: number) => {
+      l.fillStyle = "#231c14"; l.beginPath(); l.moveTo(x - 4 * s, y); l.quadraticCurveTo(x - 7 * s, y - 20 * s, x - 2 * s, y - 34 * s); l.lineTo(x + 3 * s, y - 34 * s); l.quadraticCurveTo(x + 7 * s, y - 16 * s, x + 6 * s, y); l.closePath(); l.fill();
+      for (const [dx, dy, r, col] of [[-16, -42, 18, "#28301e"], [10, -48, 20, "#2c3622"], [0, -60, 18, "#323e26"], [-6, -46, 14, "#3e4a30"], [16, -40, 13, "#36422a"]] as [number, number, number, string][]) { l.fillStyle = col; l.beginPath(); l.ellipse(x + dx * s, y + dy * s, r * s, r * s * 0.7, 0, 0, Math.PI * 2); l.fill(); }
+      l.fillStyle = "rgba(255,200,140,0.16)"; l.beginPath(); l.ellipse(x + 6 * s, y - 62 * s, 10 * s, 5 * s, 0, 0, Math.PI * 2); l.fill();
+    };
+    olive(70, H - 40, 2.1); olive(880, H - 60, 1.7); olive(300, 372, 0.8); olive(610, 346, 0.6);
+    land.refresh();
+
+    // The ploughman and his ox, small and dark, two frames of walking.
+    const pl = this.textures.createCanvas("titlePlough", 64, 30)!, pc = pl.getContext();
+    for (const f of [0, 1]) {
+      const o = f * 32, d = (x: number, y: number, w: number, h: number) => pc.fillRect(o + x, y, w, h);
+      pc.fillStyle = "#1c1610";
+      d(1, 12, 12, 6); d(0, 10, 3, 4); d(0, 8, 1, 2); d(3, 8, 1, 2); // the ox: body, head, horns
+      d(2, 18, 1, f ? 5 : 6); d(5, 18, 1, f ? 6 : 5); d(9, 18, 1, f ? 5 : 6); d(12, 18, 1, f ? 6 : 5); d(13, 13, 1, 4); // legs, tail
+      d(13, 16, 8, 1); d(20, 16, 1, 6); d(17, 21, 5, 1); // the beam and the share
+      d(24, 6, 3, 3); d(23, 9, 5, 7); d(23, 16, 2, f ? 7 : 6); d(26, 16, 2, f ? 6 : 7); d(21, 11, 3, 1); // the man, hand on the plough
+      pc.fillStyle = "#e8c890"; d(25, 6, 1, 1); // a glint of dawn on his face
+      pl.add(String(f), 0, o, 0, 32, 30);
+    }
+    pl.refresh();
+  }
+
+  create() {
+    this.starting = false; this.menu = undefined; this.farewell = undefined;
+    const save = GameState.load();
+    this.paint();
+    this.cameras.main.setBackgroundColor("#141a33").fadeIn(900, 20, 26, 51);
+    this.add.image(0, 0, "titleSky").setOrigin(0, 0);
+    // The sun comes up slowly behind the hills; clouds drift; the sea glitters.
+    const sun = this.add.image(318, 300, "titleSun").setBlendMode(Phaser.BlendModes.ADD); // rising in the saddle between two peaks
+    this.tweens.add({ targets: sun, y: 214, duration: 40000, ease: "Sine.easeOut" });
+    for (let i = 0; i < 4; i++) {
+      const cl = this.add.image(Phaser.Math.Between(0, W), Phaser.Math.Between(150, 250), "titleCloud").setAlpha(0.5 + Math.random() * 0.4).setScale(0.8 + Math.random() * 1.2, 0.7 + Math.random() * 0.5);
+      this.tweens.add({ targets: cl, x: cl.x + W + 200, duration: Phaser.Math.Between(80000, 140000), repeat: -1, onRepeat: () => { cl.x = -200; } });
+    }
+    this.add.image(0, 0, "titleLand").setOrigin(0, 0);
+    for (let i = 0; i < 26; i++) {
+      const gl = this.add.rectangle(Phaser.Math.Between(10, 460), Phaser.Math.Between(HORIZON - 12, HORIZON + 26), Phaser.Math.Between(3, 9), 1, 0xfff0c8).setAlpha(0);
+      this.tweens.add({ targets: gl, alpha: { from: 0, to: 0.7 }, duration: Phaser.Math.Between(700, 1400), yoyo: true, repeat: -1, delay: Phaser.Math.Between(0, 3000), repeatDelay: Phaser.Math.Between(400, 2600) });
+    }
+    // The ploughman crosses the field, as he has every spring since Hesiod.
+    const plough = this.add.sprite(W + 40, 368, "titlePlough", "0").setScale(1.6); // far up the field, above the menu
+    let step = 0; this.time.addEvent({ delay: 420, loop: true, callback: () => plough.setFrame(String(step++ % 2)) });
+    this.tweens.add({ targets: plough, x: -80, duration: 90000, repeat: -1 });
+    // Birds going out to the fields, and motes drifting in the low light.
+    this.time.addEvent({ delay: 4200, loop: true, startAt: 3800, callback: () => this.birds() });
+    for (let i = 0; i < 30; i++) {
+      const m = this.add.circle(Math.random() * W, HORIZON + Math.random() * 280, 1, 0xffe6b0).setAlpha(0);
+      this.tweens.add({ targets: m, y: m.y - Phaser.Math.Between(30, 90), x: m.x + Phaser.Math.Between(-20, 20), alpha: { from: 0, to: 0.6 }, duration: Phaser.Math.Between(4000, 8000), yoyo: true, repeat: -1, delay: Math.random() * 6000 });
+    }
+    // The meander borders, after Greek pottery: black and gold.
+    const g = this.add.graphics();
+    for (const y of [0, H - 26]) { g.fillStyle(0x16110c, 0.92); g.fillRect(0, y, W, 26); }
+    g.fillStyle(0xc9963f);
+    for (const y of [5, H - 21]) for (let x = 0; x < W; x += 24) { g.fillRect(x, y, 20, 3); g.fillRect(x + 17, y, 3, 16); g.fillRect(x + 4, y + 13, 16, 3); g.fillRect(x + 4, y + 6, 3, 10); g.fillRect(x + 4, y + 6, 9, 3); }
+    // The title, with the Greek above it.
+    const glow = { fontFamily: FONT, color: "#f6e3b4" };
+    this.add.text(W / 2, 74, "Ε Ρ Γ Α   Κ Α Ι   Η Μ Ε Ρ Α Ι", { ...glow, fontSize: "16px", color: "#e8c890" }).setOrigin(0.5).setAlpha(0.85);
+    this.add.text(W / 2 + 3, 133, "Works & Days", { fontFamily: FONT, fontSize: "76px", color: "#1a1208" }).setOrigin(0.5).setAlpha(0.6);
+    const title = this.add.text(W / 2, 130, "Works & Days", { ...glow, fontSize: "76px" }).setOrigin(0.5).setShadow(0, 0, "#ffc070", 18, false, true);
+    this.tweens.add({ targets: title, alpha: { from: 0.9, to: 1 }, duration: 2600, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    this.add.text(W / 2, 182, "a life of farming, gods and wonders, in the age of heroes", { fontFamily: FONT, fontSize: "17px", color: "#f0d6b0", fontStyle: "italic" }).setOrigin(0.5).setShadow(1, 1, "#000", 3);
+    // A line of Hesiod.
+    const q = HESIOD[Math.floor(Math.random() * HESIOD.length)];
+    this.add.text(W / 2, H - 72, `“${q}”`, { fontFamily: FONT, fontSize: "15px", color: "#f2e0bc", fontStyle: "italic", align: "center", wordWrap: { width: 720 } }).setOrigin(0.5).setShadow(1, 1, "#000", 4);
+    this.add.text(W / 2, H - 44, "Hesiod, Works and Days", { fontFamily: FONT, fontSize: "12px", color: "#c9a878" }).setOrigin(0.5).setShadow(1, 1, "#000", 3);
+    this.add.text(W - 12, H - 33, "Milestone 1", { fontFamily: FONT, fontSize: "10px", color: "#8d7a5a" }).setOrigin(1, 1);
+
+    // Sound may only begin once the player does something: until then, a gentle invitation. Coming back from a game, it's already allowed.
+    const ctx = SOUND.ctx;
+    if (ctx && ctx.state === "running") { this.showMenu(save); SOUND.overture(); }
+    else {
+      this.gate = this.add.text(W / 2, 450, "Click, or press any key, to begin", { fontFamily: FONT, fontSize: "24px", color: "#f6e3b4" }).setOrigin(0.5).setShadow(1, 1, "#000", 4);
+      this.tweens.add({ targets: this.gate, alpha: { from: 1, to: 0.35 }, duration: 1300, yoyo: true, repeat: -1 });
+      const open = (byKey: boolean) => {
+        if (!this.gate) return;
+        SOUND.start(); this.gate.destroy(); this.gate = undefined;
+        this.time.delayedCall(120, () => SOUND.overture());
+        this.showMenu(save, byKey);
+      };
+      this.input.keyboard!.once("keydown", () => open(true)); this.input.once("pointerdown", () => open(false));
+    }
+  }
+
+  birds() {
+    const n = Phaser.Math.Between(2, 5), y0 = Phaser.Math.Between(170, 290), fromLeft = Math.random() < 0.5;
+    for (let i = 0; i < n; i++) {
+      const b = this.add.text(fromLeft ? -20 - i * 18 : W + 20 + i * 18, y0 + (i % 2) * 8 + i * 3, "v", { fontFamily: FONT, fontSize: "14px", color: "#1e1a28" }).setOrigin(0.5);
+      this.tweens.add({ targets: b, scaleY: { from: 1, to: 0.4 }, duration: 260, yoyo: true, repeat: -1 });
+      this.tweens.add({ targets: b, x: fromLeft ? W + 40 : -40, y: b.y - 40, duration: Phaser.Math.Between(14000, 20000), onComplete: () => b.destroy() });
+    }
+  }
+
+  showMenu(save: ReturnType<typeof GameState.load>, byKey = false) {
     const options: { label: string; go: () => void }[] = [];
     if (save) options.push({ label: "Continue", go: () => this.begin(new GameState(save)) });
-    options.push({ label: "New life", go: () => { if (this.starting) return; this.starting = true; this.scene.start("Creation"); } });
-
+    options.push({ label: "New life", go: () => { if (this.starting) return; this.starting = true; SOUND.stopOverture(); this.cameras.main.fadeOut(500, 20, 26, 51); this.time.delayedCall(520, () => this.scene.start("Creation")); } });
+    options.push({ label: "Exit", go: () => this.exit() });
+    const root = (this.menu = this.add.container(0, 0).setAlpha(0));
+    const ph = 34 + options.length * 50, py = 455 - ph / 2;
+    root.add(this.add.rectangle(W / 2, py + ph / 2, 300, ph, 0x120d08, 0.62).setStrokeStyle(1, 0xc9963f, 0.7));
     let sel = 0;
-    const texts = options.map((o, i) =>
-      this.add.text(W / 2, 360 + i * 48, o.label, { fontFamily: FONT, fontSize: "30px", color: "#f2e6c9" })
-        .setOrigin(0.5).setInteractive({ useHandCursor: true })
-        .on("pointerover", () => { sel = i; draw(); })
-        .on("pointerdown", () => o.go()));
-    const draw = () => texts.forEach((t, i) => t.setColor(i === sel ? "#f2c14e" : "#f2e6c9").setText((i === sel ? "›  " : "") + options[i].label));
+    const texts = options.map((o, i) => {
+      const t = this.add.text(W / 2, py + 34 + i * 50, o.label, { fontFamily: FONT, fontSize: "30px", color: "#f2e6c9" }).setOrigin(0.5).setShadow(1, 1, "#000", 3)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerover", () => { if (sel !== i) { sel = i; draw(); SOUND.sfx("talk"); } })
+        .on("pointerdown", () => o.go());
+      root.add(t); return t;
+    });
+    const draw = () => texts.forEach((t, i) => t.setColor(i === sel ? "#f2c14e" : "#f2e6c9").setText(i === sel ? `❧  ${options[i].label}  ` : options[i].label));
     draw();
-    this.input.keyboard!.on("keydown-UP", () => { sel = (sel + options.length - 1) % options.length; draw(); });
-    this.input.keyboard!.on("keydown-DOWN", () => { sel = (sel + 1) % options.length; draw(); });
-    this.input.keyboard!.on("keydown-ENTER", () => options[sel].go());
-    this.input.keyboard!.on("keydown-SPACE", () => options[sel].go());
-    this.add.text(W / 2, H - 100, "Click the game first so it can hear your keys. Your saved life lives in this browser only.", { fontFamily: FONT, fontSize: "14px", color: "#8d877b" }).setOrigin(0.5);
+    this.tweens.add({ targets: root, alpha: 1, duration: 900, delay: 200 });
+    const shownAt = this.time.now, kb = this.input.keyboard!, live = () => !!this.menu && !this.farewell && !this.starting && (!byKey || this.time.now - shownAt > 250); // the key that opened the menu doesn't also choose from it
+    kb.on("keydown-UP", () => { if (!live()) return; sel = (sel + options.length - 1) % options.length; draw(); });
+    kb.on("keydown-DOWN", () => { if (!live()) return; sel = (sel + 1) % options.length; draw(); });
+    kb.on("keydown-ENTER", () => { if (live()) options[sel].go(); });
+    kb.on("keydown-SPACE", () => { if (live()) options[sel].go(); });
+    kb.on("keydown-ESC", () => { if (live()) this.exit(); });
   }
-  /** The title screen has its lyre and a soft wind (once a key or click lets sound begin). */
+
+  /** Leave: the music fades, the screen darkens to a farewell. A browser tab can't always be closed by the page itself, so it says so. */
+  exit() {
+    if (this.farewell) return;
+    SOUND.stopOverture();
+    if (SOUND.music && SOUND.ctx) SOUND.master?.gain.setTargetAtTime(0, SOUND.ctx.currentTime, 0.5);
+    this.menu?.setVisible(false);
+    const root = (this.farewell = this.add.container(0, 0).setAlpha(0).setDepth(50));
+    root.add(this.add.rectangle(0, 0, W, H, 0x0a0806, 0.94).setOrigin(0, 0));
+    root.add(this.add.text(W / 2, H / 2 - 50, "Farewell.", { fontFamily: FONT, fontSize: "44px", color: "#f6e3b4" }).setOrigin(0.5));
+    root.add(this.add.text(W / 2, H / 2 + 10, "Your life is kept safe in this browser: come back to it whenever you like.\nYou can close this tab or window now.", { fontFamily: FONT, fontSize: "17px", color: "#d8c49c", align: "center", lineSpacing: 6 }).setOrigin(0.5));
+    root.add(this.add.text(W / 2, H / 2 + 80, "(Click or press a key to return to the title.)", { fontFamily: FONT, fontSize: "13px", color: "#8d7a5a" }).setOrigin(0.5));
+    this.tweens.add({ targets: root, alpha: 1, duration: 800 });
+    try { window.close(); } catch { /* the page may not close itself */ }
+    this.time.delayedCall(900, () => {
+      const back = () => { if (SOUND.ctx && SOUND.master && !SOUND.muted) SOUND.master.gain.setTargetAtTime(1, SOUND.ctx.currentTime, 0.3); this.scene.restart(); };
+      this.input.keyboard!.once("keydown", back); this.input.once("pointerdown", back);
+    });
+  }
+
+  /** The title screen has its dawn: wind and birds, and the lyre after the theme (once a key or click lets sound begin). */
   update(_t: number, dms: number) { SOUND.update(dms / 1000, { scene: "Title", terrain: 3, season: "Summer", day: true, dusk: false, weather: "clear", danger: false }); }
 
   begin(state: GameState) {
     if (this.starting) return; // a click and a key in the same frame must not start the game twice
     this.starting = true;
-    startLife(this, state);
+    SOUND.stopOverture();
+    this.cameras.main.fadeOut(500, 20, 26, 51);
+    this.time.delayedCall(520, () => startLife(this, state));
   }
 }
 
