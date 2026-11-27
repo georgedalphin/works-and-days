@@ -1,4 +1,5 @@
 import { COMFORT_KIND } from "./home";
+import { WEAR, gearMods, type Worn, type WearSlot } from "./gear";
 import type { SiteRec } from "./sites";
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
@@ -81,6 +82,8 @@ export interface SaveData {
   /** Vitality: hit points. Blows and hazards take it; at 0 you fall, and your Life Thread frays. Food and sleep heal it. */
   vitality: number;
   stealth: number; // Resources: creatures let you closer (4 is the baseline)
+  /** What you're wearing, by slot (gear.ts). */
+  worn: Worn;
   lifeThread: number;
   farmPicked: Record<string, number>;
   npc: Record<string, { rel: number; talked: number; gifted: number }>;
@@ -238,7 +241,7 @@ export class GameState {
     d.manger ??= 2; d.trough ??= 2; d.hiveDay ??= -1;
     d.crops ??= {}; d.silver ??= (d as SaveData & { tally?: number }).tally ?? START_SILVER; d.outbox ??= []; d.orders ??= []; d.vineYear ??= 0;
     if (!d.seedsGiven) { d.seedsGiven = true; const g = Object.create(GameState.prototype) as GameState; g.data = d; for (const [c, n] of START_SEEDS) g.addItem(seedId(c), n); }
-    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.sites ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.vitality ??= 6 * Math.max(2, d.health ?? 4); d.meal ??= {}; d.dishes ??= []; d.songs ??= []; d.fest ??= {}; d.songUsed ??= {}; d.songBuff ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
+    d.archeryXp ??= 0; d.name ??= ""; d.look ??= { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }; d.birth ??= null; d.health ??= 4; d.stealth ??= 4; d.lifeThread ??= START_LIFE_THREAD; d.farmPicked ??= {}; d.npc ??= {}; d.stranger ??= null; d.tools ??= {}; d.smithJob ??= null; d.favor ??= {}; d.currencies ??= { ...START_CURRENCIES }; d.devotion ??= {}; d.prayedDay ??= -1; d.offered ??= {}; d.knownByName ??= {}; d.deerDebt ??= 0; d.wildOaks ??= 0; d.arts ??= []; d.blessing ??= null; d.hostedDay ??= -99; d.anchors ??= {}; d.sites ??= {}; d.caves ??= {}; d.cave ??= { key: "", level: 1 }; d.torchLit ??= false; d.myth ??= {}; d.jarSpring ??= false; d.vat ??= { repaired: false, must: 0, q: 1, sealed: -1 }; d.vines ??= {}; d.cuttings ??= {}; d.met ??= {}; d.placed ??= []; d.worn ??= { body: "Chiton" }; d.spearAt ??= null; d.requests ??= []; d.rumors ??= []; d.reqSeq ??= 0; d.askedReq ??= {}; d.askedRumor ??= {}; d.olives ??= {}; d.vitality ??= 6 * Math.max(2, d.health ?? 4); d.meal ??= {}; d.dishes ??= []; d.songs ??= []; d.fest ??= {}; d.songUsed ??= {}; d.songBuff ??= {}; d.tir ??= { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }; d.divine ??= { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }; d.divine.quests ??= {};
     if (!d.spearGiven) { d.spearGiven = true; if (!d.slots.some((s) => s?.id === "spear")) { const g = Object.create(GameState.prototype) as GameState; g.data = d; g.addItem("spear", 1); } }
     // The spear belongs on the hotbar: an empty hotbar slot, or the last seed set there (which moves to the pack).
     if (!d.spearHotbar) {
@@ -258,6 +261,27 @@ export class GameState {
   }
 
   // ---- inventory ----
+  /** Your gear, added up (Aiolos, Stealth, Intimidation, weather...). */
+  get gear() { return gearMods(this.data.worn); }
+  /** Stealth now: your Resources' Stealth, less heavy bronze, more under a cloak in the wild. */
+  stealthNow(wild: boolean) { const g = this.gear; return Math.max(0, this.data.stealth + g.stealth + (wild ? g.wildStealth : 0)); }
+  /** Put on something from your pack (what was there before goes back in the pack). Returns why not, or null. */
+  wear(id: string): string | null {
+    const d = WEAR[id]; if (!d) return "You can't wear that.";
+    if (this.count(id) <= 0) return "You don't have that.";
+    const old = this.data.worn[d.slot];
+    this.removeItem(id, 1);
+    if (old && this.addItem(old, 1) > 0) { this.addItem(id, 1); return "Your pack is too full to take off what you're wearing."; }
+    this.data.worn[d.slot] = id;
+    return null;
+  }
+  /** Take something off, into your pack. */
+  unwear(slot: WearSlot): string | null {
+    const id = this.data.worn[slot]; if (!id) return null;
+    if (this.addItem(id, 1) > 0) return "Your pack is full.";
+    this.data.worn[slot] = null;
+    return null;
+  }
   get selectedItem(): Slot | null { return this.data.slots[this.data.selected]; }
 
   count(id: string) { return this.data.slots.reduce((n, s) => n + (s && s.id === id ? s.qty : 0), 0); }
@@ -310,7 +334,7 @@ export class GameState {
       goats: START_GOATS.map((g) => ({ ...g })),
       manger: 2, trough: 2, hiveDay: -1,
       wx: 0, wy: 0, entry: "", lastTerrain: HOME_TERRAIN, screens: {},
-      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, sites: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, vitality: 24, meal: {}, dishes: [], fest: {}, songs: [], songUsed: {}, songBuff: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
+      archeryXp: 0, name: "", look: { tunic: "#e9e1cf", hair: "#4a3324", skin: "#c98e62" }, birth: null, health: 4, stealth: 4, bowGiven: true, lifeThread: START_LIFE_THREAD, farmPicked: {}, npc: {}, stranger: null, tools: {}, smithJob: null, favor: {}, currencies: { ...START_CURRENCIES }, devotion: {}, prayedDay: -1, offered: {}, knownByName: {}, deerDebt: 0, wildOaks: 0, arts: [], blessing: null, hostedDay: -99, anchors: {}, sites: {}, caves: {}, cave: { key: "", level: 1 }, torchLit: false, myth: {}, jarSpring: false, vat: { repaired: false, must: 0, q: 1, sealed: -1 }, vines: {}, cuttings: {}, met: {}, placed: [], worn: { body: "Chiton" }, spearAt: null, requests: [], rumors: [], reqSeq: 0, askedReq: {}, askedRumor: {}, olives: {}, vitality: 24, meal: {}, dishes: [], fest: {}, songs: [], songUsed: {}, songBuff: {}, tir: { step: 0, ev: {}, base: {}, doneDay: -1, spot: 0, met: false, said: -1 }, divine: { gifts: [], troubles: [], powerUsed: {}, chosen: {}, charges: {}, wrathDay: {}, day: {}, quests: {} }, weather: "clear", signs: {},
       lore: { tier: { ...START_LORE }, fails: {}, studied: {} },
       crops: {}, silver: START_SILVER, outbox: [], orders: [], vineYear: 0,
     };
@@ -505,7 +529,7 @@ export class GameState {
   }
   sleep(collapsed = false, rough = false) {
     const hoursSlept = this.sleepHours;
-    const credit = collapsed || rough ? 0.5 : 1; // a collapse, or the hard ground by a campfire: half the rest
+    const credit = collapsed ? 0.5 : rough ? (this.gear.blanket ? 0.75 : 0.5) : 1; // a collapse, or the hard ground by a campfire: half the rest (wrapped in a cloak, three quarters)
     // Hera keeps the house: at +12 sleep there restores you wholly; at -12 it gives you half the rest.
     const hera = !collapsed && !rough && this.data.scene === "House" ? (this.warded("Hera") ? 100 : this.doomed("Hera") ? 0.5 : 1) : 1;
     // A comfortable home (each kind of furnishing you've made for it) rests you a little better.

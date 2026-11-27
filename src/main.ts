@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
 import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, knossosLayoutGrand, creteAt, pickKnossosScreen, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
+import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary, type WearSlot } from "./gear";
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
 import type { SiteRec } from "./sites";
@@ -90,7 +91,7 @@ function labor(effort: number, fatigue: number, aretai: string): string | null {
     return null;
   }
   const zeus = aretai === "Kratos" ? (G.warded("Zeus") ? 0 : 1 - 0.08 * G.boon("Zeus")) : 1; // Zeus eases heavy labor
-  G.addFatigue(fatigue * disc * zeus);
+  G.addFatigue(fatigue * disc * zeus * (G.gear.work ? 0.85 : 1)); // a working tunic: the work tires you less
   return disc < 1 ? ` (${G.patron!.god}'s hour: the work comes easier)` : "";
 }
 
@@ -106,8 +107,17 @@ const curInstrument = () => INSTRUMENTS[G.selectedItem?.id ?? ""] ?? INSTRUMENTS
 const CAMP_HOURS_PER_FIBER = 2;
 const campLit = (p: Placed) => (p.fuel ?? 0) > G.absHour;
 
-/** How much a blow is softened: a woolen cloak, if you carry one. (Health gives you more Vitality instead.) */
-const armor = () => (G.count("Cloak") > 0 ? 1 : 0);
+/**
+ * Where a blow lands and what turns it (Core Rules: the Hit Location roll, d12 around the wheel of the body; armor
+ * in that place takes its rating off the damage). Returns the damage left and a few words on where it struck.
+ */
+function landBlow(base: number): { dmg: number; where: string; turned: boolean } {
+  const loc = 1 + Math.floor(Math.random() * 12), a = armorAt(G.data.worn, loc), dmg = Math.max(0, base - a);
+  const by = coverers(G.data.worn, loc).map((id) => ITEMS[id].name.toLowerCase().replace(/^bronze /, ""));
+  const list = by.length > 1 ? `${by.slice(0, -1).join(", ")} and ${by[by.length - 1]}` : by[0];
+  const where = ` in the ${LOC_NAME[loc]}${a > 0 ? (dmg === 0 ? `, but your ${list} turn${by.length > 1 ? "" : "s"} it aside` : `; your ${list} take${by.length > 1 ? "" : "s"} ${a} of it`) : ""}`;
+  return { dmg, where, turned: a > 0 && dmg === 0 };
+}
 /** A creature's blow in Vitality: its old Fatigue figure scaled to Terata hits (a fox 2, a wolf 4, a boar 6, a lion 8). */
 const blowOf = (fatigueDmg: number) => Math.max(1, Math.round(fatigueDmg / 2.5));
 /** Extra yield for things you understand fully. */
@@ -390,7 +400,7 @@ abstract class PlayScene extends Phaser.Scene {
     const moving = vx !== 0 || vy !== 0;
     // Running: each tap of Shift is a quick burst of speed, paid in Air; tap fast and they build into a sprint.
     if (Phaser.Input.Keyboard.JustDown(k.SHIFT) && moving && !this.paused) {
-      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerTap, G.data.aretai.Aiolos ?? 3) * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1);
+      const cost = G.warded("Hermes") ? 0 : skillCost(ESSENCE.runPerTap, G.data.aretai.Aiolos ?? 3) * G.hourDiscount("Aiolos") * Math.max(0.4, 1 - 0.12 * G.boon("Hermes")) * (G.songOn("lark") ? 0.5 : 1) * (1 - 0.3 * G.gear.aiolos);
       if (G.essence.Air >= cost) {
         G.essence.Air -= cost; this.dashLvl = Math.min(1, this.dashLvl + 0.34); this.dashT = 0.42;
         const puff = this.add.image(this.player.x, this.player.y + 6, "puff").setDepth(this.player.y - 1).setAlpha(0.55).setScale(0.5);
@@ -411,9 +421,11 @@ abstract class PlayScene extends Phaser.Scene {
     const w = this.underfoot();
     if (w) { speed = Math.min(speed, 70); this.dashLvl = 0; } // no running in water
     speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
+    const gear = G.gear; speed *= Math.max(0.7, 1 + 0.06 * gear.aiolos) * (gear.feet >= 2 && !w ? 1.04 : 1); // bronze weighs you down; good boots carry you
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     this.swim(dt, w);
     this.rest(dt, moving, w);
+    this.weather(dt);
     if (moving) {
       if (Math.abs(vx) > Math.abs(vy)) this.facing = vx < 0 ? 1 : 2; else this.facing = vy < 0 ? 3 : 0;
     }
@@ -982,6 +994,7 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.cursorMode && !this.cursorInReach()) { this.tooFar(); return; }
     const [lx, ly] = this.lookPoint(); if (this.cursorMode) this.faceToward(lx, ly);
     this.gesture("act");
+    if (G.selectedItem && WEAR[G.selectedItem.id]) { this.wearHeld(); return; }
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "place") { this.tryPlace(); return; }
     if (G.selectedItem && ITEMS[G.selectedItem.id]?.kind === "meal") { eatHeld(); return; }
     if (G.selectedItem?.id === "rod") { this.fishNow(); return; }
@@ -992,6 +1005,13 @@ abstract class PlayScene extends Phaser.Scene {
     }
     const tool = G.selectedItem?.id; if (tool === "axe" || tool === "mattock" || tool === "hoe" || tool === "sickle") SOUND.sfx("chop");
     this.useItem();
+  }
+  /** Put on what you hold (and what you wore there goes into your pack). */
+  wearHeld() {
+    const id = G.selectedItem!.id, d = WEAR[id], old = G.data.worn[d.slot];
+    const why = G.wear(id); if (why) { G.say(why); return; }
+    dressPlayer(this); SOUND.sfx("pickup");
+    G.say(`You put on the ${ITEMS[id].name.toLowerCase()}${old ? ` (the ${ITEMS[old].name.toLowerCase()} goes in your pack)` : ""}. ${d.does}`);
   }
   /** Q: study what you are looking at. */
   studyNow() {
@@ -1089,7 +1109,8 @@ abstract class PlayScene extends Phaser.Scene {
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
     const [calm, by] = aretaiCalm(a.kind);
     if ((a.kind === "eidolon" || a.kind === "lampad") && G.songOn("paean")) bonus -= 4; // Apollo's hymn keeps the dead at a distance
-    const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus - calm;
+    const scary = a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton" ? 0 : G.gear.intim; // bronze and a lion's mane give a beast pause (the dead don't care)
+    const agg = d.aggression + (G.isDay ? 0 : 2) + calmer + bonus - calm - scary;
     const roll = 1 + Math.floor(Math.random() * 12);
     if (roll > agg) {
       if (calm && roll <= agg + calm && d.aggression >= 2) G.say(`The ${beast(a.kind)} eyes you, then lets you be. ${by === "Pneuma" && (a.kind === "eidolon" || a.kind === "lampad") ? "The dead know a soul that has seen past the veil." : `Something in you (${by} ${G.data.aretai[by]}) holds it back.`}`);
@@ -1117,8 +1138,10 @@ abstract class PlayScene extends Phaser.Scene {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
     const d = SPECIES[a.kind];
-    let dmg = Math.max(1, blowOf(d.damage) - armor() + (G.exhausted ? 1 : 0)); // a cloak softens it; worn out, you take it worse
-    if (G.warded("Ares")) dmg = Math.max(1, Math.floor(dmg / 2)); // Ares turns the blow
+    const hit = landBlow(blowOf(d.damage) + (G.exhausted ? 1 : 0)); // armor where it lands turns it; worn out, you take it worse
+    let dmg = hit.dmg;
+    if (G.warded("Ares") && dmg > 0) dmg = Math.max(1, Math.floor(dmg / 2)); // Ares turns the blow
+    if (hit.turned) SOUND.sfx("chop");
     G.heal(-dmg); G.addFatigue(2);
     if (G.warded("Ares")) G.data.vitality = Math.max(1, G.data.vitality);
     this.invuln = 1; this.knock = 0.22;
@@ -1129,7 +1152,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
     const verb: Record<string, string> = { minotaur: "gores", brigand: "clubs", boar: "gores", wolf: "bites", fox: "snaps at", deer: "butts", centaur: "rides you down! Hooves", skeleton: "hacks at", empousa: "bites", jackal: "bites", scorpion: "stings", bear: "mauls", crab: "pinches", lion: "mauls", stymphalian: "slashes", strix: "rakes", sphinx: "claws", siren: "strikes" };
     if (a.kind === "empousa") { a.hp = Math.min(QUARRY.empousa.hp, (a.hp < 0 ? QUARRY.empousa.hp : a.hp) + 1); } // the blood-draught heals her
-    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you! (−${dmg} Vitality)${this.lowWarn()}`);
+    G.say(`The ${beast(a.kind)} ${verb[a.kind] ?? "strikes"} you${hit.where}! ${dmg > 0 ? `(−${dmg} Vitality)${this.lowWarn()}` : "(no harm done)"}`);
     if (G.data.vitality <= 0) this.struckDown(a);
   }
 
@@ -1709,9 +1732,28 @@ abstract class PlayScene extends Phaser.Scene {
     if (this.stillT < 2) return;
     if (!this.restTold && !this.seat && G.data.fatigue >= 5) { this.restTold = true; G.say("You stand and catch your breath. Keeping still slowly eases your weariness."); }
     const fire = this.fireLights().some((l) => l.r >= 60 && Math.hypot(l.x - this.player.x, l.y - this.player.y) < l.r);
-    const perHour = SLEEP_RECOVERY_PER_HOUR * (2 / 3) * (fire ? 1.5 : 1) * (this.seat ? this.seat.mult : 1) * (w === 1 ? 1.25 : 1) * (G.signActive("rest") ? 1.25 : 1);
+    const perHour = SLEEP_RECOVERY_PER_HOUR * (2 / 3) * (fire ? 1.5 : 1) * (this.seat ? this.seat.mult : 1) * (this.exposed ? 0.5 : 1) * (w === 1 ? 1.25 : 1) * (G.signActive("rest") ? 1.25 : 1);
     G.addFatigue(-perHour * dt / G.secondsPerClockHour);
     if (Math.floor(this.stillT) !== Math.floor(this.stillT - dt) && Math.floor(this.stillT) % 3 === 0) this.restFx();
+  }
+  /** The weather on you, out of doors: rain soaks you and cold gets into your bones, unless you're wrapped up (gear.ts). */
+  weatherSaid = ""; exposed = false;
+  weather(dt: number) {
+    this.exposed = false;
+    if (!this.outdoors || this.scene.key === "Labyrinth" || this.paused || this.boat) return;
+    const wet = G.data.weather === "rain", t = this.wildRec?.terrain ?? 3;
+    const cold = G.month.season === "Winter" || ((t === 9 || G.data.weather === "wind") && !G.isDay);
+    const need = (wet ? 1 : 0) + (cold ? 1 : 0), bare = Math.max(0, need - G.gear.weather);
+    if (!bare) return;
+    if (cold && this.fireLights().some((l) => Math.hypot(l.x - this.player.x, l.y - this.player.y) < l.r)) return; // warm by the fire
+    this.exposed = true;
+    G.addFatigue(dt * 0.02 * bare);
+    const key = `${G.dateKey}:${wet ? "w" : ""}${cold ? "c" : ""}`;
+    if (this.weatherSaid !== key && G.data.fatigue > 2) {
+      this.weatherSaid = key;
+      const body = ITEMS[G.data.worn.body ?? "Chiton"]?.name.toLowerCase() ?? "tunic";
+      G.say(wet && cold ? `Cold rain soaks through your ${body}, and it wears on you. A cloak or a himation would keep it off.` : wet ? `The rain soaks through your ${body}. A cloak, a himation or a broad hat would keep you drier.` : "The cold gets into your bones, and it wears on you. A cloak or a himation would keep you warm.");
+    }
   }
   splashFx() {
     for (let i = 0; i < 6; i++) {
@@ -1954,8 +1996,9 @@ abstract class PlayScene extends Phaser.Scene {
       this.rustleT = 0.28;
       this.chips(Math.floor(this.player.x / TILE), Math.floor((this.player.y + 5) / TILE), t, 2);
     }
-    if (t === T.THORN && moving) {
-      G.addFatigue(dt * 0.6);
+    const shod = G.gear.feet;
+    if (t === T.THORN && moving && shod < 2) {
+      G.addFatigue(dt * (shod ? 0.3 : 0.6)); // sandals spare you half of it; boots all
       if (!this.thornSaid) { this.thornSaid = true; G.say("The thorns snag at you as you push through."); }
     }
     return m;
@@ -1969,11 +2012,12 @@ abstract class PlayScene extends Phaser.Scene {
       if (from.kind === "centaur" && this.openGround(x, y) && Math.random() < 0.5) this.dropItem("Arrow", 1, x, y, "arrowStuck");
       return;
     }
-    const dmg = Math.max(1, blowOf(8) - armor());
+    const hit = landBlow(blowOf(8)), dmg = hit.dmg;
     G.heal(-dmg); G.addFatigue(1); this.invuln = 0.8;
     this.cameras.main.shake(100, 0.004);
     this.player.setTint(0xff7070); this.time.delayedCall(200, () => this.player.clearTint());
-    G.say(from.kind === "stymphalian" ? `A bronze feather slices into you! (−${dmg} Vitality)` : `An arrow from the ${beast(from.kind)} finds you! (−${dmg} Vitality)`);
+    const hurt = dmg > 0 ? `(−${dmg} Vitality)` : "(no harm done)";
+    G.say(from.kind === "stymphalian" ? `A bronze feather strikes you${hit.where}! ${hurt}` : `An arrow from the ${beast(from.kind)} hits you${hit.where}! ${hurt}`);
     if (G.data.vitality <= 0) this.struckDown(from);
   }
 
@@ -2118,7 +2162,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** How close creatures let you come: running scares them, Artemis' hour and full understanding calm them. */
   updateAnimals(dt: number) {
     const running = this.dashLvl > 0.3 && this.player.body!.velocity.length() > 80;
-    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.data.stealth - 4));
+    const base = (running ? 1.6 : 1) * (G.patron?.aretai === "Kardia" ? 0.7 : 1) * Math.max(0.5, 1 - 0.08 * G.boon("Artemis")) * Math.max(0.5, 1 - 0.04 * (G.stealthNow(this.scene.key === "Wild") - 4));
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     const lights = this.animals.some((a) => a.kind === "eidolon") ? this.fireLights() : [];
     if (!this.paused) for (const a of this.animals) {
@@ -2183,11 +2227,24 @@ class TitleScene extends Phaser.Scene {
   }
 }
 
+/** What Lykos the smith will make in bronze: [item, silver, copper ore]. */
+const SMITH_ARMOR: [string, number, number][] = [["Greaves", 40, 1], ["Corinthian", 70, 2], ["ScaleCuirass", 110, 2], ["Aspis", 60, 1], ["Cuirass", 170, 4]];
+/** What some village households sell: the weaver clothes, the old soldier his old gear. [item, silver] */
+const HOUSE_WARES: Record<string, { say: string; wares: [string, number][] }> = {
+  weaver: { say: "\"Linen and wool, spun and woven in this house. What do you need?\"", wares: [["Chiton", 8], ["Exomis", 9], ["Peplos", 18], ["Himation", 20], ["Robes", 30], ["Cloak", 40], ["Petasos", 8], ["Sandals", 6]] },
+  oldsoldier: { say: "\"I've no use for it now. Better it keeps someone alive than hangs on my wall.\"", wares: [["Kynee", 12], ["LeatherShirt", 28], ["Pelte", 26], ["Linothorax", 60], ["Boots", 26]] },
+};
+/** Draw the player in what they wear now, and show it at once in the scene they're in. */
+function dressPlayer(scene: Phaser.Scene) {
+  makePlayerTexture(scene, G.data.look, G.data.worn);
+  for (const s of scene.game.scene.getScenes(true)) { const p = (s as PlayScene).player; if (p?.active && p.texture) p.setTexture("player", Number(p.frame.name) || 0); }
+}
 /** Begin (or resume) a life: dress the player in their colors and open the world. */
 function startLife(scene: Phaser.Scene, state: GameState) {
   G = state;
   (window as unknown as { G: GameState }).G = G; // for testing from the console
-  makePlayerTexture(scene, G.data.look);
+  (window as unknown as { dressPlayer: typeof dressPlayer }).dressPlayer = dressPlayer;
+  makePlayerTexture(scene, G.data.look, G.data.worn);
   scene.scene.start(G.data.scene);
   if (scene.scene.isActive("UI")) scene.scene.stop("UI");
   scene.scene.launch("UI");
@@ -5091,14 +5148,15 @@ class WildScene extends PlayScene {
     if (w === 2) return 0.25; // swimming
     const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE);
     const t = this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index;
-    return t === T.MUD ? 0.7 : t === T.SAND ? 0.88 : 1;
+    const shod = G.gear.feet;
+    return t === T.MUD ? [0.7, 0.75, 0.85][shod] : t === T.SAND ? [0.88, 0.92, 0.96][shod] : 1;
   }
   /** The desert sun wears you down by day, except in the shade by water. */
   desertHeat(dt: number) {
     if (this.rec.terrain !== 8 || !G.isDay || G.warded("Apollo")) return;
     const tx = this.player.x / TILE, ty = this.player.y / TILE;
     if (this.water.some(([x, y]) => Math.hypot(x - tx, y - ty) < 5)) return;
-    G.addFatigue(dt * 0.05);
+    G.addFatigue(dt * 0.05 * (G.gear.sun ? 0.4 : 1)); // a broad hat keeps the worst of it off
     if (!this.heatSaid) { this.heatSaid = true; G.say("The sun beats down on the desert. It tires you by day; rest in the shade by water."); }
   }
 
@@ -6970,8 +7028,24 @@ class VillageScene extends PlayScene {
       return;
     }
     const greet = G.isDay && G.data.clock < 2 ? "Up early." : G.data.weather === "rain" ? "Wet enough for you?" : "Good day to you.";
-    u.showTalk(f.name, `of ${h.trade.name} · ${h.trade.patron} keeps their hearth`, `"${greet}" ${h.trade.lines[Math.floor(Math.random() * h.trade.lines.length)]}`,
-      [{ label: "Ask about their work", fn: () => u.showTalk(f.name, `of ${h.trade.name}`, h.trade.tip, []) }]);
+    const opts = [{ label: "Ask about their work", fn: () => u.showTalk(f.name, `of ${h.trade.name}`, h.trade.tip, []) }];
+    const shop = HOUSE_WARES[h.trade.id];
+    if (shop) opts.push({ label: h.trade.id === "weaver" ? "Buy clothes" : "Ask about the old gear on the wall", fn: () => this.houseShop(f.name, h, shop) });
+    u.showTalk(f.name, `of ${h.trade.name} · ${h.trade.patron} keeps their hearth`, `"${greet}" ${h.trade.lines[Math.floor(Math.random() * h.trade.lines.length)]}`, opts);
+  }
+
+  /** Buying from a household: clothes from the weaver, old armor from the old soldier. */
+  houseShop(who: string, h: Household, shop: { say: string; wares: [string, number][] }, said?: string) {
+    const u = ui(this);
+    u.showTalk(who, `of ${h.trade.name} · your purse: ${money(G.data.silver)}`, said ?? shop.say, shop.wares.map(([id, price]) => ({
+      label: `${ITEMS[id].name} (${ITEMS[id].greek}): ${money(price)}${G.data.silver < price ? " (too dear for now)" : ""}`,
+      fn: () => {
+        if (G.data.silver < price) { this.houseShop(who, h, shop, `"${money(price)}. Come back when you have it."`); return; }
+        if (G.addItem(id, 1)) { this.houseShop(who, h, shop, "\"Your pack's full. Make room.\""); return; }
+        G.data.silver -= price; SOUND.sfx("pickup");
+        this.houseShop(who, h, shop, `"It's yours." (You buy the ${ITEMS[id].name.toLowerCase()}. ${WEAR[id].does} Hold it and press Space to wear it.)`);
+      },
+    })));
   }
 
   update(_t: number, dms: number) {
@@ -7205,6 +7279,7 @@ class UIScene extends Phaser.Scene {
   }
   modal = false;
   shade!: Phaser.GameObjects.Rectangle;
+  helmView!: Phaser.GameObjects.Image;
   date!: Phaser.GameObjects.Text;
   timeText!: Phaser.GameObjects.Text;
   place!: Phaser.GameObjects.Text;
@@ -7225,7 +7300,7 @@ class UIScene extends Phaser.Scene {
   craft?: Phaser.GameObjects.Container;
   loreSel = "";
   hotbarGfx!: Phaser.GameObjects.Graphics;
-  inv?: { root: Phaser.GameObjects.Container; cells: Cell[]; info: Phaser.GameObjects.Text };
+  inv?: { root: Phaser.GameObjects.Container; cells: Cell[]; info: Phaser.GameObjects.Text; worn: { slot: WearSlot; bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image }[]; stats: Phaser.GameObjects.Text };
   held: number | null = null;
 
   constructor() { super("UI"); }
@@ -7237,6 +7312,13 @@ class UIScene extends Phaser.Scene {
     this.sheetPanel = undefined; this.sheet = ""; this.ritual = undefined; this.dialog = undefined; this.held = null;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
     this.shade = this.add.rectangle(0, 0, W, H, 0x000000, 0).setOrigin(0, 0);
+    if (!this.textures.exists("helmView")) { // the world through the eye-holes of a Corinthian helmet
+      const t = this.textures.createCanvas("helmView", W, H)!, c = t.getContext();
+      const g = c.createRadialGradient(W / 2, H / 2 - 10, 170, W / 2, H / 2 - 10, 560);
+      g.addColorStop(0, "rgba(10,8,4,0)"); g.addColorStop(0.55, "rgba(10,8,4,0.5)"); g.addColorStop(1, "rgba(10,8,4,0.9)");
+      c.fillStyle = g; c.fillRect(0, 0, W, H); t.refresh();
+    }
+    this.helmView = this.add.image(0, 0, "helmView").setOrigin(0, 0).setVisible(false);
 
     // Date, hour and patron.
     this.add.rectangle(12, 12, 400, 92, 0x1f1712, 0.78).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f);
@@ -7308,7 +7390,7 @@ class UIScene extends Phaser.Scene {
       "Move: WASD or arrows. Run: tap Shift, fast, for bursts of speed (each tap spends a little Air).",
       "Aim: point the mouse at anything within two paces. Mouse outside the window: you act on what you face.",
       "Left click or Space: work with what you hold. Right click or E: interact. Q: study.",
-      "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap). C: crafting.",
+      "Items: 1–0 or the mouse wheel. I or Tab: inventory (click two slots to swap; what you wear is below). C: crafting. Clothes and armor: hold one and press Space to put it on.",
       "J: journal. K: lore book. F: the gods. P: who you are. V (hold): sing. M: mute. N: music. H: this help. Esc: pause, save and quit.",
       "",
       "PACING",
@@ -7435,6 +7517,7 @@ class UIScene extends Phaser.Scene {
     if (outdoor && c < day && (G.data.weather === "rain" || G.data.weather === "cloudy")) { const g = G.data.weather === "rain" ? 0.2 : 0.08; if (a < g) { col = 0x3a4250; a = g; } }
     if (G.data.scene === "House") a = 0; // the house has its own light (HouseScene.light)
     this.shade.setFillStyle(col, a);
+    this.helmView.setVisible(G.gear.ourania < 0);
 
     this.drawBars();
     this.drawHotbar();
@@ -7505,7 +7588,7 @@ class UIScene extends Phaser.Scene {
     if (this.help.visible) this.help.setVisible(false);
     this.modal = true;
     const font = { fontFamily: FONT, color: "#f2e6c9" };
-    const rows = INVENTORY_SIZE / 10, w = 10 * (SLOT + GAP) + 40, h = rows * (SLOT + GAP) + 130;
+    const rows = INVENTORY_SIZE / 10, w = 10 * (SLOT + GAP) + 40, h = rows * (SLOT + GAP) + 272;
     const x0 = (W - w) / 2, y0 = (H - h) / 2 - 30;
     const root = this.add.container(0, 0).setDepth(22);
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.96).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
@@ -7523,10 +7606,25 @@ class UIScene extends Phaser.Scene {
       root.add([bg, icon, qty, star]);
       cells.push({ bg, icon, qty, star });
     }
-    const info = this.add.text(W / 2, y0 + h - 44, "Hover over an item to see what it is.", { ...font, fontSize: "14px", align: "center", wordWrap: { width: w - 40 } }).setOrigin(0.5, 0);
+    const info = this.add.text(W / 2, y0 + h - 58, "Hover over an item to see what it is.", { ...font, fontSize: "14px", align: "center", wordWrap: { width: w - 40 } }).setOrigin(0.5, 0);
     root.add(info);
+    // What you wear: seven slots, and what they add up to.
+    const wy = y0 + 66 + rows * (SLOT + GAP) + 18;
+    root.add(this.add.text(x0 + 20, wy - 2, "Worn", { ...font, fontSize: "15px", color: "#fbe39a" }));
+    const worn: { slot: WearSlot; bg: Phaser.GameObjects.Rectangle; icon: Phaser.GameObjects.Image }[] = [];
+    WEAR_SLOTS.forEach((slot, k) => {
+      const cx = x0 + 80 + k * (SLOT + GAP + 8), cy = wy;
+      const bg = this.add.rectangle(cx, cy, SLOT, SLOT, 0x2a1d14, 1).setOrigin(0, 0).setStrokeStyle(2, 0x8a6a3a).setInteractive({ useHandCursor: true });
+      const icon = this.add.image(cx + SLOT / 2, cy + SLOT / 2, "items", "hoe").setScale(2);
+      const lab = this.add.text(cx + SLOT / 2, cy + SLOT + 2, SLOT_NAME[slot], { ...font, fontSize: "11px", color: "#c9b48f" }).setOrigin(0.5, 0);
+      bg.on("pointerdown", () => this.clickWorn(slot));
+      bg.on("pointerover", () => { if (!this.inv) return; const id = G.data.worn[slot]; this.inv.info.setText(id ? `${ITEMS[id].name}${ITEMS[id].greek ? ` (${ITEMS[id].greek})` : ""}, worn: ${WEAR[id].does} Click to take it off.` : `${SLOT_NAME[slot]}: nothing. Click a thing to wear in your pack, then this slot.`); });
+      root.add([bg, icon, lab]); worn.push({ slot, bg, icon });
+    });
+    const stats = this.add.text(x0 + 80, wy + SLOT + 20, "", { ...font, fontSize: "13px", color: "#e0d0ac", lineSpacing: 3, wordWrap: { width: w - 100 } });
+    root.add(stats);
     root.add(this.add.text(W / 2, y0 + h + 10, "I, Tab or Esc to close", { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
-    this.inv = { root, cells, info };
+    this.inv = { root, cells, info, worn, stats };
   }
 
   // ---------------------------------------------------------------- conversation
@@ -8193,6 +8291,15 @@ class UIScene extends Phaser.Scene {
 
   smithOptions(v: Villager, opts: { label: string; fn: () => void }[]) {
     const job = G.data.smithJob;
+    if (job && WEAR[job.tool]) { // bronze armor on order
+      const nm = ITEMS[job.tool].name.toLowerCase();
+      if (G.dayNumber >= job.ready) opts.push({ label: `Collect your ${nm}`, fn: () => {
+        if (G.addItem(job.tool, 1)) { this.talkTo(v, `"Make room in your pack first."`); return; }
+        G.data.smithJob = null;
+        this.talkTo(v, `"There. Try it on: hold it, and press Space." He looks you up and down. "${WEAR[job.tool].slot === "head" ? "It'll ring if something hits it. Better it than your skull." : "Bronze is heavy. You'll be slower in it, and nobody will mistake you for a goatherd."}"\n\n(You receive the ${nm}.)`);
+      } });
+      return;
+    }
     if (job) {
       const u = UPGRADES.find((x) => x.tool === job.tool && x.level === job.level)!;
       if (G.dayNumber >= job.ready) opts.push({ label: `Collect your ${u.name.toLowerCase()}`, fn: () => {
@@ -8213,6 +8320,16 @@ class UIScene extends Phaser.Scene {
         G.data.silver -= price; G.removeItem("Wood", u.wood); G.removeItem(u.tool, 1);
         G.data.smithJob = { tool: u.tool, level: u.level, ready: G.dayNumber + 1 };
         this.talkTo(v, `"Leave it with me. Come back tomorrow."\n\n(${u.desc}${discount < 1 ? " As a friend, you paid a fifth less." : ""})`);
+      } });
+    }
+    // Bronze armor, made to order (the Core Rules' prices, more or less, in the village's silver).
+    for (const [id, silver, copper] of SMITH_ARMOR) {
+      const price = Math.round(silver * discount), ok = G.data.silver >= price && G.count("Copper") >= copper, nm = ITEMS[id].name.toLowerCase();
+      opts.push({ label: `Make me ${/^[aeiou]/i.test(nm) ? "an" : "a"} ${nm}: ${money(price)} and ${copper} copper ore${ok ? "" : " (you can't afford it yet)"}`, fn: () => {
+        if (!ok) { this.talkTo(v, `"${money(price)}, and ${copper} lumps of copper ore. Bronze is copper and tin, and the tin comes from the ends of the earth."`); return; }
+        G.data.silver -= price; G.removeItem("Copper", copper);
+        G.data.smithJob = { tool: id, level: 0, ready: G.dayNumber + 1 };
+        this.talkTo(v, `"${WEAR[id].does.split(";")[0].replace(/\.$/, "")}. I'll fit it to you. Come back tomorrow."`);
       } });
     }
     if (G.count("sword") <= 0) {
@@ -8457,8 +8574,9 @@ class UIScene extends Phaser.Scene {
     const slot = G.data.slots.find((s) => s && s.id === item && s.q === 3) ?? G.data.slots.find((s) => s && s.id === item);
     const fine = slot?.q === 3, ft = festToday(), feast = where === "shrine" && ft?.god === god;
     G.removeItem(item, 1); G.data.offered[god] = today; G.note("offer");
-    const after = G.addFavor(god, (fine ? 2 : 1) * (feast ? 2 : 1), feast ? 10 : cap);
-    this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}${feast ? ` at the ${ft!.name}, before the whole village` : ""}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after}${feast ? "; on the god's festival, offerings count double, as high as +10" : ""})`);
+    const g = G.gear, robed = g.riteAll || g.rite.includes(god);
+    const after = G.addFavor(god, (fine ? 2 : 1) * (feast ? 2 : 1) + (robed ? 1 : 0), feast ? 10 : cap);
+    this.openAltar(where, `You offer the ${fine ? "finest " : ""}${name} to ${god}${feast ? ` at the ${ft!.name}, before the whole village` : ""}${robed ? `, dressed for the rite in your ${ITEMS[G.data.worn.body!].name.toLowerCase()}` : ""}, and the smoke rises straight. ${god} is pleased. (favor ${after >= 0 ? "+" : ""}${after}${feast ? "; on the god's festival, offerings count double, as high as +10" : ""}${robed ? "; dressed for it, +1 more" : ""})`);
   }
 
   hearthMenu(tend: () => void) {
@@ -8551,7 +8669,7 @@ class UIScene extends Phaser.Scene {
     stat(sy, "Vitality", `${Math.ceil(G.data.vitality)} / ${G.vitalityMax}`, "#e8a090"); sy += 18;
     stat(sy, "Fatigue", `${Math.round(G.data.fatigue)} / 100`); sy += 18;
     stat(sy, "Life Thread", `${G.data.lifeThread} of ${START_LIFE_THREAD}`, "#e8c0b0"); sy += 18;
-    stat(sy, "Health · Stealth", `${G.data.health} · ${G.data.stealth}`); sy += 18;
+    stat(sy, "Health · Stealth", `${G.data.health} · ${G.data.stealth}${G.gear.stealth ? ` (${G.stealthNow(false)} in your gear)` : ""}`); sy += 18;
     stat(sy, "Essence (E W A F)", (["Earth", "Water", "Air", "Fire"] as const).map((k) => Math.round(G.essenceMax[k])).join(" · ")); sy += 18;
     stat(sy, "Purse", money(G.data.silver), "#fbe39a"); sy += 18;
     const ml = G.data.meal;
@@ -9035,7 +9153,8 @@ class UIScene extends Phaser.Scene {
     const s = G.data.slots[i];
     if (!s) return "Empty.";
     const d = ITEMS[s.id];
-    return `${s.q ? QUALITY[s.q][0].toUpperCase() + QUALITY[s.q].slice(1) + " " + d.name.toLowerCase() : d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind !== "tool" ? ` × ${s.qty}` : ""}: ${d.desc}${d.value ? ` The miller pays ${money(Math.round(d.value * QUALITY_MULT[s.q ?? 1]))} each.` : ""}`;
+    const wear = WEAR[s.id] ? ` Wear it (${SLOT_NAME[WEAR[s.id].slot].toLowerCase()}): ${WEAR[s.id].does} Hold it and press Space, or click it, then the slot below.` : "";
+    return `${s.q ? QUALITY[s.q][0].toUpperCase() + QUALITY[s.q].slice(1) + " " + d.name.toLowerCase() : d.name}${d.greek ? ` (${d.greek})` : ""}${d.kind !== "tool" ? ` × ${s.qty}` : ""}: ${d.desc}${wear}${d.value ? ` The miller pays ${money(Math.round(d.value * QUALITY_MULT[s.q ?? 1]))} each.` : ""}`;
   }
 
   clickSlot(i: number) {
@@ -9050,6 +9169,31 @@ class UIScene extends Phaser.Scene {
       const sel = i === this.held ? 0xf2c14e : i === G.data.selected ? 0xc4703f : 0x6b4a2b;
       c.bg.setStrokeStyle(i === this.held ? 3 : 2, sel);
     });
+    const heldId = this.held !== null ? G.data.slots[this.held]?.id : undefined, fits = heldId && WEAR[heldId] ? WEAR[heldId].slot : null;
+    for (const w of this.inv!.worn) {
+      const id = G.data.worn[w.slot];
+      w.icon.setVisible(!!id); if (id) w.icon.setFrame(id);
+      w.bg.setStrokeStyle(fits === w.slot ? 3 : 2, fits === w.slot ? 0xf2c14e : 0x8a6a3a);
+    }
+    const g = G.gear, pen = [g.aiolos ? `Aiolos ${g.aiolos}` : "", g.stealth ? `Stealth ${g.stealth}` : "", g.wildStealth ? `Stealth +${g.wildStealth} in the wild` : "", g.intim ? `Intimidation +${g.intim}` : "", g.ourania ? `Ourania ${g.ourania}` : ""].filter(Boolean).join(" · ");
+    const txt = `Armor: ${armorSummary(G.data.worn)}${pen ? `   ·   ${pen}` : ""}`;
+    if (this.inv!.stats.text !== txt) this.inv!.stats.setText(txt);
+  }
+  /** Click a worn slot: put on what you picked up in your pack (if it goes there), or take off what's there. */
+  clickWorn(slot: WearSlot) {
+    const play = this.scene.manager.getScenes(true).find((s) => s instanceof PlayScene) as PlayScene | undefined;
+    if (this.held !== null) {
+      const id = G.data.slots[this.held]?.id; this.held = null;
+      if (!id || !WEAR[id]) { G.say("You can't wear that."); return; }
+      if (WEAR[id].slot !== slot) { G.say(`The ${ITEMS[id].name.toLowerCase()} is worn on the ${SLOT_NAME[WEAR[id].slot].toLowerCase()}.`); return; }
+      const why = G.wear(id); if (why) { G.say(why); return; }
+      if (play) dressPlayer(play); SOUND.sfx("pickup");
+      return;
+    }
+    if (!G.data.worn[slot]) return;
+    const id = G.data.worn[slot]!, why = G.unwear(slot); if (why) { G.say(why); return; }
+    if (play) dressPlayer(play);
+    G.say(`You take off the ${ITEMS[id].name.toLowerCase()}.`);
   }
 
   choose(text: string, onYes: () => void) {

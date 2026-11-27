@@ -114,7 +114,7 @@ export const NIGHT_WATCHES_PLAYABLE = 2;
 export const SLEEP_RECOVERY_PER_HOUR = 12;
 
 // ---- items ----
-export type ItemKind = "tool" | "material" | "seed" | "crop" | "find" | "place" | "meal";
+export type ItemKind = "tool" | "material" | "seed" | "crop" | "find" | "place" | "meal" | "wear";
 export interface ItemDef { id: string; name: string; greek?: string; kind: ItemKind; desc: string; value?: number }
 
 export const ITEMS: Record<string, ItemDef> = {
@@ -155,7 +155,26 @@ export const ITEMS: Record<string, ItemDef> = {
   WineAmphora: { id: "WineAmphora", value: 70, name: "Amphora of wine", greek: "amphoreus oinou", kind: "material", desc: "Three measures of wine, sealed with pitch. Worth far more to the miller than loose wine." },
   Lamp: { id: "Lamp", value: 10, name: "Clay lamp", greek: "lychnos", kind: "material", desc: "A little lamp burning beeswax. Carried, it lights caves wider than a torch, and never burns out." },
   Cloth: { id: "Cloth", value: 6, name: "Linen cloth", greek: "othone", kind: "material", desc: "A bolt of plain linen from your loom." },
-  Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "material", desc: "A thick cloak pinned at the shoulder. Carried, it turns a little of every blow (Health +1)." },
+  Cloak: { id: "Cloak", value: 30, name: "Woolen cloak", greek: "chlaina", kind: "wear", desc: "A thick traveler's cloak pinned at the shoulder." },
+  // Things to wear (gear.ts says what each does).
+  Chiton: { id: "Chiton", value: 5, name: "Chiton", greek: "chiton", kind: "wear", desc: "A plain linen tunic, belted." },
+  Exomis: { id: "Exomis", value: 6, name: "Exomis", greek: "exomis", kind: "wear", desc: "A short tunic fastened on one shoulder, for working in." },
+  Peplos: { id: "Peplos", value: 12, name: "Peplos", greek: "peplos", kind: "wear", desc: "A long woolen dress, folded over and pinned at the shoulders." },
+  Robes: { id: "Robes", value: 20, name: "Ritual robes", greek: "stole", kind: "wear", desc: "White robes for the rites, bordered with saffron." },
+  Himation: { id: "Himation", value: 14, name: "Himation", greek: "himation", kind: "wear", desc: "A great rectangular mantle of wool, wrapped and draped." },
+  Petasos: { id: "Petasos", value: 5, name: "Petasos", greek: "petasos", kind: "wear", desc: "A broad-brimmed traveler's hat of straw and felt." },
+  Kynee: { id: "Kynee", value: 8, name: "Leather cap", greek: "kynee", kind: "wear", desc: "A close cap of hardened leather: a 'dog-skin'." },
+  TuskHelm: { id: "TuskHelm", value: 35, name: "Boar's-tusk helmet", greek: "kaprodonton", kind: "wear", desc: "A leather cap sewn with rows of split boar's tusks, as the old heroes wore." },
+  Corinthian: { id: "Corinthian", value: 50, name: "Corinthian helmet", greek: "korys", kind: "wear", desc: "Hammered from one sheet of bronze, with cheek-pieces and a nose-guard, crested with horsehair." },
+  LeatherShirt: { id: "LeatherShirt", value: 20, name: "Leather jerkin", greek: "spolas", kind: "wear", desc: "A jerkin of thick hide." },
+  Linothorax: { id: "Linothorax", value: 40, name: "Linothorax", greek: "linothorax", kind: "wear", desc: "Layers of linen glued and stitched into a stiff cuirass, with shoulder-pieces." },
+  ScaleCuirass: { id: "ScaleCuirass", value: 90, name: "Scale cuirass", greek: "pholidotos thorax", kind: "wear", desc: "Bronze scales sewn on leather, like a fish's side." },
+  Cuirass: { id: "Cuirass", value: 125, name: "Bronze cuirass", greek: "chalkochiton", kind: "wear", desc: "A bell of hammered bronze, front and back, shaped to the muscles of the chest." },
+  Pelte: { id: "Pelte", value: 18, name: "Pelte", greek: "pelte", kind: "wear", desc: "A light crescent shield of wicker and hide." },
+  Aspis: { id: "Aspis", value: 40, name: "Aspis", greek: "aspis", kind: "wear", desc: "A great round shield of wood faced with bronze, carried on the forearm." },
+  Greaves: { id: "Greaves", value: 25, name: "Greaves", greek: "knemides", kind: "wear", desc: "Bronze shin-guards, sprung to clip around the leg." },
+  Sandals: { id: "Sandals", value: 4, name: "Sandals", greek: "pedila", kind: "wear", desc: "Leather soles with thongs." },
+  Boots: { id: "Boots", value: 18, name: "High boots", greek: "kothornoi", kind: "wear", desc: "Soft leather boots laced to the calf." },
   Press: { id: "Press", value: 35, name: "Press", greek: "lenos", kind: "place", desc: "A beam press over a stone bed, for olives and grapes. Place it on your homestead." },
   Table: { id: "Table", value: 14, name: "Table", greek: "trapeza", kind: "place", desc: "A low wooden table, for meals and for setting things on. Furniture: set it down in your house." },
   Stool: { id: "Stool", value: 6, name: "Stool", greek: "diphros", kind: "place", desc: "A four-legged stool. Sit on it to rest a while." },
@@ -381,12 +400,25 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "LampStand", qty: 1, needs: [["Wood", 3], ["Lamp", 1]], desc: "A clay lamp on a tall stand, to light the house at night.", at: "workbench" },
   { out: "Pelt", qty: 1, needs: [["Hide", 3]], desc: "A fleece rug for the floor." },
   { out: "Basket", qty: 1, needs: [["Fiber", 4]], desc: "A wool basket for the corner." },
+  { out: "Sandals", qty: 1, needs: [["Hide", 1], ["Fiber", 1]], desc: "Leather sandals." },
+  { out: "Petasos", qty: 1, needs: [["Fiber", 5]], desc: "A broad straw hat against the sun." },
+  // Armor at the workbench.
+  { out: "Kynee", qty: 1, needs: [["Hide", 2]], desc: "A leather cap: head armor 1.", at: "workbench" },
+  { out: "LeatherShirt", qty: 1, needs: [["Hide", 3]], desc: "A leather jerkin: torso armor 1.", at: "workbench" },
+  { out: "Boots", qty: 1, needs: [["Hide", 3]], desc: "High boots, for long roads.", at: "workbench" },
+  { out: "TuskHelm", qty: 1, needs: [["Tusk", 4], ["Hide", 2]], desc: "A boar's-tusk helmet: head armor 2.", at: "workbench" },
+  { out: "Pelte", qty: 1, needs: [["Wood", 4], ["Hide", 2]], desc: "A light shield.", at: "workbench" },
+  { out: "Aspis", qty: 1, needs: [["Wood", 8], ["Hide", 2], ["Copper", 2]], desc: "A great round shield, bronze-faced.", at: "workbench" },
   // At the press.
   { out: "OliveOil", qty: 1, needs: [["Olives", 4]], desc: "Crush and press the olives, and let the oil settle.", at: "press", quality: true },
   { out: "Must", qty: 2, needs: [["Grapes", 5]], desc: "Press grapes to must, for the vat to ferment.", at: "press" },
   { out: "Must", qty: 1, needs: [["WildGrapes", 4]], desc: "Wild grapes give a thinner must.", at: "press" },
   // At the forge.
   { out: "Arrow", qty: 8, needs: [["Copper", 1], ["Wood", 2]], desc: "Cast bronze arrowheads, a whole quiver's worth.", at: "forge" },
+  { out: "Greaves", qty: 1, needs: [["Copper", 3]], desc: "Bronze greaves: leg armor 2.", at: "forge" },
+  { out: "Corinthian", qty: 1, needs: [["Copper", 5]], desc: "A Corinthian helmet: head armor 3.", at: "forge" },
+  { out: "ScaleCuirass", qty: 1, needs: [["Copper", 4], ["Hide", 2]], desc: "A scale cuirass: torso armor 3.", at: "forge" },
+  { out: "Cuirass", qty: 1, needs: [["Copper", 8]], desc: "A bronze cuirass: torso armor 4.", at: "forge" },
   { out: "Fibula", qty: 1, needs: [["Copper", 1]], desc: "A bronze cloak pin: a fine gift, or an offering to Athena.", at: "forge", quality: true },
   { out: "axe", qty: 1, needs: [["Copper", 3], ["Wood", 4]], desc: "Rework your axe with a finer bronze edge (fells oaks in two blows).", at: "forge", upgrade: 2 },
   { out: "mattock", qty: 1, needs: [["Copper", 4], ["Wood", 5]], desc: "Shoe your mattock with bronze (it splits boulders).", at: "forge", upgrade: 2 },
@@ -397,7 +429,13 @@ export const RECIPES: { out: string; qty: number; needs: [string, number][]; des
   { out: "Figurine", qty: 1, needs: [["Clay", 2], ["Ochre", 1]], desc: "A votive, painted with ochre: an excellent offering.", at: "kiln", quality: true },
   // At the loom.
   { out: "Cloth", qty: 1, needs: [["Fiber", 3]], desc: "A bolt of linen.", at: "loom", quality: true },
-  { out: "Cloak", qty: 1, needs: [["Cloth", 2], ["Hide", 1]], desc: "Turns a little of every blow (Health +1 while carried).", at: "loom", quality: true },
+  { out: "Cloak", qty: 1, needs: [["Cloth", 2], ["Hide", 1]], desc: "A traveler's cloak: keeps off the weather, and a blanket at night.", at: "loom" },
+  { out: "Chiton", qty: 1, needs: [["Cloth", 2]], desc: "A plain tunic.", at: "loom" },
+  { out: "Exomis", qty: 1, needs: [["Cloth", 1]], desc: "A working tunic: labor tires you less.", at: "loom" },
+  { out: "Peplos", qty: 1, needs: [["Cloth", 3]], desc: "A woolen dress, sacred to Athena.", at: "loom" },
+  { out: "Himation", qty: 1, needs: [["Cloth", 3]], desc: "A mantle against the weather.", at: "loom" },
+  { out: "Robes", qty: 1, needs: [["Cloth", 3], ["Flowers", 2]], desc: "Robes for the rites, dyed with flowers.", at: "loom" },
+  { out: "Linothorax", qty: 1, needs: [["Cloth", 6]], desc: "Linen armor: torso 2, shoulders 1.", at: "loom" },
   { out: "Rug", qty: 1, needs: [["Cloth", 2], ["Ochre", 1]], desc: "A woolen rug, dyed with ochre.", at: "loom" },
   { out: "Tapestry", qty: 1, needs: [["Cloth", 3], ["Ochre", 1]], desc: "A woven hanging for the wall.", at: "loom" },
 ];

@@ -4,6 +4,7 @@ import { DISH_IDS, NAMED } from "./cooking";
 import { FORAGE } from "./forage";
 import { VILLAGERS } from "./village";
 import { drawFurnIcon, makeHomeTextures } from "./home";
+import { WEAR, type Worn } from "./gear";
 
 // Placeholder pixel art, drawn in code. Warm Mediterranean palette.
 export const T = {
@@ -819,8 +820,34 @@ export function makeTextures(scene: Phaser.Scene) {
   });
 }
 
+/** Icons for the things you wear. */
+function drawGearIcon(c: Ctx, o: number, id: string): boolean {
+  const tunic = (col: string, long = false) => { px(c, o + 4, 3, 8, long ? 12 : 10, col); px(c, o + 2, 3, 3, 4, col); px(c, o + 11, 3, 3, 4, col); px(c, o + 6, 2, 4, 2, "rgba(0,0,0,0.25)"); };
+  switch (id) {
+    case "Chiton": tunic("#e9e1cf"); px(c, o + 4, 7, 8, 1, "#b0412f"); return true;
+    case "Exomis": tunic("#b8a47a"); px(c, o + 11, 3, 3, 4, "rgba(0,0,0,0)"); c.clearRect(o + 11, 3, 3, 4); px(c, o + 4, 7, 8, 1, "#6b4a2b"); return true;
+    case "Peplos": tunic("#5a6aa0", true); px(c, o + 4, 6, 8, 1, "#7a8ac0"); return true;
+    case "Robes": tunic("#f0ead8", true); px(c, o + 4, 14, 8, 1, "#d39a3a"); px(c, o + 2, 6, 3, 1, "#d39a3a"); px(c, o + 11, 6, 3, 1, "#d39a3a"); return true;
+    case "Himation": px(c, o + 2, 3, 12, 11, "#c8bc9e"); for (let k = 0; k < 10; k++) px(c, o + 3 + k, 3 + k, 1, 1, "#a89c7e"); px(c, o + 2, 13, 12, 1, "#a89c7e"); return true;
+    case "Petasos": px(c, o + 1, 9, 14, 3, "#c8a050"); px(c, o + 2, 8, 12, 1, "#d8b468"); px(c, o + 5, 4, 6, 5, "#d3ad5e"); px(c, o + 5, 7, 6, 1, "#8a3a2a"); return true;
+    case "Kynee": px(c, o + 3, 5, 10, 7, "#8a6440"); px(c, o + 4, 4, 8, 1, "#a8804e"); px(c, o + 3, 11, 10, 1, "#6b4a2b"); px(c, o + 4, 8, 8, 1, "#6b4a2b"); return true;
+    case "TuskHelm": px(c, o + 3, 4, 10, 9, "#e8dcc4"); for (const y of [6, 9, 12]) px(c, o + 3, y, 10, 1, "#8a6440"); px(c, o + 7, 2, 2, 2, "#8a6440"); return true;
+    case "Corinthian": px(c, o + 3, 4, 10, 10, "#c8a050"); px(c, o + 2, 2, 12, 2, "#b0412f"); px(c, o + 4, 8, 3, 1, "#2a1d14"); px(c, o + 9, 8, 3, 1, "#2a1d14"); px(c, o + 7, 8, 2, 4, "#a8803a"); px(c, o + 5, 11, 2, 3, "rgba(0,0,0,0)"); c.clearRect(o + 6, 11, 4, 3); px(c, o + 4, 5, 1, 4, "#f0d890"); return true;
+    case "LeatherShirt": tunic("#8a6440"); px(c, o + 8, 3, 1, 8, "#6b4a2b"); return true;
+    case "Linothorax": tunic("#e8dcc0"); px(c, o + 2, 3, 12, 2, "#b0412f"); for (let x = 4; x < 12; x += 2) px(c, o + x, 12, 1, 3, "#e8dcc0"); return true;
+    case "ScaleCuirass": tunic("#b8903a"); for (let y = 4; y < 13; y++) for (let x = 4 + (y % 2); x < 12; x += 2) px(c, o + x, y, 1, 1, "#8a6a2a"); return true;
+    case "Cuirass": tunic("#d0a848"); px(c, o + 6, 5, 4, 1, "#a8803a"); px(c, o + 7, 6, 2, 3, "#a8803a"); px(c, o + 5, 4, 1, 6, "#f0d890"); px(c, o + 4, 11, 8, 1, "#a8803a"); return true;
+    case "Pelte": px(c, o + 2, 4, 12, 9, "#8a6440"); px(c, o + 5, 2, 2, 3, "#8a6440"); px(c, o + 9, 2, 2, 3, "#8a6440"); c.clearRect(o + 7, 2, 2, 4); px(c, o + 5, 7, 6, 2, "#c8a050"); return true;
+    case "Aspis": px(c, o + 4, 1, 8, 14, "#c8a050"); px(c, o + 2, 3, 12, 10, "#c8a050"); px(c, o + 1, 5, 14, 6, "#c8a050"); px(c, o + 5, 5, 6, 6, "#b0412f"); px(c, o + 7, 7, 2, 2, "#c8a050"); px(c, o + 4, 1, 8, 1, "#f0d890"); return true;
+    case "Greaves": for (const x of [3, 9]) { px(c, o + x, 2, 4, 12, "#c8a050"); px(c, o + x, 2, 1, 12, "#f0d890"); px(c, o + x + 1, 6, 2, 2, "#a8803a"); } return true;
+    case "Sandals": for (const x of [2, 9]) { px(c, o + x, 5, 5, 10, "#8a6440"); px(c, o + x + 1, 7, 3, 1, "#4a3220"); px(c, o + x + 1, 10, 3, 1, "#4a3220"); } return true;
+    case "Boots": for (const x of [2, 9]) { px(c, o + x, 2, 4, 10, "#6b4a2b"); px(c, o + x, 11, 6, 3, "#6b4a2b"); px(c, o + x, 4, 4, 1, "#8a6440"); px(c, o + x, 7, 4, 1, "#8a6440"); } return true;
+  }
+  return false;
+}
+
 export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
-  "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
+  "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish"];
 
 const CROP_COL: Record<string, [string, string]> = {
@@ -892,6 +919,7 @@ const FORAGE_ICON: Record<string, string> = { WildGrapes: "wildgrape", Plum: "pl
 
 function drawIcon(c: Ctx, o: number, id: string) {
   if (drawFurnIcon(c, o, id)) return;
+  if (drawGearIcon(c, o, id)) return;
   if (id === "rod") { for (let i = 0; i < 12; i++) px(c, o + 2 + i, 13 - i, 1, 1, "#8a5a2a"); px(c, o + 13, 1, 1, 9, "rgba(230,230,220,0.7)"); px(c, o + 12, 10, 2, 2, "#d8402a"); return; }
   const FISHC: Record<string, [string, string, number]> = { Chub: ["#8a8a6a", "#c8c8a8", 9], Perch: ["#6a8a3a", "#c8d070", 9], Trout: ["#7a8a7a", "#e0a0a0", 10], Mullet: ["#8a9098", "#d8dce0", 10],
     Sardine: ["#5a7a9a", "#e0e8f0", 7], Bream: ["#8a9aa8", "#f0d060", 10], RedMullet: ["#c85a50", "#f0b0a0", 9], Tuna: ["#2a3a5a", "#a0b0c8", 12] };
@@ -1050,17 +1078,24 @@ export const POSE = { stand: 0, walk1: 1, walk2: 2, raise: 3, strike: 4, lookA: 
  * The player in 4 facings (down, left, right, up) x 7 poses: standing, two walking steps,
  * raising and striking with a tool, and a hand over the brow looking one way, then the other.
  */
-export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }) { makeFigureTexture(scene, "player", look); }
+export function makePlayerTexture(scene: Phaser.Scene, look: { tunic: string; hair: string; skin: string }, worn?: Worn) { makeFigureTexture(scene, "player", look, worn ? { gear: worn } : {}); }
 
 export interface FigureExtras { beard?: boolean; long?: boolean; veil?: string;
   /** A traveler's broad-brimmed hat (petasos), in this color. */ hat?: string;
   /** Something carried upright: a walking staff, a spear, a club, or a bow. */ pole?: "staff" | "spear" | "club" | "bow";
-  /** A bundle on the back, in this color. */ pack?: string }
+  /** A bundle on the back, in this color. */ pack?: string;
+  /** What they wear (gear.ts): drawn over the figure. */ gear?: Worn }
 /** Any walking person: the player, villagers, the folk of the wild huts. Same 28 frames as the player. */
 export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tunic: string; hair: string; skin: string }, ex: FigureExtras = {}) {
   if (scene.textures.exists(key)) scene.textures.remove(key);
   const belt = look.tunic === "#b0412f" ? "#e9e1cf" : "#b0412f";
-  const leg = "#6b4a2b", eye = "#2a1d14", tool = "#7a5a33", toolHead = "#9c968a";
+  const eye = "#2a1d14", tool = "#7a5a33", toolHead = "#9c968a";
+  const gw = (slot: keyof Worn) => { const id = ex.gear?.[slot]; return id ? WEAR[id] : undefined; };
+  const gBody = gw("body"), gArmor = gw("armor"), gCloak = gw("cloak"), gShield = gw("shield"), gHead = gw("head"), gLegs = gw("legs"), gFeet = gw("feet");
+  // Legs: bare, or in greaves, boots, sandals.
+  const leg = gLegs ? gLegs.look.col! : gFeet?.look.kind === "boots" ? gFeet.look.col! : "#6b4a2b";
+  const foot = gFeet?.look.kind === "boots" ? gFeet.look.col! : gFeet?.look.kind === "sandals" ? "#4a3220" : leg;
+  if (gHead?.look.kind === "petasos" && !ex.hat) ex = { ...ex, hat: gHead.look.col };
   const player = canvasTex(scene, key, 16 * 4 * POSES, 16, (c) => {
     for (let f = 0; f < 4; f++) for (let pose = 0; pose < POSES; pose++) {
       const o = (f * POSES + pose) * 16;
@@ -1070,13 +1105,28 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
       const walk = pose === 1 ? 1 : pose === 2 ? -1 : 0;
       p(5, 13, 6, 2, "rgba(0,0,0,0.25)");
       // Legs.
-      if (!side) {
-        p(6, 13, 1, walk === -1 ? 1 : 2, leg); p(9, 13, 1, walk === 1 ? 1 : 2, leg);
-      } else if (walk === 1) { p(9, 13, 1, 2, leg); p(6, 13, 1, 2, leg); }
-      else if (walk === -1) { p(7, 13, 1, 2, leg); p(8, 13, 1, 1, leg); }
-      else { p(7, 13, 1, 2, leg); p(8, 13, 1, 2, leg); }
-      // Body and head.
-      p(5, 6, 6, 7, look.tunic); p(5, 9, 6, 1, belt);
+      const L2 = (x: number, h: number) => { p(x, 13, 1, h, leg); if (h === 2) p(x, 14, 1, 1, foot); };
+      if (!side) { L2(6, walk === -1 ? 1 : 2); L2(9, walk === 1 ? 1 : 2); }
+      else if (walk === 1) { L2(9, 2); L2(6, 2); }
+      else if (walk === -1) { L2(7, 2); L2(8, 1); }
+      else { L2(7, 2); L2(8, 2); }
+      // A cloak hangs behind (seen from the back, it covers you).
+      if (gCloak && f === 3) { const ck = gCloak.look; p(4, 5, 8, 9, ck.col!); p(5, 12, 6, 1, "rgba(0,0,0,0.18)"); if (ck.kind === "lion") { p(4, 13, 2, 1, ck.col!); p(10, 13, 2, 1, ck.col!); } }
+      else if (gCloak && side) p(3, 6, 2, 7, gCloak.look.col!);
+      // Body: the garment, then armor over it.
+      const bk = gBody?.look.kind ?? "chiton", bcol = bk === "chiton" ? look.tunic : gBody!.look.col!;
+      if (bk === "peplos" || bk === "robes") { p(5, 6, 6, 8, bcol); p(5, 8, 6, 1, "rgba(255,255,255,0.18)"); if (bk === "robes") p(5, 13, 6, 1, gBody!.look.col2!); }
+      else if (bk === "exomis") { p(5, 6, 6, 6, bcol); if (!side && f !== 3) p(9, 6, 2, 1, look.skin); else if (side) p(7, 6, 2, 1, look.skin); }
+      else p(5, 6, 6, 7, bcol);
+      if (gArmor) {
+        const ak = gArmor.look.kind, a1 = gArmor.look.col!, a2 = gArmor.look.col2!;
+        p(5, 6, 6, 4, a1);
+        if (ak === "scale") for (let yy = 6; yy < 10; yy++) for (let xx = 5 + (yy % 2); xx < 11; xx += 2) p(xx, yy, 1, 1, a2);
+        if (ak === "bronze") { p(f === 3 ? 5 : 6, 7, 1, 2, "#f0d890"); if (f === 0) { p(7, 7, 1, 1, a2); p(8, 7, 1, 1, a2); p(7, 8, 2, 1, a2); } }
+        if (ak === "armor" && a2 === "#b0412f") { p(5, 6, 6, 1, a2); for (let xx = 5; xx < 11; xx += 2) p(xx, 10, 1, 2, a1); } // a linothorax: shoulder-pieces, and its skirt of strips
+        if (ak === "armor" && a2 !== "#b0412f" && !side) p(f === 3 ? 6 : 9, 6, 1, 3, a2); // the jerkin's lacing
+      }
+      p(5, 9, 6, 1, gArmor?.look.kind === "bronze" ? gArmor.look.col2! : belt);
       p(6, 1, 4, 5, look.skin); p(6, 1, 4, 2, look.hair);
       if (f === 3) p(6, 1, 4, 4, look.hair);
       if (ex.long) { if (f === 3) p(5, 1, 6, 6, look.hair); else if (side) p(5, 1, 1, 6, look.hair); else { p(5, 2, 1, 5, look.hair); p(10, 2, 1, 5, look.hair); } }
@@ -1087,6 +1137,18 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
         const ex = pose === 5 ? 8 : pose === 6 ? 6 : 7;
         p(ex, 3, 1, 1, eye); p(ex + 1, 3, 1, 1, eye);
       } else if (side) p(pose === 6 ? 8 : 9, 3, 1, 1, eye);
+      // Headgear.
+      if (gHead && gHead.look.kind !== "petasos") {
+        const hk = gHead.look.kind, h1 = gHead.look.col!, h2 = gHead.look.col2 ?? h1;
+        if (hk === "cap") { if (f === 3) p(6, 1, 4, 4, h1); else p(6, 1, 4, 2, h1); p(6, 2, 4, 1, "rgba(0,0,0,0.2)"); }
+        else if (hk === "tusk") { if (f === 3) p(6, 0, 4, 5, h1); else p(6, 0, 4, 3, h1); p(6, 1, 4, 1, h2); p(6, 3, 4, 1, h2); p(7, 0, 2, 1, h2); }
+        else if (hk === "corinth") {
+          p(6, 1, 4, 5, h1); p(5, 0, 6, 1, h2); p(7, 0, 2, 1, h2); // bronze bowl and a horsehair crest
+          if (f === 0) { p(6, 3, 1, 1, eye); p(9, 3, 1, 1, eye); p(7, 4, 2, 2, look.skin); p(7, 3, 2, 1, "#a8803a"); }
+          else if (side) { p(9, 3, 1, 1, eye); p(9, 4, 1, 2, look.skin); }
+          p(f === 3 ? 6 : 6, 2, 1, 2, "#f0d890");
+        }
+      }
       // The pack on the back (drawn first on the back view, so it sits on the tunic).
       if (ex.pack) { if (f === 3) { p(5, 6, 6, 5, ex.pack); p(6, 7, 4, 1, "rgba(0,0,0,0.18)"); } else if (side) p(3, 6, 2, 5, ex.pack); else { p(6, 6, 1, 3, "#6b4a2b"); p(9, 6, 1, 3, "#6b4a2b"); } }
       // The petasos: a wide brim over the brow and a low crown.
@@ -1108,6 +1170,22 @@ export function makeFigureTexture(scene: Phaser.Scene, key: string, look: { tuni
         else if (pose === 3) { p(6, 2, 1, 5, sk); p(5, 0, 2, 2, toolHead); p(6, 2, 1, 1, tool); }
         else if (pose === 4) { p(9, 8, 4, 1, sk); p(13, 7, 1, 3, tool); p(14, 9, 2, 2, toolHead); }
         else { p(9, 5, 1, 3, sk); p(9, 2, 3, 1, sk); p(10, 3, 1, 1, sk); }
+      }
+      // A cloak's edges in front, pinned at the shoulder; a lion's head worn as a hood.
+      if (gCloak && f !== 3) {
+        const ck = gCloak.look;
+        if (ck.kind === "lion") { p(5, 0, 6, 2, ck.col2!); p(5, 0, 1, 1, ck.col!); p(10, 0, 1, 1, ck.col!); p(6, 1, 4, 1, ck.col!); p(7, 1, 2, 1, "#a87a3a"); if (f === 0) { p(5, 1, 1, 5, ck.col2!); p(10, 1, 1, 5, ck.col2!); p(6, 8, 1, 2, ck.col!); p(9, 8, 1, 2, ck.col!); } else p(5, 1, 2, 6, ck.col2!); }
+        else if (ck.kind === "himation") { if (f === 0) { p(5, 6, 2, 1, ck.col!); p(6, 7, 2, 1, ck.col!); p(7, 8, 2, 2, ck.col!); p(8, 10, 3, 2, ck.col!); } else p(5, 7, 4, 4, ck.col!); }
+        else if (f === 0) { p(5, 6, 1, 7, ck.col!); p(10, 6, 1, 7, ck.col!); p(6, 6, 1, 1, "#d9b25e"); }
+      }
+      // A shield on the left arm: round (aspis) or crescent (pelte).
+      if (gShield && !(pose === 3 || pose === 4)) {
+        const sk2 = gShield.look, big = sk2.kind === "aspis", s1 = sk2.col!, s2 = sk2.col2!;
+        const disc = (x: number, y: number) => {
+          if (big) { p(x + 1, y, 4, 7, s1); p(x, y + 1, 6, 5, s1); p(x + 2, y + 2, 2, 3, s2); p(x + 1, y, 4, 1, "#f0d890"); }
+          else { p(x, y + 1, 5, 4, s1); p(x + 1, y + 5, 3, 1, s1); p(x + 1, y, 1, 1, s1); p(x + 3, y, 1, 1, s1); p(x + 2, y + 1, 1, 1, s2); p(x + 1, y + 2, 3, 1, s2); }
+        };
+        if (f === 0) disc(big ? 10 : 10, 6); else if (f === 3) disc(big ? 0 : 1, 6); else disc(big ? 2 : 3, 6);
       }
       // What they carry, held upright while they walk or stand (not in the working poses).
       if (ex.pole && (pose <= 2 || pose >= 5)) {
