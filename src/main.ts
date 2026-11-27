@@ -8,7 +8,7 @@ import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary,
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
 import type { SiteRec } from "./sites";
-import { WAYFARERS, rollWayfarers, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
+import { WAYFARERS, rollWayfarers, wayChance, makeParty, findPath, Wayfarer, FigureFoe, WOLF_CRY, NEAR_WORDS, WAY_SEEN, WAY_COMING, pick, theTitle, type WayDef } from "./wayfarers";
 import { Ambience, varyLayers, scatterDetails, seasonGroundTint, jitterLayer, jitterOf, softenPatches } from "./ambience";
 import { SOUND } from "./audio";
 import { villageHouseholds, HOUSE_SPOTS, Walker, pickGossip, HUT_KINDS, makeFolk, type Household, type Folk } from "./folk";
@@ -5869,10 +5869,15 @@ class WildScene extends PlayScene {
   /** Creatures going after something other than you: a wolf after a goat, a wounded boar after its hunter, a man running off. */
   chase = new Map<Animal, { to: () => { x: number; y: number } | null; speed: number; reach: () => void; leave?: boolean }>();
 
+  /** How likely people are about here: near your farm and the village, and with roads, more; out in the wilds, seldom. */
+  get peopleChance() {
+    const near = Math.min(Math.max(Math.abs(G.data.wx), Math.abs(G.data.wy)), Math.max(Math.abs(G.data.wx), Math.abs(G.data.wy - 1)));
+    return wayChance(near, this.rec.roads?.length ?? 0);
+  }
   /** On arrival: perhaps someone is here, on the road or at their work. */
   setupWayfarers() {
     this.ways = []; this.chase = new Map(); this.wayT = 50 + Math.random() * 60;
-    const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: this.water.length > 6, monster: !!this.monster, hutHere: !!this.rec.hut, only: this.site ? (w) => w.mode === "cross" : undefined });
+    const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: this.water.length > 6, monster: !!this.monster, hutHere: !!this.rec.hut, only: this.site ? (w) => w.mode === "cross" : undefined, chance: this.peopleChance });
     if (def) { const g = this.spawnWay(def, false); if (g) this.time.delayedCall(900, () => G.say(WAY_SEEN[def.id] ?? `Here: ${def.title.toLowerCase()}.`)); }
   }
 
@@ -6084,7 +6089,7 @@ class WildScene extends PlayScene {
     if ((this.wayT -= dt) <= 0) {
       this.wayT = 70 + Math.random() * 90;
       if (this.ways.length < 2 && !this.ways.some((g) => g.def.hostile) && !this.monster) {
-        const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: false, monster: false, hutHere: true, only: (w) => w.mode === "cross" });
+        const def = rollWayfarers(Math.random, { terrain: this.rec.terrain, road: !!this.rec.roads?.length, depth: this.depth, day: G.isDay, water: false, monster: false, hutHere: true, only: (w) => w.mode === "cross", chance: this.peopleChance * 0.8 }); // passers-by, as often as people are about here
         if (def && this.spawnWay(def, true)) G.say(WAY_COMING[def.id] ?? `Someone is coming along the way: ${def.title.toLowerCase()}.`);
       }
     }

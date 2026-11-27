@@ -147,9 +147,20 @@ export const theTitle = (t: string) => (/^an? /i.test(t) ? t.replace(/^an? /i, "
  * Who you meet, if anyone, on arriving: a d12 roll, more likely on a road, rarer at night (when most folk keep to fires
  * and roofs). Brigands are about one meeting in twenty, a little more at night and far out.
  */
-export function rollWayfarers(r: () => number, o: { terrain: number; road: boolean; depth: number; day: boolean; water: boolean; monster: boolean; hutHere: boolean; only?: (w: WayDef) => boolean }): WayDef | null {
+/**
+ * How likely someone is about, on a wild screen: people keep near the farms and the village, and to the roads.
+ * `near` is how many screens it is from your farm or the village (whichever is closer); `roads` how many of its
+ * edges a road crosses. Close in, on a road, someone is about one time in two; out past the third ring of screens,
+ * off the roads, hardly ever.
+ */
+export function wayChance(near: number, roads: number): number {
+  const prox = near <= 1 ? 1 : near === 2 ? 0.6 : near === 3 ? 0.3 : 0.12;
+  const road = roads <= 0 ? 0.35 : roads === 1 ? 0.8 : roads === 2 ? 1.1 : 1.3;
+  return 0.45 * prox * road;
+}
+export function rollWayfarers(r: () => number, o: { terrain: number; road: boolean; depth: number; day: boolean; water: boolean; monster: boolean; hutHere: boolean; only?: (w: WayDef) => boolean; chance?: number }): WayDef | null {
   if (o.monster || o.depth < 1) return null;
-  const chance = (o.road ? 0.36 : 0.18) * (o.day ? 1 : 0.4);
+  const chance = (o.chance ?? (o.road ? 0.36 : 0.18)) * (o.day ? 1 : 0.4);
   if (r() >= chance) return null;
   const pool = WAYFARERS.filter((w) => (!o.only || o.only(w)) && (!w.terrains.length || w.terrains.includes(o.terrain)) && (!w.water || o.water) && o.depth >= (w.minDepth ?? 1)
     && (w.when === "any" || (w.when === "day") === o.day) && !(o.hutHere && (w.id === "herbwoman" || w.id === "woodcutter")));
