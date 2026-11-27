@@ -13,6 +13,7 @@ async def main():
         print("cap:", await pg.evaluate("G.friendCap"))
         # --- A wanderer: a traveler; ask where bound, share food, ask to join, give a cloak.
         print("spawned:", await spawn(pg, "traveler"))
+        await pg.evaluate(f"{G0}.people[0].folk.age='adult'")  # elders don't take the road with you
         await pg.evaluate("G.addItem('Millet', 3); G.addItem('Cloak', 1); G.data.selected=G.data.slots.findIndex(q=>q&&q.id==='Millet')")
         print(" talk:", await talk(pg))
         nm = await pg.evaluate(f"{G0}.people[0].folk.name")

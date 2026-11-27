@@ -6,9 +6,9 @@ async def main():
         pg = await b.new_page(viewport={"width":960,"height":640})
         errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
         await pg.goto("file:///home/claude/works-and-days/dist/index.html"); await pg.wait_for_timeout(1200)
-        await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
+        await pg.mouse.click(480,320); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1800)
         if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
-        await pg.evaluate("game.scene.getScene('UI').help.setVisible(false); game.scene.getScene('UI').modal=false; game.scene.getScene('House').goTo('Farm')"); await pg.wait_for_timeout(2500)
+        await pg.wait_for_function("game.scene.getScene('UI')?.help && game.scene.isActive('House')", timeout=20000); await pg.evaluate("game.scene.getScene('UI').help.setVisible(false); game.scene.getScene('UI').modal=false; game.scene.getScene('House').goTo('Farm')"); await pg.wait_for_timeout(2500)
         F="game.scene.getScene('Farm')"
         msg = lambda: pg.evaluate("G.messages.map(m=>m.text).slice(-3).join(' | ')")
         print("scene", await pg.evaluate("G.data.scene"), "bow", await pg.evaluate("G.data.slots.findIndex(s=>s&&s.id==='bow')"), "arrows", await pg.evaluate("G.count('Arrow')"))

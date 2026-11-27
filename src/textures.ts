@@ -4,6 +4,7 @@ import { DISH_IDS, NAMED } from "./cooking";
 import { FORAGE } from "./forage";
 import { ASPECTS, PHARM_ICON_IDS, type Aspect } from "./pharmakeia";
 import { CIRCLET_ICON_IDS } from "./circlets";
+import { HERD_ICON_IDS } from "./herd";
 import { VILLAGERS } from "./village";
 import { drawFurnIcon, makeHomeTextures } from "./home";
 import { WEAR, type Worn } from "./gear";
@@ -528,6 +529,42 @@ export function makeTextures(scene: Phaser.Scene) {
     px(c, o + 2, 6, 11, 5, B); px(c, o + 12, 2, 2, 6, B); px(c, o + 13, 1, 3, 3, B); px(c, o + 15, 3, 1, 1, "#2a1a10");
     px(c, o + 11, 1, 2, 6, D); px(c, o + 0, 6, 2, 5, D); px(c, o + 14, 2, 1, 1, "#1a1008");
   });
+  // ---- the household's working animals (herd.ts) ----
+  strip("hound", (c, o, f) => { // a lean Laconian hound, tawny with a dark muzzle
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)");
+    const B = "#b8844a", D = "#4a3220", L = "#d8b07a";
+    if (f === 0) { px(c, o + 4, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 3, 10, 1, 4, D); px(c, o + 7, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 3, 7, 10, 4, B); px(c, o + 5, 10, 6, 1, L); px(c, o + 1, 5, 3, 1, B); px(c, o + 0, 4, 1, 2, B);
+    px(c, o + 11, 4, 4, 4, B); px(c, o + 15, 6, 1, 2, D); px(c, o + 11, 3, 2, 2, D); px(c, o + 13, 5, 1, 1, "#1a1008");
+    px(c, o + 11, 8, 2, 1, "#b04030"); // a red collar
+  });
+  strip("ox", (c, o, f) => { // a big dun ox with pale horns
+    px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.25)");
+    const B = "#a8845a", D = "#5a4028", L = "#c8a878";
+    if (f === 0) { px(c, o + 2, 11, 2, 3, D); px(c, o + 5, 11, 2, 3, D); px(c, o + 9, 11, 2, 3, D); px(c, o + 12, 11, 1, 3, D); }
+    else { px(c, o + 1, 11, 2, 3, D); px(c, o + 6, 11, 2, 3, D); px(c, o + 8, 11, 2, 3, D); px(c, o + 12, 11, 2, 3, D); }
+    px(c, o + 1, 5, 12, 7, B); px(c, o + 2, 10, 10, 1, L); px(c, o + 1, 4, 9, 1, B); px(c, o + 0, 6, 1, 4, D);
+    px(c, o + 12, 5, 4, 5, B); px(c, o + 13, 9, 3, 2, L); px(c, o + 14, 6, 1, 1, "#1a1008");
+    px(c, o + 11, 3, 1, 2, "#efe6d0"); px(c, o + 15, 3, 1, 2, "#efe6d0"); px(c, o + 10, 2, 1, 1, "#efe6d0");
+  });
+  strip("donkey", (c, o, f) => { // a grey donkey with long ears and panniers
+    px(c, o + 2, 14, 12, 2, "rgba(0,0,0,0.22)");
+    const B = "#8a8478", D = "#3a3630", L = "#c8c2b4";
+    if (f === 0) { px(c, o + 3, 10, 1, 4, D); px(c, o + 5, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 2, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 2, 6, 11, 5, B); px(c, o + 3, 10, 9, 1, L); px(c, o + 1, 6, 1, 4, D);
+    px(c, o + 12, 4, 3, 4, B); px(c, o + 13, 7, 3, 2, L); px(c, o + 12, 1, 1, 3, B); px(c, o + 14, 1, 1, 3, B); px(c, o + 14, 5, 1, 1, "#1a1008");
+    px(c, o + 4, 5, 6, 1, D); px(c, o + 4, 6, 3, 4, "#8a6a40"); px(c, o + 8, 6, 3, 4, "#7a5a34"); // the panniers
+  });
+  strip("steed", (c, o, f) => { // a bay riding horse, bridled, with a red saddle-cloth
+    px(c, o + 1, 14, 14, 2, "rgba(0,0,0,0.22)"); const B = "#7a4a2a", D = "#2a1a10";
+    if (f === 0) { px(c, o + 3, 10, 1, 4, D); px(c, o + 5, 10, 1, 4, D); px(c, o + 10, 10, 1, 4, D); px(c, o + 12, 10, 1, 4, D); }
+    else { px(c, o + 2, 10, 1, 4, D); px(c, o + 6, 10, 1, 4, D); px(c, o + 9, 10, 1, 4, D); px(c, o + 13, 10, 1, 4, D); }
+    px(c, o + 2, 6, 11, 5, B); px(c, o + 12, 2, 2, 6, B); px(c, o + 13, 1, 3, 3, B); px(c, o + 15, 3, 1, 1, D);
+    px(c, o + 11, 1, 2, 6, D); px(c, o + 0, 6, 2, 5, D); px(c, o + 14, 2, 1, 1, "#1a1008");
+    px(c, o + 5, 5, 5, 3, "#b03a2a"); px(c, o + 5, 8, 5, 1, "#e0b048"); px(c, o + 13, 3, 3, 1, "#c8a060"); // saddle-cloth and bridle
+  });
   strip("bustard", (c, o, f) => {
     px(c, o + 4, 14, 8, 1, "rgba(0,0,0,0.2)"); const B = "#b89a6a";
     px(c, o + (f ? 6 : 7), 11, 1, 3, "#8a7a5a"); px(c, o + (f ? 9 : 8), 11, 1, 3, "#8a7a5a");
@@ -880,7 +917,7 @@ function drawGearIcon(c: Ctx, o: number, id: string): boolean {
   return false;
 }
 
-export const ITEM_ICON_ORDER = ["Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
+export const ITEM_ICON_ORDER = [...HERD_ICON_IDS, "Pearl", "Moly", "Clew", "Labrys", "Torch", "Copper", "GoldDust", "Must", "Wine", "Cutting", "Ivy", "Syrinx", "WildGrapes", "Plum", "Cornel", "Purslane", "Oats", "Thyme", "Capers", "Clay", "Ochre", "Mushrooms", "SeaFennel", "Saltbush", "MountainTea", "Thistle", "Fennel", "Fibula", "Figurine", "Arrowhead", "OldCoin", "Nest", "Fossil", "Obsidian", "Amber", "OwlFeather", "Thunderstone", "HeliadTear", "LionPelt",
   "Workbench", "Kiln", "Loom", "Chest", "Table", "Stool", "Chair", "Couch", "Rug", "Pelt", "LampStand", "Basket", "Vase", "Tapestry", "Fence", "Snare", "Amphora", "WineAmphora", "Lamp", "Cloth", "Kopis", "Club", "SilverDagger", "Cestus", "Sling", "Javelin", "FireArrow", "HealerKit", "Tackle", "Mirror", "Waterskin", "Tent", "Map", "Loadstone", "Scale", "Knife", "Pack", "Cloak", "Chiton", "Exomis", "Peplos", "Robes", "Himation", "Petasos", "Kynee", "TuskHelm", "Corinthian", "LeatherShirt", "Linothorax", "ScaleCuirass", "Cuirass", "Pelte", "Aspis", "Greaves", "Sandals", "Boots", "Garland", "Campfire", "Boat", "Press", "Forge", "Olives", "OliveOil", "Parcel", "spear", "sword", "hoe", "jar", "sickle", "axe", "mattock", "bow", "Arrow", "Meat", "Hide", "Antler", "Tusk", "Feather", "Wood", "Stone", "Fiber", "Flowers", "Milk", "Honey", "Wax", "Grapes",
   ...Object.keys(CROPS), ...Object.keys(CROPS).map(seedId), ...DISH_IDS, "Lyre", "Aulos", "rod", "Chub", "Perch", "Trout", "Eel", "Mullet", "Sardine", "Bream", "RedMullet", "Octopus", "Tuna", "Cuttlefish", ...PHARM_ICON_IDS, ...CIRCLET_ICON_IDS];
 
@@ -1053,6 +1090,7 @@ function drawIcon(c: Ctx, o: number, id: string) {
     if (id === "OliveSprig") for (const [x, y] of [[9, 8], [5, 4]]) px(c, o + x, y, 1, 1, "#3a3a2a");
     return;
   }
+  if (id === "Ard") { for (let i = 0; i < 11; i++) px(c, o + 2 + i, 3 + Math.floor(i * 0.5), 2, 1, "#8a6a42"); px(c, o + 11, 8, 2, 5, "#7a5a34"); px(c, o + 10, 12, 5, 2, "#c88a4a"); px(c, o + 13, 13, 2, 1, "#9a6a32"); px(c, o + 6, 2, 1, 4, "#6a4a2a"); return; }
   if (id === "Mortar") { px(c, o + 3, 8, 10, 5, "#a09888"); px(c, o + 4, 13, 8, 1, "#7a7266"); px(c, o + 4, 8, 8, 2, "#5a5448"); px(c, o + 5, 8, 6, 1, "#6a9a4a"); for (let i = 0; i < 6; i++) px(c, o + 8 + i, 7 - i, 2, 1, "#8a6a42"); return; }
   if (id.startsWith("pharm_")) {
     const col = ASPECTS[id.slice(6) as Aspect]?.color ?? "#c9a35a";

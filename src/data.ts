@@ -249,7 +249,7 @@ export const ITEMS: Record<string, ItemDef> = {
 };
 
 // ---- the homestead's animals ----
-export const MANGER_MAX = 6; // fodder, one per goat per night
+export const MANGER_MAX = 10; // fodder, one per goat and working beast per night
 export const TROUGH_MAX = 6; // water, one per goat per night
 export const HIVE_DAYS = 4; // days for the bees to fill new comb
 export interface Goat { name: string; tint: number; affection: number; fed: boolean; pettedDay: number; milkedDay: number; songDay?: number }

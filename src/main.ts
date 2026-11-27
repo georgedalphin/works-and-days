@@ -28,6 +28,7 @@ import { WHEEL, ITEMS, JAR_CAPACITY, INVENTORY_SIZE, STACK_MAX, MANGER_MAX, TROU
   CROPS, seedId, QUALITY, QUALITY_MULT, money, TERRAINS, CAVE_KINDS, CAVE_LEVELS, type CaveType, VAT_REPAIR, GRAPES_PER_MUST, FERMENT_DAYS, VINE_BEARS_AFTER, YOUNG_VINE_YIELD, BOW_RANGE, ARROW_SPEED, QUARRY, ARCHERY, RECIPES, PEACE_FOOD, MELEE, MELEE_REACH, WEAPONS, SPEAR_THROW, SWORD_ORDER, START_LIFE_THREAD, SLICE_TERRAINS } from "./data";
 import type { CropRec } from "./state";
 import { LORE, TIERS, TIER_MOD, RARITY_MOD, HERA_HOUR_BONUS, MAX_PERSEVERANCE, loreLines } from "./lore";
+import { BEASTS, OX_DAY, newBeast, type Beast, type BeastKind } from "./herd";
 import { Animal, SPECIES, SURE_FOOTED, BREATHLESS, type Species } from "./animals";
 import { FORAGE, bearing, type ForageDef } from "./forage";
 import { artCondition, artWhere, RURAL_TEACHERS, type ArtCtx } from "./rural";
@@ -68,6 +69,10 @@ const TEACH = "\n\n(You learn Pharmakeia, the herb-Art: every check is 2 easier 
 
 /** Something the player can use with E: a door, the bed, a sign. */
 interface Target { x: number; y: number; label: string; act: () => void }
+/** A Greek name's possessive: Argos' and Onos', but Aura's. */
+const poss = (n: string) => (n.endsWith("s") ? `${n}'` : `${n}'s`);
+/** One of your working animals in the scene. */
+interface HerdSprite { b: Beast; sprite: Phaser.GameObjects.Sprite; t: Target; animT: number; biteT: number; huntT: number; wanderT: number; tx: number; ty: number; scented: boolean; goal?: Animal; mode?: "guard" | "catch" | "bay" }
 
 // ------------------------------------------------------------------ helpers
 function ui(scene: Phaser.Scene) { return scene.scene.get("UI") as unknown as UIScene; }
@@ -437,7 +442,8 @@ abstract class PlayScene extends Phaser.Scene {
     speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     const gear = G.gear; speed *= Math.max(0.7, 1 + 0.06 * gear.aiolos) * (gear.feet >= 2 && !w ? 1.04 : 1); // bronze weighs you down; good boots carry you
     if (G.grace("Hermes") >= 4 && this.onRoad()) speed *= 1.25; // Road-Blessed
-    if (this.pet?.riding) speed *= 1.75; // on horseback
+    if (this.pet?.riding || this.riding) speed *= this.riding && G.data.beasts.find((b) => b.id === this.riding)?.hungry === G.dayNumber ? 1.3 : 1.75; // on horseback (a hungry horse flags)
+    if (this.yoked) speed *= 0.55; // walking the plough at the ox's pace
     if (moving && G.grace("Aphrodite") >= 4 && this.outdoors && Math.random() < dt * 1.2) this.bloom(); // flowers in your wake
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     this.swim(dt, w);
@@ -1320,6 +1326,7 @@ abstract class PlayScene extends Phaser.Scene {
     }
     this.movePlayer(dt);
     this.petTick(dt);
+    this.herdTick(dt);
     this.mateTick(dt);
     this.dangerTick(dt);
     if (this.madUntil > this.time.now && !G.warded("Dionysus")) { const v = this.player.body!.velocity; this.player.setVelocity(-v.x, -v.y); }
@@ -2547,6 +2554,239 @@ abstract class PlayScene extends Phaser.Scene {
     if (moving) { p.animT += dt * def.frameRate; s.setFrame(Math.floor(p.animT) % 2); if (Math.abs(vx) > 1) s.setFlipX(vx < 0); } else s.setFrame(0);
     s.setDepth(s.y);
   }
+  // ---------------------------------------------------------------- the household's animals (herd.ts)
+  herd = new Map<string, HerdSprite>();
+  /** The horse you're on, and the ox at the plough (beast ids). */
+  riding = ""; yoked = "";
+  trail: [number, number][] = []; traces?: Phaser.GameObjects.Graphics;
+  shied = new WeakSet<Animal>(); panniersSaidT = 0;
+  /** Which of your animals belong in this scene: all of them on the farm, those walking with you elsewhere outdoors. */
+  herdWanted(): Beast[] {
+    if (!this.petAllowed()) return [];
+    return G.data.beasts.filter((b) => this.scene.key === "Farm" || b.follow);
+  }
+  /** Where an animal kept at home spends its day: the hound by the door, the others grazing in the pen. */
+  homeSpot(b: Beast): [number, number] {
+    if (b.kind === "hound") return [DOOR.tx * TILE + 8 + (Math.random() * 40 - 20), (DOOR.ty + 2) * TILE + Math.random() * 12];
+    return [(PEN.x0 + 1.5 + Math.random() * (PEN.x1 - PEN.x0 - 2.5)) * TILE, (PEN.y0 + 2 + Math.random() * (PEN.y1 - PEN.y0 - 3)) * TILE];
+  }
+  spawnBeast(b: Beast) {
+    const atHome = !b.follow && this.scene.key === "Farm";
+    const [x, y] = atHome ? this.homeSpot(b) : [this.player.x + (Math.random() < 0.5 ? -16 : 16), this.player.y + 8 + Math.random() * 6];
+    const sprite = this.add.sprite(x, y, b.kind, 0).setDepth(y);
+    const sc = this;
+    const t: Target = { get x() { return sprite.x; }, get y() { return sprite.y + 2; },
+      get label() { return sc.riding === b.id ? `Get down from ${b.name}` : sc.yoked === b.id ? `Unyoke ${b.name}` : `${b.name} the ${BEASTS[b.kind].name}`; },
+      act: () => sc.beastMenu(b) };
+    this.targets.push(t);
+    const h: HerdSprite = { b, sprite, t, animT: 0, biteT: 0, huntT: 12 + Math.random() * 10, wanderT: 0, tx: x, ty: y, scented: false };
+    this.herd.set(b.id, h);
+    if (b.riding && b.kind === "steed") this.mountBeast(b, true);
+    return h;
+  }
+  dropBeast(h: HerdSprite, fade = false) {
+    this.herd.delete(h.b.id); this.targets = this.targets.filter((t) => t !== h.t);
+    if (this.riding === h.b.id) this.dismountBeast(true);
+    if (this.yoked === h.b.id) this.unyoke(true);
+    const s = h.sprite;
+    if (fade) this.tweens.add({ targets: s, alpha: 0, duration: 900, onComplete: () => s.destroy() }); else s.destroy();
+  }
+  /** Talking to one of your animals. */
+  beastMenu(b: Beast) {
+    const h = this.herd.get(b.id); if (!h) return;
+    if (this.riding === b.id) { this.dismountBeast(); return; }
+    if (this.yoked === b.id) { this.unyoke(); return; }
+    const u = ui(this), def = BEASTS[b.kind], opts: { label: string; fn: () => void }[] = [];
+    const hungry = b.hungry === G.dayNumber;
+    if (b.kind === "steed" && !this.pet?.riding) opts.push({ label: `Ride ${b.name}`, fn: () => { u.closeTalk(); this.mountBeast(b); } });
+    if (b.kind === "ox" && this.scene.key === "Farm") {
+      const done = b.work?.day === G.dayNumber ? b.work.n : 0;
+      opts.push({ label: G.count("Ard") ? `Yoke ${b.name} to the ard (${OX_DAY - done} furrows left today)` : "Yoke to the ard (you need an ard)", fn: () => {
+        u.closeTalk();
+        if (!G.count("Ard")) { G.say("You need an ard, a wooden plough, for the ox to draw. Theron at the mill sells them."); return; }
+        if (hungry) { G.say(`${b.name} stands with his head down. He went hungry last night, and won't pull today. Keep fodder in the manger.`); return; }
+        if (done >= OX_DAY) { G.say(`${b.name} has drawn all the furrows he can today. Tomorrow.`); return; }
+        this.yokeOx(b);
+      } });
+    }
+    if (b.kind === "donkey" && b.pack) opts.push({ label: "Open the panniers", fn: () => { u.closeTalk(); ui(this).openChest({ store: b.pack } as Placed, `${poss(b.name)} panniers`); } });
+    const held = G.selectedItem;
+    if (b.kind === "hound" && held && (held.id === "Meat" || ITEMS[held.id].kind === "meal")) opts.push({ label: `Give ${b.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
+      G.removeItem(held.id, 1);
+      const week = (b.meatDay ?? -99) <= G.dayNumber - 7; b.meatDay = G.dayNumber;
+      if (week) G.addFavor("Artemis", 1, 6);
+      this.beastMenu(b);
+      u.showTalk(b.name, `your ${def.name}`, `${b.name} wolfs it down and leans against your legs.${week ? " Artemis smiles on a hunter who keeps a good hound. (Artemis +1)" : ""}`, [{ label: "Back", fn: () => this.beastMenu(b) }]);
+    } });
+    if (this.scene.key === "Farm" || b.kind === "hound") {
+      if (b.follow) opts.push({ label: this.scene.key === "Farm" ? `Leave ${b.name} at home` : `Send ${b.name} home`, fn: () => { u.closeTalk(); b.follow = false; G.say(this.scene.key === "Farm" ? `${b.name} stays home on the farm.` : `${b.name} turns for home. You'll find ${b.kind === "hound" ? "him" : "it"} at the farm.`); if (this.scene.key !== "Farm") this.dropBeast(h, true); } });
+      else opts.push({ label: `Bring ${b.name} with you`, fn: () => { u.closeTalk(); b.follow = true; G.say(`${b.name} falls in behind you.`); } });
+    } else if (b.follow) opts.push({ label: `Send ${b.name} home`, fn: () => { u.closeTalk(); b.follow = false; G.say(`${b.name} plods off toward home. It knows the way.`); this.dropBeast(h, true); } });
+    const days = G.dayNumber - b.since;
+    u.showTalk(b.name, `your ${def.name} · yours ${days === 0 ? "since today" : `${days} day${days > 1 ? "s" : ""}`}${hungry ? " · hungry" : ""}`,
+      `${b.name} ${def.does}.${def.grazes ? " Kept at home, it eats from the manger at night." : ""}${hungry ? "\n\nIt went hungry last night and is poor company today." : ""}`, opts);
+  }
+  mountBeast(b: Beast, quiet = false) {
+    const h = this.herd.get(b.id); if (!h || this.boat || this.underfoot() || this.pet?.riding) return;
+    if (this.yoked) this.unyoke(true);
+    this.riding = b.id; b.riding = true; b.follow = true;
+    this.player.setPosition(h.sprite.x, h.sprite.y - 3);
+    if (!quiet) G.say(`You swing up onto ${poss(b.name)} back. (Move to ride; E to get down.)${b.hungry === G.dayNumber ? " It went hungry last night, and won't go fast today." : ""}`);
+  }
+  dismountBeast(quiet = false) {
+    const b = G.data.beasts.find((x) => x.id === this.riding), h = this.herd.get(this.riding);
+    this.riding = ""; if (b) b.riding = false; this.player.setCrop();
+    if (h) h.sprite.setPosition(this.player.x + (this.facing === 1 ? 12 : -12), this.player.y + 4);
+    if (!quiet && b) G.say(`You slide down from ${poss(b.name)} back.`);
+  }
+  yokeOx(b: Beast) {
+    if (this.riding) this.dismountBeast(true);
+    this.yoked = b.id; this.trail = [];
+    this.traces ??= this.add.graphics();
+    G.say(`You yoke ${b.name} to the ard. Walk where you want furrows; he follows, and breaks the ground behind you. (E on him to unyoke.)`);
+  }
+  unyoke(quiet = false) {
+    const b = G.data.beasts.find((x) => x.id === this.yoked);
+    this.yoked = ""; this.trail = []; this.traces?.clear();
+    if (!quiet && b) G.say(`You unyoke ${b.name}.`);
+  }
+  /** One step of the ox at the plough: a fresh furrow wherever the share bites ground that can be worked. */
+  plough(b: Beast, x: number, y: number) {
+    const f = this as unknown as FarmScene;
+    if (this.scene.key !== "Farm" || !f.setGround) return;
+    const tx = Math.floor(x / TILE), ty = Math.floor((y + 4) / TILE);
+    if (tx < 1 || ty < 1 || tx >= MW - 1 || ty >= MH - 1 || inPen(tx, ty) || G.data.ground[`${tx},${ty}`] || G.data.crops[`${tx},${ty}`]) return;
+    const obj = f.objects.getTileAt(tx, ty)?.index ?? -1;
+    if ((obj !== -1 && obj !== T.FLOWERS) || f.baseGround[ty][tx] === T.PATH) return;
+    if (obj === T.FLOWERS) f.clearObject(tx, ty);
+    f.setGround(tx, ty, "tilled"); G.addFatigue(0.3);
+    const w = (b.work = b.work?.day === G.dayNumber ? b.work : { day: G.dayNumber, n: 0 }); w.n++;
+    if (w.n === 1) G.note("plough");
+    if (w.n >= OX_DAY) { G.say(`${b.name} has drawn sixty furrows and is blowing hard. Enough for one day.`); this.unyoke(true); }
+  }
+  /** Your animals' day: following, grazing at home, riding, ploughing, the hound's work. */
+  herdTick(dt: number) {
+    for (const h of [...this.herd.values()]) if (!h.sprite.active || h.sprite.scene !== this) this.herd.delete(h.b.id); // the scene was rebuilt
+    if (!this.herd.size) { this.riding = ""; this.yoked = ""; this.traces = undefined; }
+    const want = this.herdWanted();
+    if (!this.petAllowed()) { for (const b of G.data.beasts) b.riding = false; return; }
+    for (const h of [...this.herd.values()]) if (!want.includes(h.b) || !G.data.beasts.includes(h.b)) this.dropBeast(h, true);
+    for (const b of want) if (!this.herd.has(b.id) && !this.boat && !this.underfoot()) this.spawnBeast(b);
+    if (this.paused) return;
+    if (G.toPanniers) { if (this.panniersSaidT <= 0) G.say(`Your pack is full: it goes into ${poss(G.toPanniers)} panniers.`); this.panniersSaidT = 10; G.toPanniers = ""; }
+    this.panniersSaidT -= dt;
+    let i = 0;
+    for (const h of this.herd.values()) {
+      const b = h.b, s = h.sprite, def = BEASTS[b.kind];
+      let vx = 0, vy = 0;
+      if (this.riding === b.id) {
+        if (this.boat || this.underfoot()) { this.dismountBeast(true); G.say(`${b.name} won't go into the water. You get down.`); continue; }
+        s.setPosition(this.player.x, this.player.y + 4).setDepth(this.player.y + 0.6).setFlipX(this.facing === 1);
+        this.player.setCrop(0, 0, 16, 12);
+        const mv = (this.player.body as Phaser.Physics.Arcade.Body).velocity;
+        if (Math.abs(mv.x) + Math.abs(mv.y) > 1) { h.animT += dt * def.frameRate * 1.5; s.setFrame(Math.floor(h.animT) % 2); } else s.setFrame(0);
+        // A riding horse is no warhorse: a beast coming at it may make it rear and throw you.
+        const charger = this.animals.find((a) => (a.state === "charge") && !this.shied.has(a) && Math.hypot(a.sprite.x - s.x, a.sprite.y - s.y) < 110);
+        if (charger) {
+          this.shied.add(charger);
+          const chance = Math.max(0.1, 0.45 - 0.05 * (G.data.aretai.Aiolos ?? 3)) * (G.grace("Poseidon") >= 4 ? 0.5 : 1);
+          if (Math.random() < chance) { this.dismountBeast(true); G.addFatigue(8); G.say(`${b.name} rears at the ${charger.kind === "brigand" ? "brigand" : beast(charger.kind)} and throws you! (Energy −8)`); }
+        }
+        continue;
+      }
+      const followOn = b.follow;
+      if (this.yoked === b.id) {
+        // At the plough: he walks your path a little behind you, and the share breaks the ground where he treads.
+        const last = this.trail[this.trail.length - 1];
+        if (!last || Math.hypot(last[0] - this.player.x, last[1] - this.player.y) > 2) this.trail.push([this.player.x, this.player.y]);
+        let back = 0, k = this.trail.length - 1;
+        while (k > 0 && back < 16) { back += Math.hypot(this.trail[k][0] - this.trail[k - 1][0], this.trail[k][1] - this.trail[k - 1][1]); k--; }
+        this.trail.splice(0, Math.max(0, k - 2));
+        const [px, py] = this.trail[Math.min(k, this.trail.length - 1)] ?? [s.x, s.y];
+        const moved = Math.hypot(px - s.x, py - s.y) > 0.5;
+        if (moved) { if (Math.abs(px - s.x) > 0.3) s.setFlipX(px < s.x); s.setPosition(px, py); h.animT += dt * def.frameRate; s.setFrame(Math.floor(h.animT) % 2); this.plough(b, px, py); } else s.setFrame(0);
+        s.setDepth(s.y);
+        this.traces?.clear().lineStyle(1, 0x6a4a2a, 1).lineBetween(s.x + (s.flipX ? -6 : 6), s.y + 2, this.player.x, this.player.y + 4).setDepth(Math.min(s.y, this.player.y) - 1);
+        i++; continue;
+      }
+      if (followOn) {
+        if (b.kind === "hound") [vx, vy] = this.houndWork(h, dt);
+        if (!vx && !vy && !h.goal) {
+          // Fall in behind you, each a little farther back.
+          const back = 16 + i * 12, fx = this.facing === 1 ? 1 : this.facing === 2 ? -1 : 0, fy = this.facing === 3 ? 1 : this.facing === 0 ? -1 : 0;
+          const gx = this.player.x + fx * back + (fx ? 0 : (i % 2 ? 10 : -10)), gy = this.player.y + 6 + fy * back;
+          const d = Math.hypot(gx - s.x, gy - s.y), pd = Math.hypot(this.player.x - s.x, this.player.y - s.y);
+          if (pd > 280 && this.depthAt(gx, gy + 5) < 2) s.setPosition(gx, gy);
+          else if (d > 6) { const sp = Math.min(170, Math.max(def.walk * 2.5, 70) * (pd > 80 ? 1.8 : 1)); vx = (gx - s.x) / d * sp; vy = (gy - s.y) / d * sp; }
+        }
+        i++;
+      } else {
+        // At home: wandering about its spot, unhurried.
+        if ((h.wanderT -= dt) <= 0) { h.wanderT = 3 + Math.random() * 6; [h.tx, h.ty] = Math.random() < 0.6 ? this.homeSpot(b) : [s.x, s.y]; }
+        if (b.kind === "hound" && this.scene.key === "Farm") { const fox = (this as unknown as { fox?: Animal | null }).fox; if (fox && fox.state !== "dead" && fox.sprite.active && !fox.appeased) [vx, vy] = this.chaseOff(h, fox, dt); }
+        if (!vx && !vy) { const d = Math.hypot(h.tx - s.x, h.ty - s.y), sp = def.walk * (d > 60 ? 2.5 : 1); if (d > 3) { vx = (h.tx - s.x) / d * sp; vy = (h.ty - s.y) / d * sp; } }
+      }
+      [vx, vy] = this.companionStep(s, vx, vy, dt);
+      const moving = Math.abs(vx) + Math.abs(vy) > 1;
+      if (moving) { h.animT += dt * def.frameRate * (Math.hypot(vx, vy) > def.walk * 2 ? 1.6 : 1); s.setFrame(Math.floor(h.animT) % 2); if (Math.abs(vx) > 1) s.setFlipX(vx < 0); } else s.setFrame(0);
+      s.setDepth(s.y);
+    }
+  }
+  /** The hound at its work: guarding you, running down small game, bringing big game to bay. Returns its velocity. */
+  houndWork(h: HerdSprite, dt: number): [number, number] {
+    const s = h.sprite, b = h.b, px = this.player.x, py = this.player.y;
+    const near = (a: Animal, r: number) => Math.hypot(a.sprite.x - px, a.sprite.y - py) < r;
+    const live = (a?: Animal) => !!a && a.sprite.active && a.state !== "dead" && a.state !== "gone";
+    if (!h.scented && this.scene.key === "Wild") {
+      h.scented = true;
+      const kinds = [...new Set(this.animals.filter((a) => live(a) && !a.def.flies && !isMonster(a.kind) && !["goat", "brigand", "eidolon"].includes(a.kind)).map((a) => beast(a.kind)))];
+      this.time.delayedCall(1200, () => G.say(kinds.length ? `${b.name} puts his nose to the ground and quarters about: ${kinds.slice(0, 3).join(", ")}${kinds.length > 3 ? " and more" : ""} ${kinds.length > 1 ? "have" : "has"} been this way.` : `${b.name} casts about, and finds no fresh scent here.`));
+    }
+    // Guard: whatever is coming at you.
+    if (!live(h.goal) || (h.mode === "guard" && h.goal!.state !== "charge" && h.goal!.state !== "recoil")) { h.goal = undefined; h.mode = undefined; }
+    if (!h.goal) {
+      const threat = this.animals.find((a) => live(a) && (a.state === "charge" || a.state === "recoil") && a.kind !== "eidolon" && a.kind !== "lampad" && near(a, 160));
+      if (threat) { h.goal = threat; h.mode = "guard"; G.say(`${b.name} goes for the ${threat.kind === "brigand" ? "brigand" : beast(threat.kind)}!`); }
+    }
+    // Hunt: now and then he runs down a hare or a bird on the ground; bigger game he brings to bay.
+    if (!h.goal && this.scene.key === "Wild" && (h.huntT -= dt) <= 0) {
+      h.huntT = 18 + Math.random() * 12;
+      const small = this.animals.find((a) => live(a) && (a.kind === "hare" || a.kind === "bustard") && a.sprite.visible && near(a, 190));
+      const big = this.animals.find((a) => live(a) && ["deer", "boar", "ibex", "horse"].includes(a.kind) && a.sprite.visible && !a.appeased && near(a, 170) && (a.heldCool ?? 0) <= 0);
+      if (small) { h.goal = small; h.mode = "catch"; }
+      else if (big) { h.goal = big; h.mode = "bay"; G.say(`${b.name} gives tongue and goes after the ${beast(big.kind)}!`); }
+    }
+    if (!h.goal) return [0, 0];
+    const g = h.goal, d = Math.hypot(g.sprite.x - s.x, g.sprite.y - s.y) || 1;
+    if (h.mode === "bay" && d < 18) {
+      if ((g.held ?? 0) <= 0) { g.held = 5; g.heldCool = 40; G.say(`${b.name} brings the ${beast(g.kind)} to bay! It stands at a loss: quick, while it's held.`); }
+      if ((g.held ?? 0) > 0) return [0, 0]; // holding it, baying
+      h.goal = undefined; h.mode = undefined; return [0, 0];
+    }
+    if (d < 12 && (h.biteT -= dt) <= 0) {
+      h.biteT = 1;
+      if (h.mode === "catch") { G.say(`${b.name} runs down the ${beast(g.kind)} and brings it back to you.`); this.kill(g); h.goal = undefined; h.mode = undefined; }
+      else if (h.mode === "guard") this.beastBite(g, s, 0.5);
+    }
+    const sp = 160;
+    return [(g.sprite.x - s.x) / d * sp, (g.sprite.y - s.y) / d * sp];
+  }
+  /** At home, the hound sees off the fox. */
+  chaseOff(h: HerdSprite, fox: Animal, _dt: number): [number, number] {
+    const s = h.sprite, d = Math.hypot(fox.sprite.x - s.x, fox.sprite.y - s.y) || 1;
+    if (d < 14) { fox.appeased = true; fox.bolt(s); fox.rolled = true; fox.rerollT = 999; G.say(`${h.b.name} sees the fox off into the brush, barking.`); return [0, 0]; }
+    return [(fox.sprite.x - s.x) / d * 150, (fox.sprite.y - s.y) / d * 150];
+  }
+  /** A hound's bite. */
+  beastBite(a: Animal, from: Phaser.GameObjects.Sprite, dmg: number) {
+    const q = QUARRY[a.kind]; if (a.hp < 0) a.hp = q?.hp ?? 2;
+    a.hp -= dmg; SOUND.sfx("hit");
+    a.sprite.setTint(0xff8080); this.time.delayedCall(220, () => a.sprite.active && a.sprite.clearTint());
+    if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return; }
+    const ang = Math.atan2(a.sprite.y - from.y, a.sprite.x - from.x);
+    (a.sprite as Phaser.Physics.Arcade.Sprite).setVelocity?.(Math.cos(ang) * 120, Math.sin(ang) * 120);
+    a.state = "recoil"; a.timer = 0.9;
+  }
   petBite(a: Animal, dmg: number) {
     const q = QUARRY[a.kind]; if (a.hp < 0) a.hp = q?.hp ?? 2;
     a.hp -= dmg; SOUND.sfx("hit");
@@ -2559,7 +2799,7 @@ abstract class PlayScene extends Phaser.Scene {
   /** Warnings of danger: Athena's owls, Artemis' birds, a watchful companion. And Athena's grey eyes see through an empousa. */
   dangerTick(dt: number) {
     if ((this.dangerT -= dt) > 0 || this.paused) return; this.dangerT = 0.5;
-    const owl = G.grace("Athena") >= 4, birds = G.grace("Artemis") >= 7, watcher = !!this.pet && !this.pet.riding && TAMABLE[G.data.companion?.kind ?? ""]?.role === "watch" && !G.data.companion?.stay;
+    const owl = G.grace("Athena") >= 4, birds = G.grace("Artemis") >= 7, hound = [...this.herd.values()].find((h) => h.b.kind === "hound" && h.b.follow), watcher = (!!this.pet && !this.pet.riding && TAMABLE[G.data.companion?.kind ?? ""]?.role === "watch" && !G.data.companion?.stay) || !!hound;
     const grey = G.grace("Athena") >= 7;
     for (const a of this.animals) {
       if (this.warned.has(a) || a.state === "dead" || a.state === "gone" || !a.sprite.visible || a.appeased) continue;
@@ -2572,8 +2812,8 @@ abstract class PlayScene extends Phaser.Scene {
       if (!owl && !birds && !watcher) continue;
       const dir = Math.abs(dx) > Math.abs(dy) * 2 ? (dx > 0 ? "east" : "west") : Math.abs(dy) > Math.abs(dx) * 2 ? (dy > 0 ? "south" : "north") : `${dy > 0 ? "south" : "north"}-${dx > 0 ? "east" : "west"}`;
       const c = G.data.companion;
-      G.say(watcher ? `${c!.name} goes still, ears up, staring ${dir}: something dangerous is near.` : owl ? `An owl hoots, sharp and sudden: Athena's warning. Something dangerous is near, to the ${dir}.` : `The birds fall silent, then cry out in alarm to the ${dir}: something dangerous is near.`);
-      if (watcher) this.alarm({ sprite: this.pet!.sprite } as unknown as Animal);
+      G.say(hound ? `${hound.b.name} stiffens, hackles up, growling low toward the ${dir}: something dangerous is near.` : watcher ? `${c!.name} goes still, ears up, staring ${dir}: something dangerous is near.` : owl ? `An owl hoots, sharp and sudden: Athena's warning. Something dangerous is near, to the ${dir}.` : `The birds fall silent, then cry out in alarm to the ${dir}: something dangerous is near.`);
+      if (watcher) this.alarm({ sprite: hound ? hound.sprite : this.pet!.sprite } as unknown as Animal);
     }
   }
   // ---------------------------------------------------------------- friends who join you (friends.ts)
@@ -3811,7 +4051,7 @@ class FarmScene extends PlayScene {
     const n = fiber + oats;
     if (!n) { G.say("You have no fodder. Cut brush with the sickle for fiber, or gather wild oats."); return; }
     G.data.manger += n;
-    G.say(`You fork ${[fiber && `${fiber} fiber`, oats && `${oats} wild oats`].filter(Boolean).join(" and ")} into the manger. Each goat eats one a night.`);
+    G.say(`You fork ${[fiber && `${fiber} fiber`, oats && `${oats} wild oats`].filter(Boolean).join(" and ")} into the manger. Each goat${G.data.beasts.some((b) => BEASTS[b.kind].grazes) ? " and working beast" : ""} eats one a night.`);
   }
 
   fillTrough() {
@@ -6069,6 +6309,18 @@ class WildScene extends PlayScene {
         if (!G.data.arts.includes("flock")) { G.data.arts.push("flock"); text = `"Your goats? Then you'll want Pan on your side. Out here, in the wild, where he can hear: play him the pipes, as well as you can, pour him wine, share a meal with him, and bring him flowers off the hill. Spring at noon is best. He'll keep the wolves off and the milk coming."\n\n(You learn Flock Thriving. Press R for the Arts.) They press a skin of milk on you too: ${give("Milk", 2)}.`; break; }
         text = `They press a skin of milk on you for the road: ${give("Milk", 2)}.`; break;
       case "charcoal": text = `"Take these. Caves are dark." ${give("Torch", 2)}.`; break;
+      case "horsebreeder": {
+        const price = BEASTS.steed.price, has = G.data.beasts.some((b) => b.kind === "steed");
+        if (has) { text = "He looks your horse over, lifts each hoof, and grunts. \"You're keeping it well enough. Oats, not just grass, if you ride it hard.\""; break; }
+        if (G.data.silver < price) { text = `He walks you along the paddock rail: bays, a grey, a black colt nobody can sit. "That bay mare, broken to the bridle, gentle. ${money(price)}. Come back when you have it." (You have ${money(G.data.silver)}.)`; break; }
+        u.showTalk(kind.title, names, `He walks you along the paddock rail: bays, a grey, a black colt nobody can sit. "That bay mare. Broken to the bridle, gentle, sure-footed. Not a warhorse, mind: she'll shy at a charging boar. ${money(price)}."`, [
+          { label: `Buy the bay mare (${money(price)})`, fn: () => {
+            G.data.silver -= price; const b = newBeast("steed", G.dayNumber, G.data.beasts.map((x) => x.name)); b.follow = true; G.data.beasts.push(b); G.addFavor("Poseidon", 1, 6);
+            u.showTalk(kind.title, names, `He slaps the mare's neck and puts the bridle in your hand. "Her name's ${b.name}. Poseidon made the horse; thank him." (${b.name} is yours: talk to her and ride. Kept at home, she eats from your manger. Poseidon +1; −${money(price)})`, [{ label: "Back", fn: back }]);
+          } },
+          { label: "Not today", fn: back }]);
+        return;
+      }
       case "fisher": text = `They share the day's catch, and a bundle of sea fennel: ${give("Meat", 1)}, ${give("SeaFennel", 2)}.`; break;
       case "hunter": G.data.archeryXp += 20; text = "He takes your bow, laughs at your grip, and fixes it. You shoot at a knot in a tree until your fingers sting. (Archery practice +20)"; break;
       case "rootcutter": {
@@ -8518,6 +8770,7 @@ class UIScene extends Phaser.Scene {
       "THE HOMESTEAD",
       "Hoe tills, the jar waters (refill at the well), the sickle cuts brush, the axe fells, the mattock breaks stone.",
       "Sow on tilled soil and water daily; crops watered every night or sown in their god's hour grow finer (★). Sell at the pithos.",
+      "Working animals (Theron at the mill: hound, donkey, ox and ard; a horse-breeder on the windswept plains: a riding horse). E on one to bring it along or leave it home. The hound finds game, runs down hares, holds deer and boar at bay, guards you and keeps the fox off; the yoked ox ploughs where you walk; the donkey's panniers take what your pack can't; ride the horse. Those kept at home eat from the manger at night.",
       "Goats: pet and milk them (E), keep manger and trough full. Honey every few days. Wine: mend the vat, tread grapes, wait 6 days.",
       "Crafting: handwork anywhere (C). Build a workbench, hold it and click to set it down, then E at it for chests, fences, a kiln, a loom, a press (oil, must) and a forge (bronze, tool work).",
       "Tiresias, an old blind seer, sits about the farm. His small requests lead you through the whole world, one a day.",
@@ -8832,6 +9085,7 @@ class UIScene extends Phaser.Scene {
     this.requestOptions(v, opts);
     this.rumorOptions(v, opts);
     if (v.id === "theron") opts.push({ label: "Trade at the mill", fn: () => this.openMarket("mill") });
+    if (v.id === "theron") opts.push({ label: "Ask about livestock", fn: () => this.livestock(v) });
     if (v.id === "lykos") this.smithOptions(v, opts);
     if (v.id === "myrrhine" && !G.data.arts.includes("hospitality")) opts.push({ label: "Ask her to teach you an Art", fn: () => {
       if (rec.rel < ARTS.hospitality.teachAt) { this.talkTo(v, `"The Arts are not for strangers. Come to know me better first." (Friendship +${ARTS.hospitality.teachAt} needed)`); return; }
@@ -8880,6 +9134,38 @@ class UIScene extends Phaser.Scene {
       if (st) opts.push({ label: "Ask about the stranger", fn: () => this.talkTo(v, `"That one? ${STRANGER_KINDS[st.kind].desc[0].toUpperCase() + STRANGER_KINDS[st.kind].desc.slice(1)}. Came in ${G.dayNumber - st.arrived === 0 ? "this morning" : `${G.dayNumber - st.arrived} day${G.dayNumber - st.arrived > 1 ? "s" : ""} ago`}. Keeps to the bench out front. Be kind; you never know."`) });
     }
     this.showTalk(v.name, sub, line, opts, v.id);
+  }
+
+  /** Theron keeps a few beasts besides his mill, and knows where to find the rest. */
+  livestock(v: Villager, said?: string) {
+    const opts: { label: string; fn: () => void }[] = [];
+    const owned = (k: BeastKind) => G.data.beasts.some((b) => b.kind === k);
+    const offer = (k: BeastKind, pitch: string) => {
+      if (owned(k)) return;
+      const price = BEASTS[k].price;
+      opts.push({ label: `Buy ${pitch} (${money(price)})`, fn: () => {
+        if (G.data.silver < price) { this.livestock(v, `"${money(price)}, and not an obol less. Come back when you have it."`); return; }
+        G.data.silver -= price; SOUND.sfx("pickup");
+        const b = newBeast(k, G.dayNumber, G.data.beasts.map((x) => x.name)); G.data.beasts.push(b);
+        b.follow = true; // it walks home with you
+        const how = k === "hound" ? `He whistles, and a lean tawny hound trots up and sniffs your hand. "${b.name}. He'll follow you now. Feed him meat now and then; Artemis likes a hunter who keeps a good hound."`
+          : k === "ox" ? `He leads out a big dun ox. "${b.name}. Patient as a stone and strong as two men. Keep fodder in your manger, and he'll plough you a field a day. You'll want an ard for him."`
+          : `He brings round a grey donkey with panniers already on. "${b.name}. Ten loads he'll carry, and complain about every one."`;
+        this.livestock(v, `${how}\n\n(${b.name} is yours: talk to ${k === "hound" ? "him" : "it"} with E. −${money(price)})`);
+      } });
+    };
+    offer("hound", "a hunting hound");
+    offer("donkey", "a pack donkey");
+    offer("ox", "a plough ox");
+    if (owned("ox") && !G.count("Ard")) opts.push({ label: `Buy an ard for the ox (${money(ITEMS.Ard.value!)})`, fn: () => {
+      const p = ITEMS.Ard.value!;
+      if (G.data.silver < p) { this.livestock(v, `"${money(p)}. Come back when you have it."`); return; }
+      if (G.addItem("Ard", 1)) { this.livestock(v, "\"Your pack's full.\""); return; }
+      G.data.silver -= p; this.livestock(v, `"Ash for the beam, oak for the stilt, and a good bronze share. Yoke him, walk where you want your field, and let him do the work." (You have an ard. −${money(p)})`);
+    } });
+    opts.push({ label: "Ask about horses", fn: () => this.livestock(v, `"Horses? Not from a miller. Horses are for the rich, or the mad. There's a horse-breeder out on the windswept plains, beyond the farmlands: ${money(BEASTS.steed.price)} for a riding horse, if he'll sell to you at all. Or tame a wild one, if the gods favor you."`) });
+    opts.push({ label: "Back", fn: () => this.talkTo(v) });
+    this.showTalk(v.name, "the miller's livestock", said ?? `"A hound for the hunt, a donkey for the carrying, an ox for the plough. Every farm wants all three, sooner or later." He nods at the pen behind the mill.${G.data.beasts.length ? `\n\nYou have ${G.data.beasts.map((b) => `${b.name} the ${BEASTS[b.kind].name}`).join(", ")}.` : ""}`, opts, v.id);
   }
 
   // ---------------------------------------------------------------- festivals
@@ -10432,11 +10718,12 @@ class UIScene extends Phaser.Scene {
   // ---------------------------------------------------------------- chests
   chestPanel?: Phaser.GameObjects.Container;
   chestOf?: Placed;
-  openChest(p: Placed) {
+  chestTitle = "The chest";
+  openChest(p: Placed, title = "The chest") {
     if (this.market || this.dialog || this.loreBook || this.craft) return;
     if (this.inv) this.toggleInventory();
     if (this.help.visible) this.help.setVisible(false);
-    this.chestOf = p; this.modal = true; this.buildChest();
+    this.chestOf = p; this.chestTitle = title; this.modal = true; this.buildChest();
   }
   closeChest() { this.chestPanel?.destroy(); this.chestPanel = undefined; this.chestOf = undefined; this.modal = this.help.visible || !!this.inv || !!this.market || !!this.loreBook || !!this.craft; }
   /** Move a whole stack between the pack and the chest. */
@@ -10454,7 +10741,7 @@ class UIScene extends Phaser.Scene {
     const cell = 40, cols = 10, w = cols * cell + 60, h = 340 + (G.data.slots.length - 30) / 10 * cell, x0 = (W - w) / 2, y0 = (H - h) / 2 - 20;
     const root = this.add.container(0, 0).setDepth(23); this.chestPanel = root;
     root.add(this.add.rectangle(x0, y0, w, h, 0x1f1712, 0.97).setOrigin(0, 0).setStrokeStyle(2, 0xc4703f));
-    root.add(this.add.text(W / 2, y0 + 10, "The chest", { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
+    root.add(this.add.text(W / 2, y0 + 10, this.chestTitle, { ...font, fontSize: "20px" }).setOrigin(0.5, 0));
     const grid = (arr: (Slot | null)[], gy: number, other: (Slot | null)[], n: number) => {
       for (let i = 0; i < n; i++) {
         const cx = x0 + 30 + (i % cols) * cell + cell / 2, cy = gy + Math.floor(i / cols) * cell + cell / 2;
@@ -10468,8 +10755,8 @@ class UIScene extends Phaser.Scene {
           .on("pointerout", () => box.setStrokeStyle(1, 0x5e4a36)).on("pointerdown", () => { UIScene.moveStack(arr, i, other); this.buildChest(); });
       }
     };
-    root.add(this.add.text(x0 + 30, y0 + 40, "In the chest (click to take)", { ...font, fontSize: "13px", color: "#c9b48f" }));
-    grid(store, y0 + 58, G.data.slots, CHEST_SIZE);
+    root.add(this.add.text(x0 + 30, y0 + 40, this.chestTitle === "The chest" ? "In the chest (click to take)" : "In the panniers (click to take)", { ...font, fontSize: "13px", color: "#c9b48f" }));
+    grid(store, y0 + 58, G.data.slots, store.length);
     root.add(this.add.text(x0 + 30, y0 + 148, "Your pack (click to put away)", { ...font, fontSize: "13px", color: "#c9b48f" }));
     grid(G.data.slots, y0 + 166, store, G.data.slots.length);
     const hint = this.add.text(W / 2, y0 + h - 26, "E or Esc to close", { ...font, fontSize: "12px", color: "#c9b48f" }).setOrigin(0.5, 0);

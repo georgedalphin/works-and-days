@@ -95,6 +95,8 @@ export class Animal {
   strikes?: (a: Animal) => void;
   hp = -1; // set from the quarry table on the first hit
   /** Footing: the pace it means to go (before mud, brush or water slows it), what was last applied, and its breath in deep water. */
+  /** Held at bay by a hound (seconds left), and how long before it can be held again. */
+  held = 0; heldCool = 0;
   gBase = { x: 0, y: 0 }; gApplied = { x: 0, y: 0 }; breath = 0; drownT = 0; wet = 0; steerSide = 0; steerT = 0;
   timer: number;
   tx = 0; ty = 0;
@@ -124,6 +126,11 @@ export class Animal {
       this.timer -= dt;
       if (this.timer <= 0) this.settle();
       return;
+    }
+    if (this.heldCool > 0) this.heldCool -= dt;
+    if (this.held > 0 && this.state !== "charge" && this.state !== "recoil") {
+      // At bay: it stands and faces the hound, too beset to run.
+      this.held -= dt; this.state = "idle"; this.timer = 0.5; s.setVelocity(0, 0); this.animate(dt); return;
     }
     const dist = Phaser.Math.Distance.Between(s.x, s.y, player.x, player.y);
     if (this.rolled && this.state !== "charge" && this.state !== "recoil" && (this.rerollT -= dt) <= 0 && dist > d.scare * 2) this.rolled = false;

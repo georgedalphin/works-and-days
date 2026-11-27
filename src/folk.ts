@@ -84,6 +84,7 @@ export const HUT_KINDS: HutKind[] = [
   { id: "hunter", title: "A hunter and his sons", patron: "Artemis", terrains: [2, 9, 4], greeting: "\"You walk loud. Every deer for a mile knows you're here.\"", special: "Ask for a lesson with the bow", goods: [["Arrow", 2], ["Meat", 5]] },
   { id: "hermit", title: "A hermit", patron: "Apollo", terrains: [8, 11, 12, 9], greeting: "\"Few come this far. Fewer come by chance. Sit.\"", special: "Ask what he sees in you", goods: [] },
   { id: "fisher", title: "A fisher family", patron: "Poseidon", terrains: [7, 5], greeting: "\"The sea gave little today, but there's enough for a guest.\"", special: "Share their catch", goods: [["SeaFennel", 3], ["Meat", 5], ["rod", 8]] },
+  { id: "horsebreeder", title: "A horse-breeder's steading", patron: "Poseidon", terrains: [10, 3], greeting: "\"Mind the mares, they kick. You've come about a horse, or you've come about nothing. Which?\"", special: "Look over his horses", goods: [["Oats", 3]] },
   { id: "goatherd", title: "A goatherd", patron: "Dionysus", terrains: [11, 4, 10], greeting: "\"The goats saw you before I did. They're cleverer than me.\"", special: "Share their milk", goods: [["Milk", 4], ["Hide", 6], ["Syrinx", 12]] },
 ];
 

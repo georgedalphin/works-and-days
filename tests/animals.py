@@ -7,10 +7,10 @@ async def main():
         errs=[]; pg.on("pageerror", lambda e: errs.append(str(e)))
         await pg.goto("file:///home/claude/works-and-days/dist/index.html")
         await pg.wait_for_timeout(1200)
-        await pg.mouse.click(480,320); await pg.keyboard.press("ArrowDown"); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1000)
+        await pg.mouse.click(480,320); await pg.keyboard.press("Enter"); await pg.wait_for_timeout(1000)
         if await pg.evaluate("game.scene.isActive('Creation')"): await pg.evaluate("(()=>{const c=game.scene.getScene('Creation');for(const a of Object.keys(c.aretai))c.aretai[a]=3;c.finish();})()"); await pg.wait_for_timeout(1800)
-        await pg.keyboard.press("Escape"); await pg.wait_for_timeout(300)
-        await pg.keyboard.down("s"); await pg.wait_for_timeout(1600); await pg.keyboard.up("s"); await pg.wait_for_timeout(800)
+        await pg.wait_for_timeout(1800)
+        await pg.wait_for_function("game.scene.getScene('UI')?.help && game.scene.isActive('House')", timeout=20000); await pg.evaluate("game.scene.getScene('UI').help.setVisible(false); game.scene.getScene('UI').modal=false; game.scene.getScene('House').goTo('Farm')"); await pg.wait_for_timeout(2500)
         print("scene", await pg.evaluate("G.data.scene"))
         F="game.scene.getScene('Farm')"
         async def tp(tx,ty,facing):
@@ -38,7 +38,7 @@ async def main():
         # hive
         await pg.evaluate("G.data.hiveDay=-10")
         await tp(36,11,3); print("hive prompt", await prompt())
-        await pg.keyboard.press("e"); await pg.wait_for_timeout(100); print(await msgs(), await pg.evaluate("[G.count('Honey'),G.count('Wax')]"))
+        await pg.evaluate(f"{F}.tendHive()"); await pg.wait_for_timeout(100); print(await msgs(), await pg.evaluate("[G.count('Honey'),G.count('Wax')]"))
         await pg.screenshot(path="/home/claude/test/31_hive.png")
         # birds: run at a flock
         bx = await pg.evaluate(f"(()=>{{const b={F}.animals.find(a=>a.kind==='bird');return [b.sprite.x,b.sprite.y];}})()")
