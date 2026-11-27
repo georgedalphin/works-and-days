@@ -3,6 +3,7 @@ import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } fro
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
 import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, knossosLayoutGrand, creteAt, pickKnossosScreen, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
 import { GRACES, TAMABLE, PET_NAMES } from "./graces";
+import { FOLK_TASTES, BIG_QUESTS, ROAD_ASKS, CHORE_NAME, FRIEND_REL, MARRY_REL, type Friend, type Chore } from "./friends";
 import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary, type WearSlot } from "./gear";
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
@@ -339,7 +340,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
     this.ambience = undefined;
-    this.seat = undefined; this.seatFree = undefined; this.pet = undefined; this.warned = new Set();
+    this.seat = undefined; this.seatFree = undefined; this.pet = undefined; this.warned = new Set(); this.mates = []; this.matesDone = false;
     this.poseT = 0; this.poseKind = ""; this.walkT = 0; this.trunks = undefined; this.trunkAt.clear(); this.rustleT = 0; this.thornSaid = false;
     this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
     this.focusMarks = this.add.graphics().setDepth(99981);
@@ -1136,6 +1137,7 @@ abstract class PlayScene extends Phaser.Scene {
     }
     this.movePlayer(dt);
     this.petTick(dt);
+    this.mateTick(dt);
     this.dangerTick(dt);
     if (this.madUntil > this.time.now && !G.warded("Dionysus")) { const v = this.player.body!.velocity; this.player.setVelocity(-v.x, -v.y); }
     this.divineTick(dt);
@@ -2273,6 +2275,137 @@ abstract class PlayScene extends Phaser.Scene {
       if (watcher) this.alarm({ sprite: this.pet!.sprite } as unknown as Animal);
     }
   }
+  // ---------------------------------------------------------------- friends who join you (friends.ts)
+  mates: { f: Friend; s: Phaser.GameObjects.Sprite; animT: number; biteT: number; facing: number; mode: "follow" | "wander"; tx: number; ty: number; wait: number; target?: Animal; t: Target; said: boolean }[] = [];
+  matesDone = false;
+  /** How much a friendly chat warms someone: Aphrodite's favor, her hour and her grace. */
+  warmth() { const aph = G.boon("Aphrodite"); return Math.max(1, 1 + (aph >= 2 ? 1 : 0) + (G.patron?.aretai === "Phoenix" ? 1 : 0) + (G.grace("Aphrodite") >= 4 ? 1 : 0)); }
+  /** Ask someone to throw in their lot with you: to follow you, or to live on your homestead and help. */
+  askToJoin(fr: Friend, onJoin: () => void, onNo: () => void) {
+    const u = ui(this), list = (G.data.friends ??= []), cap = G.friendCap;
+    if (list.length >= cap) { u.showTalk(fr.name, "would come, if you could keep them", `${fr.name} looks at you a long time. "I'd come. But you've people enough depending on you already."\n\n(How many will follow you is your Phoenix less 2: ${cap}${cap === 1 ? " person" : " people"}. You have ${list.length}.)`, [{ label: "I understand", fn: () => onNo() }]); return; }
+    const finish = (role: "follow" | "home", chore?: Chore) => {
+      fr.role = role; fr.chore = chore; fr.with = role === "follow"; fr.since = G.dayNumber;
+      list.push(fr); G.npcRec(fr.id).rel = Math.max(G.rel(fr.id), 10);
+      onJoin(); u.closeTalk(); this.matesDone = false; for (const m of this.mates) { m.s.destroy(); this.targets = this.targets.filter((t) => t !== m.t); } this.mates = [];
+      G.say(role === "follow" ? `${fr.name} shoulders a pack and falls in beside you. "Lead on." (Talk to ${fr.female ? "her" : "him"} to send ${fr.female ? "her" : "him"} home to your farm, or to change ${fr.female ? "her" : "his"} mind.)` : `${fr.name} will come to your homestead tomorrow and settle in: ${CHORE_NAME[chore!].toLowerCase()}. You'll find ${fr.female ? "her" : "him"} about the farm by day.`);
+    };
+    const choose = () => u.showTalk(fr.name, "what should they do?", `"What would you have me do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c], fn: () => finish("home", c) })));
+    const opts: { label: string; fn: () => void }[] = [];
+    if (fr.age === "adult") opts.push({ label: "Travel with me, and stand by me", fn: () => finish("follow") });
+    opts.push({ label: "Come and live at my homestead, and help with the work", fn: choose });
+    opts.push({ label: "Not yet", fn: () => onNo() });
+    u.showTalk(fr.name, `${fr.title} · your sworn friend`, `"You've done more for me than anyone. If you want me, I'm yours. What would you have me do?"`, opts);
+  }
+  /** Bring the friends who belong here into the scene: followers at your side, housemates about the farm by day, your spouse at home. */
+  spawnMates() {
+    this.matesDone = true;
+    const key = this.scene.key, out = ["Farm", "Wild", "Village", "Gym"].includes(key);
+    let k = 0;
+    for (const f of G.data.friends ?? []) {
+      if (key === "House" && f.role === "spouse") this.addMate(f, "wander", 9 * TILE + 8, 7 * TILE);
+      else if (out && f.role === "follow" && f.with) { if (!this.boat && !this.underfoot()) this.addMate(f, "follow", this.player.x + (k % 2 ? 16 : -16), this.player.y + 10 + 6 * k); k++; }
+      else if (key === "Farm" && G.isDay && f.role !== "follow" || key === "Farm" && G.isDay && f.role === "follow" && !f.with) this.addMate(f, "wander", DOOR_X + (Math.random() - 0.5) * 120, (DOOR.ty + 3) * TILE + Math.random() * 60);
+    }
+  }
+  addMate(f: Friend, mode: "follow" | "wander", x: number, y: number) {
+    const tex = `friend_${f.id}_${f.role === "follow" ? "f" : "h"}`;
+    if (!this.textures.exists(tex)) makeFigureTexture(this, tex, f.look, { ...f.extras, pole: f.role === "follow" ? (f.extras.pole ?? "spear") : undefined, pack: f.role === "follow" ? f.extras.pack ?? "#8a6a4a" : undefined });
+    const s = this.add.sprite(x, y, tex, 0).setDepth(y);
+    const sc = this, role = f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? "lives with you" : "your companion";
+    const t: Target = { get x() { return s.x; }, get y() { return s.y + 2; }, label: `${f.name} (${role})`, act: () => sc.talkToFriend(f) };
+    this.targets.push(t);
+    this.mates.push({ f, s, animT: 0, biteT: 0, facing: 0, mode, tx: x, ty: y, wait: 1 + Math.random() * 3, t, said: false });
+  }
+  mateTick(dt: number) {
+    if (!this.matesDone && this.player) { if (G.data.friends?.length) this.spawnMates(); else this.matesDone = true; }
+    if (this.paused || !this.mates.length) return;
+    let k = 0;
+    for (const m of this.mates) {
+      const s = m.s; let vx = 0, vy = 0;
+      if (m.mode === "follow") {
+        // Stand by you: go for whatever is coming at you.
+        if (!m.target || m.target.state === "dead" || !m.target.sprite.active || (m.target.state !== "charge" && m.target.state !== "recoil")) {
+          m.target = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && a.kind !== "goat" && a.kind !== "eidolon" && a.kind !== "lampad" && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 150);
+          if (m.target && !m.said) { m.said = true; G.say(`${m.f.name} steps up beside you, spear leveled at the ${beast(m.target.kind)}.`); }
+          if (!m.target) m.said = false;
+        }
+        if (m.target) {
+          const a = m.target, d = Math.hypot(a.sprite.x - s.x, a.sprite.y - s.y);
+          vx = (a.sprite.x - s.x) / d * 110; vy = (a.sprite.y - s.y) / d * 110;
+          if (d < 16 && (m.biteT -= dt) <= 0) { m.biteT = 1.1; this.blowFrom(a, 1, s.x, s.y); }
+        } else {
+          const ang = (this.facing === 1 ? 0 : this.facing === 2 ? Math.PI : this.facing === 3 ? Math.PI / 2 : -Math.PI / 2) + (k % 2 ? 0.7 : -0.7);
+          const gx = this.player.x + Math.cos(ang) * (22 + 8 * Math.floor(k / 2)), gy = this.player.y + 4 + Math.sin(ang) * (16 + 6 * Math.floor(k / 2));
+          const d = Math.hypot(gx - s.x, gy - s.y);
+          if (d > 260) s.setPosition(gx, gy);
+          else if (d > 6) { const sp = Math.min(150, d > 60 ? 120 : 75); vx = (gx - s.x) / d * sp; vy = (gy - s.y) / d * sp; }
+        }
+        k++;
+      } else {
+        m.wait -= dt;
+        const d = Math.hypot(m.tx - s.x, m.ty - s.y);
+        if (d > 3) { vx = (m.tx - s.x) / d * 20; vy = (m.ty - s.y) / d * 20; }
+        else if (m.wait <= 0) {
+          m.wait = 3 + Math.random() * 6;
+          if (this.scene.key === "House") { m.tx = (3 + Math.random() * 13) * TILE; m.ty = (5.5 + Math.random() * 4.5) * TILE; }
+          else { m.tx = Phaser.Math.Clamp(s.x + (Math.random() - 0.5) * 90, 3 * TILE, 45 * TILE); m.ty = Phaser.Math.Clamp(s.y + (Math.random() - 0.5) * 60, 12 * TILE, 28 * TILE); }
+        }
+      }
+      s.x += vx * dt; s.y += vy * dt;
+      const moving = Math.abs(vx) + Math.abs(vy) > 1;
+      if (moving) { m.animT += dt; m.facing = Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 1 : 2) : vy < 0 ? 3 : 0; }
+      const pose = moving ? [POSE.walk1, POSE.stand, POSE.walk2, POSE.stand][Math.floor(m.animT / 0.14) % 4] : POSE.stand;
+      s.setFrame(m.facing * POSES + pose).setDepth(s.y);
+    }
+  }
+  /** A blow from a companion (a follower's spear, a beast's teeth): it hurts the creature and knocks it back. */
+  blowFrom(a: Animal, dmg: number, sx: number, sy: number) {
+    const q = QUARRY[a.kind]; if (a.hp < 0) a.hp = q?.hp ?? 2;
+    a.hp -= dmg; SOUND.sfx("hit");
+    a.sprite.setTint(0xff8080); this.time.delayedCall(220, () => a.sprite.active && a.sprite.clearTint());
+    if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return; }
+    const ang = Math.atan2(a.sprite.y - sy, a.sprite.x - sx);
+    (a.sprite as Phaser.Physics.Arcade.Sprite).setVelocity?.(Math.cos(ang) * 140, Math.sin(ang) * 140);
+    a.state = "recoil"; a.timer = 0.9;
+  }
+  /** Talking with a friend who has joined you. */
+  talkToFriend(f: Friend, said?: string) {
+    const u = ui(this), rec = G.npcRec(f.id), today = G.dayNumber, again = (t: string) => this.talkToFriend(f, t), he = f.female ? "she" : "he", him = f.female ? "her" : "him";
+    const opts: { label: string; fn: () => void }[] = [];
+    const respawn = () => { for (const m of this.mates) { m.s.destroy(); this.targets = this.targets.filter((t) => t !== m.t); } this.mates = []; this.matesDone = false; };
+    if (rec.talked !== today) opts.push({ label: "Talk a while", fn: () => { rec.talked = today; const g = this.warmth(); u.changeRel(f.id, g); again(`You talk as you ${f.role === "follow" ? "walk" : "work"}. ${f.name} tells you about ${pick(["the place " + he + " grew up", "a dream " + he + " had", "a song " + he + " half remembers", "the gods and what they want", "someone " + he + " once loved"])}. (+${g}: ${relLabel(G.rel(f.id))})`); } });
+    const held = G.selectedItem;
+    if (held && ITEMS[held.id].kind !== "tool" && rec.gifted !== today && !(held.id === "Garland" && G.rel(f.id) >= MARRY_REL && !G.spouse)) opts.push({ label: `Give ${f.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
+      G.removeItem(held.id, 1); rec.gifted = today;
+      const t = FOLK_TASTES[f.trade], d = t ? (t.loves.includes(held.id) ? 3 : t.likes.includes(held.id) ? 2 : t.dislikes.includes(held.id) ? -2 : 1) : isFoodGift(held.id) ? 2 : 1;
+      u.changeRel(f.id, d); again(`${d >= 2 ? `"For me? Thank you."` : d < 0 ? `"...thank you."` : `"That's kind."`} (${d >= 0 ? "+" : ""}${d}: ${relLabel(G.rel(f.id))})`);
+    } });
+    if (f.role === "follow") {
+      if (f.with) opts.push({ label: "Go back to the farm and rest", fn: () => { f.with = false; u.closeTalk(); respawn(); G.say(`${f.name} heads off toward your farm. You'll find ${him} there.`); } });
+      else opts.push({ label: "Come with me", fn: () => { f.with = true; u.closeTalk(); respawn(); G.say(`${f.name} takes up ${f.female ? "her" : "his"} spear. "Where to?"`); } });
+      opts.push({ label: "Live at the homestead and help instead", fn: () => u.showTalk(f.name, "what should they do?", `"Gladly. What should I do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c], fn: () => { f.role = "home"; f.chore = c; f.with = false; u.closeTalk(); respawn(); G.say(`${f.name} will see to it: ${CHORE_NAME[c].toLowerCase()}.`); } }))) });
+    } else {
+      opts.push({ label: `Change what ${he} does around the homestead`, fn: () => u.showTalk(f.name, "what should they do?", `"What would you have me do?"`, (Object.keys(CHORE_NAME) as Chore[]).map((c) => ({ label: CHORE_NAME[c] + (f.chore === c ? " (now)" : ""), fn: () => { f.chore = c; again(`"I'll see to it." (${CHORE_NAME[c]})`); } }))) });
+      if (f.role === "home" && f.age === "adult") opts.push({ label: "Travel with me instead", fn: () => { f.role = "follow"; f.with = true; f.chore = undefined; u.closeTalk(); respawn(); G.say(`${f.name} puts down ${f.female ? "her" : "his"} work and takes up a spear. "At last."`); } });
+    }
+    // Marriage: to someone who is beloved to you, with a garland.
+    if (f.role !== "spouse" && !G.spouse && G.rel(f.id) >= MARRY_REL) opts.push({ label: `Ask ${f.name} to marry you${held?.id === "Garland" ? " (offer the garland)" : " (you'll want a garland)"}`, fn: () => {
+      if (held?.id !== "Garland") { again(`You open your mouth, and close it again. You can't ask with empty hands: a wedding wants a garland. (Hold a garland, and ask.)`); return; }
+      G.removeItem("Garland", 1); f.role = "spouse"; f.with = false; f.chore = f.chore ?? "hearth";
+      const h = G.addFavor("Hera", 2, 10), a = G.addFavor("Aphrodite", 1, 10); G.earn("Pathos", 1, "you were married");
+      u.closeTalk(); respawn();
+      u.showTalk(`${f.name}`, f.female ? "your wife" : "your husband", `${f.name} takes the garland, and laughs, and cries a little, and says yes.\n\nThe village comes out for the wedding: the torches at dusk, the songs on the road, the cart to your door. Hera, who keeps marriages, is glad of it. ${f.name} lives with you now, and keeps the house with you.\n\n(Hera ${h >= 0 ? "+" : ""}${h}, Aphrodite ${a >= 0 ? "+" : ""}${a}, +1 Pathos. Your house counts two more comforts, and ${he} brings you breakfast every morning.)`, []);
+    } });
+    opts.push({ label: f.role === "spouse" ? "Part" : `Part ways with ${f.name}`, fn: () => u.choose(`Part with ${f.name}? ${f.from === "village" ? `${he[0].toUpperCase() + he.slice(1)} will go back to ${f.female ? "her" : "his"} household in the village.` : `${he[0].toUpperCase() + he.slice(1)} will go back to the road.`}${f.role === "spouse" ? " (A marriage ended makes Hera angry.)" : ""}`, () => {
+      G.data.friends = (G.data.friends ?? []).filter((x) => x !== f);
+      if (f.role === "spouse") G.addFavor("Hera", -3);
+      u.changeRel(f.id, -2); respawn(); G.say(`${f.name} gathers ${f.female ? "her" : "his"} things and goes.`);
+    }) });
+    const role = f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you: ${CHORE_NAME[f.chore ?? "trade"].toLowerCase()}` : f.with ? "travels with you" : "your companion, resting at the farm";
+    const line = said ?? (f.role === "spouse" ? pick([`"There you are."`, `"Come and sit a while."`, `"The house is quiet without you."`]) : f.role === "home" ? pick([`"Plenty to do around here. I like it."`, `"Good day to you."`, `"The goats are fat and the jars are full."`]) : pick([`"Ready when you are."`, `"Where to?"`, `"I'm with you."`]));
+    u.showTalk(f.name, `${f.title} · ${role} · ${relLabel(G.rel(f.id))} (${G.rel(f.id) >= 0 ? "+" : ""}${G.rel(f.id)})`, line, opts);
+  }
   /** Blood-Blessed (Ares' grace): the wound bleeds, and a moment later it costs the creature another blow's worth. */
   bleed(a: Animal) {
     this.time.delayedCall(1800, () => {
@@ -2519,6 +2652,7 @@ class TitleScene extends Phaser.Scene {
 /** What a recipe needs from you: the Smith's Apprentice (Hephaestus' grace at +7) saves a copper at the forge. */
 const needsOf = (r: { needs: [string, number][]; at?: Station }): [string, number][] =>
   r.at === "forge" && G.grace("Hephaestus") >= 7 ? r.needs.map(([id, n]) => [id, id === "Copper" ? Math.max(1, n - 1) : n] as [string, number]) : r.needs;
+const him = (w: { folk: { female: boolean } }) => (w.folk.female ? "her" : "him");
 /** What Lykos the smith will make in bronze: [item, silver, copper ore]. */
 const SMITH_ARMOR: [string, number, number][] = [["Kopis", 60, 2], ["Greaves", 40, 1], ["Corinthian", 70, 2], ["ScaleCuirass", 110, 2], ["Aspis", 60, 1], ["Cuirass", 170, 4]];
 /** What some village households sell: the weaver clothes, the old soldier his old gear. [item, silver] */
@@ -6389,7 +6523,7 @@ class WildScene extends PlayScene {
   }
   kill(a: Animal) {
     if (a.kind !== "brigand") { super.kill(a); return; }
-    G.note("kill");
+    G.note("kill"); G.note("kill:brigand");
     a.state = "dead"; a.sprite.setVelocity(0, 0).setAngle(90).setTint(0xc8b8a8);
     G.say("The brigand goes down, and does not get up.");
     const g = this.ways.find((x) => x.foes.includes(a as FigureFoe));
@@ -6576,6 +6710,29 @@ class WildScene extends PlayScene {
         if (g.done.news === undefined) opts.push({ label: "Ask them for news", fn: () => { g.done.news = today; again(pick(["\"Brigands on the far roads, three of them, one with a bow. If you meet them, run, or pay. Don't be a hero.\"", "\"Wolves came down off the mountain last winter and took half a village's sheep. Keep your goats in at night.\"", "\"Nothing. Marching, mostly. Our captain's lost, but don't tell him we said so.\""])); } });
         if (held === "Wine") opts.push({ label: "Offer them a drink of your wine", fn: () => { G.removeItem("Wine", 1); const v = G.addFavor("Ares", 1, 4); again(`They pass it round and it's gone in a breath. "A good farmer. Ares keep your fields." (Ares ${v >= 0 ? "+" : ""}${v})`); } });
         break;
+    }
+    // Someone of the road may throw in their lot with you, if you win them over here and now.
+    const ra = ROAD_ASKS[d.id], he = w.folk.female ? "she" : "he";
+    if (ra && !w.lying && w.folk.age !== "child" && !g.foes.length) {
+      if (g.done.story === undefined) opts.push({ label: `Ask ${w.folk.name} where ${he}'s bound`, fn: () => { g.done.story = today; again(`${pick([`"Nowhere in particular. Somewhere better than the last place."`, `"Home, if I still have one. It's been a long time."`, `"Wherever the road goes. I stopped asking it."`, `"To the sea, then along it. I've a cousin somewhere on the coast."`])} ${w.folk.name} talks a while, about the road and the people on it, and seems glad of the company.`); } });
+      const helped = d.id === "herder" ? !!g.helpedRaid : d.id === "wounded" || d.id === "parched" ? g.done.helped !== undefined : false;
+      const warm = (g.done.story !== undefined ? 1 : 0) + (g.done.fed !== undefined ? 1 : 0);
+      if (ra.helped ? helped : warm >= 2) opts.push({ label: `Ask ${w.folk.name} to come with you`, fn: () => {
+        const can = ra.bring ? ra.bring.every(([id, n]) => G.count(id) >= n) : true;
+        const need = ra.bring ? ra.bring.map(([id, n]) => `${n} ${ITEMS[id].name.toLowerCase()}`).join(" and ") : "";
+        u.showTalk(w.folk.name, `${ra.title} · would they join you?`, ra.ask, [
+          ...(can ? [{ label: ra.bring ? `Give ${him(w)} the ${need}` : "Then come with me", fn: () => {
+            const fr: Friend = { id: `r${G.dayNumber}${Math.floor(Math.random() * 1e6).toString(36)}`, name: w.folk.name, female: w.folk.female, age: w.folk.age === "elder" ? "elder" : "adult", look: w.folk.look, extras: { ...w.folk.extras }, from: "road", trade: d.id === "pilgrims" ? "pilgrim" : d.id, title: ra.title, role: "follow", since: today };
+            this.askToJoin(fr, () => {
+              if (ra.bring) for (const [id, n] of ra.bring) G.removeItem(id, n);
+              G.say(ra.thanks);
+              w.sprite.setVisible(false).setPosition(-200, -200); g.people = g.people.filter((p) => p !== w);
+              if (!g.people.length) this.dropWay(g);
+            }, () => again(`"Another time, maybe."`));
+          } }] : []),
+          { label: can ? "Not now" : `You haven't got ${need}`, fn: () => again(`"Well. The offer stands while I'm on this road."`) },
+        ]);
+      } });
     }
     u.showTalk(d.title, sub, text, opts);
   }
@@ -7245,6 +7402,7 @@ class VillageScene extends PlayScene {
     for (const h of this.households) {
       const door: [number, number] = [h.house.tx * TILE + 24, h.house.ty * TILE + 50];
       h.members.forEach((f, i) => {
+        if ((G.data.friends ?? []).some((x) => x.id === f.id)) return; // gone to live with you
         const w = new Walker(this, f, door[0] + (i - 1) * 10, door[1] + 4, door);
         this.physics.add.collider(w.sprite, this.objects); this.physics.add.collider(w.sprite, solids); this.collideTrunks(w.sprite);
         w.sprite.setVisible(G.isDay);
@@ -7331,10 +7489,46 @@ class VillageScene extends PlayScene {
       return;
     }
     const greet = G.isDay && G.data.clock < 2 ? "Up early." : G.data.weather === "rain" ? "Wet enough for you?" : "Good day to you.";
-    const opts = [{ label: "Ask about their work", fn: () => u.showTalk(f.name, `of ${h.trade.name}`, h.trade.tip, []) }];
+    this.folkTalk(w, h, `"${greet}" ${h.trade.lines[Math.floor(Math.random() * h.trade.lines.length)]}`);
+  }
+  /** Talking with someone of a village household: getting to know them, their big quest, and asking them to join you. */
+  folkTalk(w: Walker, h: Household, said: string) {
+    const f = w.folk, u = ui(this), rec = G.npcRec(f.id), today = G.dayNumber, again = (t: string) => this.folkTalk(w, h, t);
+    const opts: { label: string; fn: () => void }[] = [{ label: "Ask about their work", fn: () => again(h.trade.tip) }];
     const shop = HOUSE_WARES[h.trade.id];
     if (shop) opts.push({ label: h.trade.id === "weaver" ? "Buy clothes" : "Ask about the old gear on the wall", fn: () => this.houseShop(f.name, h, shop) });
-    u.showTalk(f.name, `of ${h.trade.name} · ${h.trade.patron} keeps their hearth`, `"${greet}" ${h.trade.lines[Math.floor(Math.random() * h.trade.lines.length)]}`, opts);
+    if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => { rec.talked = today; const g = this.warmth(); ui(this).changeRel(f.id, g); again(`You talk about the weather, the harvest, the gossip from the well. ${f.name} laughs at something you say. (+${g}: ${relLabel(G.rel(f.id))})`); } });
+    const held = G.selectedItem;
+    if (held && ITEMS[held.id].kind !== "tool" && rec.gifted !== today) opts.push({ label: `Give ${f.name} your ${ITEMS[held.id].name.toLowerCase()}`, fn: () => {
+      G.removeItem(held.id, 1); rec.gifted = today;
+      const t = FOLK_TASTES[h.trade.id] ?? { loves: [], likes: [], dislikes: [] }, n = ITEMS[held.id].name.toLowerCase();
+      let d = t.loves.includes(held.id) ? 3 : t.likes.includes(held.id) ? 2 : t.dislikes.includes(held.id) ? -2 : 1;
+      if (d > 0) d += G.grace("Aphrodite") >= 7 ? 2 : 0;
+      ui(this).changeRel(f.id, d);
+      again(`${d >= 3 ? `"${n[0].toUpperCase() + n.slice(1)}! For me? You shouldn't have."` : d === 2 ? `"Oh, ${n}. Thank you, really."` : d < 0 ? `"...${n}. Well. Thank you."` : `"That's kind of you."`} (${d >= 0 ? "+" : ""}${d}: ${relLabel(G.rel(f.id))})`);
+    } });
+    // Their trouble: a big quest, once you're close.
+    const q = BIG_QUESTS[h.trade.id], fq = (G.data.folkQuest ??= {}), mine = fq[f.id], adult = f.age !== "child";
+    const anyHouse = Object.entries(fq).some(([id, r]) => !r.done && h.members.some((m) => m.id === id) && id !== f.id);
+    if (q && adult && !mine && !anyHouse && G.rel(f.id) >= FRIEND_REL) opts.push({ label: "Is something troubling you?", fn: () => {
+      ui(this).showTalk(f.name, `of ${h.trade.name} · a great favor`, `${f.name} hesitates, then tells you.\n\n${q.ask}`, [
+        { label: "I'll do it", fn: () => { fq[f.id] = { day: today, base: q.deed ? (G.data.tir.ev[q.deed.note] ?? 0) : undefined }; again(`"You will? Gods bless you." (Your journal, J, keeps track.)`); } },
+        { label: "Not now", fn: () => again(`"I understand. It's a lot to ask."`) },
+      ]);
+    } });
+    if (q && mine && !mine.done) {
+      const have = q.bring ? q.bring.every(([id, n]) => G.count(id) >= n) : (G.data.tir.ev[q.deed!.note] ?? 0) - (mine.base ?? 0) >= q.deed!.n;
+      const progress = q.bring ? q.bring.map(([id, n]) => `${n} ${ITEMS[id].name.toLowerCase()} (${G.count(id)})`).join(", ") : `${q.deed!.what}: ${Math.min(q.deed!.n, (G.data.tir.ev[q.deed!.note] ?? 0) - (mine.base ?? 0))} of ${q.deed!.n}`;
+      opts.push({ label: have ? (q.bring ? "Give them what they asked for" : "Tell them it's done") : `About their trouble (${progress})`, fn: () => {
+        if (!have) { again(`"Still: ${progress}. I know it's hard. I'll wait."`); return; }
+        if (q.bring) for (const [id, n] of q.bring) G.removeItem(id, n);
+        mine.done = true; ui(this).changeRel(f.id, 3); const v = G.addFavor(q.patron, 2, 8); G.earn("Kleos", 1, `you did a great thing for ${f.name}`);
+        again(`${q.thanks}\n\n${f.name} is your sworn friend now. (+3; ${q.patron} ${v >= 0 ? "+" : ""}${v}; +1 Kleos)${G.friendCap > (G.data.friends ?? []).length ? `\n\nYou could ask ${f.female ? "her" : "him"} to throw in their lot with you.` : ""}`);
+      } });
+    }
+    // A sworn friend may join you.
+    if (mine?.done && adult) opts.push({ label: `Ask ${f.name} to throw in their lot with you`, fn: () => this.askToJoin({ id: f.id, name: f.name, female: f.female, age: f.age === "elder" ? "elder" : "adult", look: f.look, extras: f.extras, from: "village", trade: h.trade.id, title: h.trade.name.replace(/^the /, "").replace("'s household", ""), role: "follow", since: today }, () => { w.sprite.setVisible(false).setPosition(-100, -100); }, () => again(`"I'm honored you'd ask."`)) });
+    u.showTalk(f.name, `of ${h.trade.name} · ${h.trade.patron} keeps their hearth · ${relLabel(G.rel(f.id))} (${G.rel(f.id) >= 0 ? "+" : ""}${G.rel(f.id)})`, said, opts);
   }
 
   /** Buying from a household: clothes from the weaver, old armor from the old soldier. */
@@ -7704,6 +7898,7 @@ class UIScene extends Phaser.Scene {
       "Spear: click to thrust (long reach). Hold to aim, release to throw, then go and fetch it.",
       "Sword (forged by Lykos): short reach, hardest blow. Axe, mattock and sickle serve at a pinch.",
       "Bare hands (an empty slot): a light punch that knocks a creature back.",
+      "Friends: chat with and give gifts to village folk and people on the road. Help a close friend with something great and they may join you, to follow you or live on your farm (how many: your Phoenix less 2). Marry one with a garland. J lists them.",
       "Bow: hold Space to aim, click where the arrow lands. Lead moving quarry. The sling (stones) and fire arrows (with a bow in your pack) aim the same way; javelins throw like the spear.",
       "Angry beasts charge: run, fight, or calm them (E), food in hand. Blows take Vitality (the red bar: 6 per point of Health). At 0 you fall, and your Life Thread frays. Food, sleep and time heal it.",
     ], [
@@ -8590,7 +8785,15 @@ class UIScene extends Phaser.Scene {
       return `• ${p.name[0].toUpperCase() + p.name.slice(1)} (${{ fortress: "citadel", isle: "isle", delphi: "sanctuary", knossos: "palace" }[p.kind]}), ${directions(mx, my)}: ${state}${p.treasury ? (p.kind === "fortress" ? "; treasury taken" : "") : ""}.`;
     });
     for (const f of G.data.foretold ?? []) places.push(`• Foretold by the Pythia: ${f.text}`);
-    const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}${places.length ? `\n\nPLACES\n${places.join("\n")}` : ""}`;
+    const fr = G.data.friends ?? [], cap = G.friendCap;
+    const friendLines = fr.map((f) => `• ${f.name}, ${f.title}: ${f.role === "spouse" ? (f.female ? "your wife" : "your husband") : f.role === "home" ? `lives with you (${CHORE_NAME[f.chore ?? "trade"].toLowerCase()})` : f.with ? "travels with you" : "resting at your farm"}.`);
+    const hh = villageHouseholds(G.data.seed);
+    for (const [id, q] of Object.entries(G.data.folkQuest ?? {})) {
+      if (q.done) continue; const h = hh.find((x) => x.members.some((m) => m.id === id)), m = h?.members.find((x) => x.id === id), bq = h ? BIG_QUESTS[h.trade.id] : undefined; if (!m || !bq) continue;
+      friendLines.push(`• A great favor for ${m.name} (${h!.trade.name}): ${bq.bring ? `bring ${bq.bring.map(([i, n]) => `${n} ${ITEMS[i].name.toLowerCase()} (${G.count(i)})`).join(", ")}` : `${bq.deed!.what}, ${Math.min(bq.deed!.n, (G.data.tir.ev[bq.deed!.note] ?? 0) - (q.base ?? 0))} of ${bq.deed!.n}`}.`);
+    }
+    const companions = `\n\nCOMPANIONS (${fr.length} of ${cap}: your Phoenix less 2)\n${friendLines.length ? friendLines.join("\n") : "No one yet. Get close to someone in the village, or on the road, and help them with something great."}`;
+    const text = `FESTIVALS\n${fests.join("\n")}\n\nREQUESTS\n${reqs.length ? reqs.join("\n") : "Nothing promised. Ask the villagers if they need anything."}\n\nRUMORS\n${rum.length ? rum.join("\n") : "None. Ask around in the village."}${places.length ? `\n\nPLACES\n${places.join("\n")}` : ""}${companions}`;
     this.showTalk("Journal", `${G.dateLabel()} · you are ${directions(G.data.scene === "Wild" ? G.data.wx : 0, G.data.scene === "Wild" ? G.data.wy : 0).replace(" of your farm", "") || "at home"}${G.data.scene === "Wild" ? " of your farm" : ""}`, text, G.count("Map") > 0 ? [{ label: "Look at your map", fn: () => { this.closeTalk(); this.openMap(); } }] : []);
   }
 

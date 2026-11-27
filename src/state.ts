@@ -1,6 +1,7 @@
 import { COMFORT_KIND } from "./home";
 import { WEAR, gearMods, type Worn, type WearSlot } from "./gear";
 import { GRACES } from "./graces";
+import { TRADE_WORK, NEAR_FORAGE, CHORE_NAME, type Friend } from "./friends";
 import type { SiteRec } from "./sites";
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
@@ -10,7 +11,7 @@ import { SIGNS, SIGN_DAYS, MAGIC_FINDS, type SignEffect, DREAMS, MOROS_DREAMS, O
 import {
   MONTHS, WHEEL, START_ARETAI, essencePools, ESSENCE, DAYLIGHT_REAL_SECONDS, rollWeather, WEATHER_WORD, type Weather,
   NIGHT_WATCHES_PLAYABLE, SLEEP_RECOVERY_PER_HOUR, moonPhase,
-  ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE,
+  ITEMS, money, STACK_MAX, JAR_CAPACITY, INVENTORY_SIZE, MANGER_MAX, TROUGH_MAX,
   START_GOATS, type Goat, terrain, HOME_TERRAIN,
   CROPS, seedId, START_SEEDS, START_SILVER, STARTING_ARROWS, ARCHERY, START_LIFE_THREAD, DRY_LIMIT, QUALITY_MULT,
 } from "./data";
@@ -56,6 +57,9 @@ export interface SaveData {
   /** Taming (Artemis' grace): days you've fed each kind of creature from your hand, and the last day you did. */
   tame?: Record<string, { n: number; day: number }>;
   /** Your animal companion, if you have one: what it is, its name, and where you told it to wait. */
+  /** People who have joined you (friends.ts), and each village household's big quest: when you took it on, the deed count then, done. */
+  friends?: Friend[];
+  folkQuest?: Record<string, { day: number; base?: number; done?: boolean }>;
   companion?: { kind: string; name: string; since: number; riding?: boolean; stay?: { scene: string; wx: number; wy: number; x: number; y: number } } | null;
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
@@ -548,7 +552,25 @@ export class GameState {
   get homeComfort() {
     const kinds = new Set<string>();
     for (const p of this.data.placed) if (p.where === "house" && COMFORT_KIND[p.id]) kinds.add(COMFORT_KIND[p.id]);
-    return kinds.size + (this.grace("Hera") >= 4 ? 2 : 0); // Hera keeps the house
+    const fr = this.data.friends ?? [];
+    return kinds.size + (this.grace("Hera") >= 4 ? 2 : 0) + (this.spouse ? 2 : 0) + (fr.some((f) => f.role !== "follow" && f.chore === "hearth") ? 1 : 0); // Hera keeps the house; a spouse makes it a home
+  }
+  /** How many people will throw in their lot with you: your Phoenix, less 2. */
+  get friendCap() { return Math.max(0, (this.data.aretai.Phoenix ?? 3) - 2); }
+  get spouse() { return (this.data.friends ?? []).find((f) => f.role === "spouse"); }
+  /** The household's work, done before you wake: by the people who live with you. */
+  chores(notes: string[]) {
+    for (const f of this.data.friends ?? []) {
+      if (f.role === "follow") continue;
+      const c = f.chore ?? (f.role === "spouse" ? "hearth" : "trade");
+      const deliver = (id: string, n: number, what: string) => { const left = this.addItem(id, n); notes.push(left >= n ? `${f.name} ${what}, but your pack was too full to take it.` : `${f.name} ${what}: +${n - left} ${ITEMS[id].name.toLowerCase()}.`); };
+      if (c === "fields") { let n = 0; for (const [k, v] of Object.entries(this.data.ground)) if (v === "tilled") { this.data.ground[k] = "wet"; n++; } notes.push(n ? `${f.name} watered the fields at first light (${n} plot${n > 1 ? "s" : ""}).` : `${f.name} looked over the fields: nothing needed water.`); }
+      else if (c === "goats") { this.data.manger = MANGER_MAX; this.data.trough = TROUGH_MAX; for (const g of this.data.goats) g.affection = Math.min(10, g.affection + 1); notes.push(`${f.name} filled the manger and the trough, and saw to the goats.`); }
+      else if (c === "forage") { const opts = NEAR_FORAGE[this.month.season] ?? NEAR_FORAGE.Summer; deliver(opts[Math.floor(Math.random() * opts.length)], 2, "went out early and came back with something"); }
+      else if (c === "hearth") { this.data.tendedHearthDay = this.dateKey; notes.push(`${f.name} swept the house and tended the hearth, with the first portion for Hestia.`); }
+      else { const w = TRADE_WORK[f.trade]; if (w?.give) deliver(w.give[0], w.give[1], w.say); else if (w?.fatigue) { this.addFatigue(-w.fatigue); notes.push(`${f.name} ${w.say}.`); } }
+      if (f.role === "spouse") { this.heal(this.vitalityMax / 4); notes.push(`${f.name} brings you warm bread and a cup of milk before the day begins.`); }
+    }
   }
   /** A god's grace (graces.ts): 0, 4 or 7 (10 at the top, for taming). */
   grace(god: string): number { const f = this.favor(god); return f >= 10 ? 10 : f >= 7 ? 7 : f >= 4 ? 4 : 0; }
@@ -636,6 +658,7 @@ export class GameState {
       notes.push(`Artemis is angered: you took her deer and gave her no share. (Artemis -${n}, +${n} Hubris)`);
     }
     if (this.data.smithJob && this.dayNumber === this.data.smithJob.ready) notes.push("Lykos the smith has finished your tool. Collect it at the smithy.");
+    this.chores(notes);
     // The goats eat and drink in the night; a goat that goes without gives no milk.
     for (const g of this.data.goats) {
       if (this.data.manger >= 1 && this.data.trough >= 1) { this.data.manger--; this.data.trough--; g.fed = true; }
