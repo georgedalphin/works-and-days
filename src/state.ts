@@ -1,5 +1,6 @@
 import { COMFORT_KIND } from "./home";
 import { WEAR, gearMods, type Worn, type WearSlot } from "./gear";
+import { GRACES } from "./graces";
 import type { SiteRec } from "./sites";
 import { VILLAGERS } from "./village";
 import type { Request, Rumor } from "./quests";
@@ -52,6 +53,10 @@ export interface SaveData {
   jarWater: number;
   /** The waterskin's drinks (0-4); when you last drank from it (absolute hour); the day you last used the healer's kit. */
   skin?: number; drankAt?: number; kitDay?: number;
+  /** Taming (Artemis' grace): days you've fed each kind of creature from your hand, and the last day you did. */
+  tame?: Record<string, { n: number; day: number }>;
+  /** Your animal companion, if you have one: what it is, its name, and where you told it to wait. */
+  companion?: { kind: string; name: string; since: number; riding?: boolean; stay?: { scene: string; wx: number; wy: number; x: number; y: number } } | null;
   cleared: string[]; // "x,y" tiles cleared on the homestead
   ground: Record<string, "tilled" | "wet">; // worked soil on the homestead
   treeHits: Record<string, number>;
@@ -379,6 +384,8 @@ export class GameState {
     this.data.favor[god] = after;
     if (after >= 4 && !this.data.knownByName[god]) { this.data.knownByName[god] = true; this.data.currencies.Ambrosia++; this.say(`${god} knows you by name now. (+1 Ambrosia)`); }
     if (favorLabel(after) !== favorLabel(before)) this.say(`${god}: ${favorLabel(after).toLowerCase()} (favor ${after >= 0 ? "+" : ""}${after}).`);
+    const gr = GRACES[god];
+    if (gr) for (const [t, g] of [[4, gr.at4], [7, gr.at7]] as [number, { name: string; desc: string }][]) if (before < t && after >= t) this.say(`${god} grants you a grace: ${g.name}. ${g.desc}`);
     this.checkChosen(god);
     return after;
   }
@@ -523,12 +530,28 @@ export class GameState {
   get sleepHours() { return Math.max(0, 24 - Math.max(this.data.clock, this.daylight - 2)); }
 
   /** Sleep until dawn. Returns hours slept and fatigue recovered. */
+
+  /** Apollo's prophetic dreams: tomorrow's weather, and sometimes the way to a place you haven't found. */
+  apolloDream(): string {
+    const w = this.data.nextWeather, sky: Record<string, string> = { clear: "a clear sky, and larks", rain: "rain on the thatch", cloudy: "a sky like grey wool", wind: "wind in the olives", mist: "mist in the hollows", storm: "thunder" };
+    let s = `You dreamed of ${sky[w ?? "clear"] ?? "tomorrow"}: tomorrow's weather, Apollo tells you.`;
+    const way = (k?: string) => { if (!k) return ""; const [x, y] = k.split(",").map(Number), ew = x > 0 ? "east" : x < 0 ? "west" : "", ns = y > 0 ? "south" : y < 0 ? "north" : ""; return [ns, ew].filter(Boolean).join("-") || "near"; };
+    const a = this.data.anchors, found = (name: string) => !!this.data.sites[name];
+    const unfound: string[] = [];
+    if (a.delphi && !found("Delphi")) unfound.push(`a laurel tree and a voice from a cleft in the rock, far to the ${way(a.delphi)}`);
+    if (a.crete && !found("Crete")) unfound.push(`a bull in a palace on an island, far over the sea to the ${way(a.crete)}`);
+    if (a.cave && !this.data.screens[a.cave]) unfound.push(`a mouth in the hillside breathing cold air, to the ${way(a.cave)}`);
+    if (unfound.length && Math.random() < 0.35) s += ` And you dreamed of ${unfound[Math.floor(Math.random() * unfound.length)]}.`;
+    return s;
+  }
   /** How comfortable the house is: one for each kind of furnishing in it (a table, a seat, a couch, a rug, a lamp...). */
   get homeComfort() {
     const kinds = new Set<string>();
     for (const p of this.data.placed) if (p.where === "house" && COMFORT_KIND[p.id]) kinds.add(COMFORT_KIND[p.id]);
-    return kinds.size;
+    return kinds.size + (this.grace("Hera") >= 4 ? 2 : 0); // Hera keeps the house
   }
+  /** A god's grace (graces.ts): 0, 4 or 7 (10 at the top, for taming). */
+  grace(god: string): number { const f = this.favor(god); return f >= 10 ? 10 : f >= 7 ? 7 : f >= 4 ? 4 : 0; }
   sleep(collapsed = false, rough: boolean | "tent" = false) {
     const hoursSlept = this.sleepHours;
     const credit = collapsed ? 0.5 : rough === "tent" ? (this.gear.blanket ? 0.95 : 0.85) : rough ? (this.gear.blanket ? 0.75 : 0.5) : 1; // a collapse, or the hard ground by a campfire: half the rest (wrapped in a cloak, three quarters)
@@ -539,7 +562,8 @@ export class GameState {
     const recovered = hera === 100 ? this.data.fatigue : Math.min(this.data.fatigue, hoursSlept * SLEEP_RECOVERY_PER_HOUR * credit * hera * (this.signActive("rest") ? 1.25 : 1) * (1 + 0.03 * comfort));
     this.data.fatigue -= recovered;
     const v0 = this.data.vitality;
-    this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")) * (1 + 0.05 * comfort));
+    if (this.data.scene === "House" && !collapsed && !rough && this.grace("Hera") >= 7) this.heal(this.vitalityMax); // Hera's own bed
+    this.heal((hoursSlept / 8) * this.vitalityMax * credit * (hera === 100 ? 2 : hera) * (1 + 0.15 * this.boon("Apollo")) * (1 + 0.05 * comfort) * (this.grace("Apollo") >= 7 ? 2 : 1));
     const healed = this.data.vitality - v0;
     this.data.clock = 0;
     this.data.day += 1;
@@ -554,8 +578,9 @@ export class GameState {
     // Requests not met in time lapse, and the asker is a little let down.
     for (const q of [...this.data.requests]) if (this.dayNumber > q.due) {
       this.data.requests.splice(this.data.requests.indexOf(q), 1);
-      if (!this.warded("Aphrodite")) this.npcRec(q.from).rel -= 1;
-      notes.push(`${VILLAGERS[q.from].name}'s request lapsed${this.warded("Aphrodite") ? "" : ` (-1 with ${VILLAGERS[q.from].name})`}.`);
+      const kind = this.warded("Aphrodite") || this.grace("Aphrodite") >= 7;
+      if (!kind) this.npcRec(q.from).rel -= 1;
+      notes.push(`${VILLAGERS[q.from].name}'s request lapsed${kind ? "" : ` (-1 with ${VILLAGERS[q.from].name})`}.`);
       if (q.kind === "deliver") this.removeItem("Parcel", 1);
     }
     // Crops grow on nights their soil is watered, and wither after too many dry ones or out of season.
@@ -566,7 +591,7 @@ export class GameState {
       if (!def.seasons.includes(this.month.season)) { c.withered = true; withered++; continue; }
       const ripeAt = c.picks > 0 && def.regrow ? def.regrow : def.days;
       if (c.growth >= ripeAt) continue; // ripe: it waits for you
-      if (this.data.ground[k] === "wet" || this.warded("Demeter")) { c.growth++; c.dryStreak = 0; } // Demeter's protection waters them
+      if (this.data.ground[k] === "wet" || this.warded("Demeter")) { c.growth += this.grace("Demeter") >= 7 && Math.random() < 0.5 ? 2 : 1; c.growth = Math.min(c.growth, ripeAt); c.dryStreak = 0; } // Demeter's protection waters them; her blessing hastens them
       else { c.dryNights++; c.dryStreak++; if (c.dryStreak >= DRY_LIMIT) { c.withered = true; withered++; } }
     }
     if (withered) notes.push(`${withered} planting${withered > 1 ? "s" : ""} withered.`);
@@ -588,6 +613,7 @@ export class GameState {
     // The new day's weather. Rain waters every tilled bed for you.
     this.data.weather = this.data.nextWeather ?? rollWeather(this.month.season, 1 + Math.floor(Math.random() * 12));
     this.data.nextWeather = rollWeather(this.month.season, 1 + Math.floor(Math.random() * 12));
+    if (this.grace("Apollo") >= 4) notes.push(this.apolloDream());
     if (this.data.weather === "rain") {
       for (const k of Object.keys(this.data.ground)) if (this.data.ground[k] === "tilled") this.data.ground[k] = "wet";
       notes.push("Rain is falling: the fields are watered.");

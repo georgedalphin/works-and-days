@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { GameState, rng, CHEST_SIZE, type Placed, type Slot, type SaveData } from "./state";
 import { makeTextures, makePlayerTexture, makePortrait, paintCreationBg, makeFigureTexture, T, TILE, POSES, POSE } from "./textures";
 import { fortressAt, isleAt, fortressLayout, isleLand, partOf, CITADELS, ISLES, uniqueAt, pickUniqueSpot, delphiLayout, knossosLayout, knossosLayoutGrand, creteAt, pickKnossosScreen, type SiteInfo, type FortLayout, type UniqueLayout } from "./sites";
+import { GRACES, TAMABLE, PET_NAMES } from "./graces";
 import { WEAR, WEAR_SLOTS, SLOT_NAME, LOC_NAME, armorAt, coverers, armorSummary, type WearSlot } from "./gear";
 import { HOME, HOME_FIXED, HOME_WALL_BUSY, HOME_WINDOW, furn, footprint, footAnchor } from "./home";
 import { fillShore, coastMask, allSea, someSea, unpack, type Shore, type Intent } from "./coast";
@@ -338,7 +339,7 @@ abstract class PlayScene extends Phaser.Scene {
     this.player = this.physics.add.sprite(x, y, "player", 0);
     this.player.setSize(8, 6).setOffset(4, 10).setDepth(10);
     this.ambience = undefined;
-    this.seat = undefined; this.seatFree = undefined;
+    this.seat = undefined; this.seatFree = undefined; this.pet = undefined; this.warned = new Set();
     this.poseT = 0; this.poseKind = ""; this.walkT = 0; this.trunks = undefined; this.trunkAt.clear(); this.rustleT = 0; this.thornSaid = false;
     this.focusGlow = this.add.image(0, 0, "focusGlow").setBlendMode(Phaser.BlendModes.ADD).setVisible(false).setDepth(99980);
     this.focusMarks = this.add.graphics().setDepth(99981);
@@ -357,6 +358,7 @@ abstract class PlayScene extends Phaser.Scene {
   }
 
   knock = 0; // seconds of being thrown back by a blow
+  hurtAt = -1e9;
   invuln = 0; // seconds before another blow can land
   mealT = 0;
   /** Held still (at the start line, before the race begins). */
@@ -422,6 +424,9 @@ abstract class PlayScene extends Phaser.Scene {
     if (w) { speed = Math.min(speed, 70); this.dashLvl = 0; } // no running in water
     speed *= this.groundSpeed() * this.bushSpeed(dt, moving);
     const gear = G.gear; speed *= Math.max(0.7, 1 + 0.06 * gear.aiolos) * (gear.feet >= 2 && !w ? 1.04 : 1); // bronze weighs you down; good boots carry you
+    if (G.grace("Hermes") >= 4 && this.onRoad()) speed *= 1.25; // Road-Blessed
+    if (this.pet?.riding) speed *= 1.75; // on horseback
+    if (moving && G.grace("Aphrodite") >= 4 && this.outdoors && Math.random() < dt * 1.2) this.bloom(); // flowers in your wake
     this.player.setVelocity((vx / len) * speed, (vy / len) * speed);
     this.swim(dt, w);
     this.rest(dt, moving, w);
@@ -1033,7 +1038,7 @@ abstract class PlayScene extends Phaser.Scene {
       case "HealerKit": {
         if (G.data.kitDay === G.dayNumber) { G.say("You've already dressed your wounds today. Let them be until tomorrow."); return true; }
         if (G.data.vitality >= G.vitalityMax) { G.say("You have no wounds that need binding."); return true; }
-        const n = 1 + Math.floor(Math.random() * 6) + Math.floor((G.data.aretai.Gnosis ?? 3) / 2);
+        const n = (1 + Math.floor(Math.random() * 6) + Math.floor((G.data.aretai.Gnosis ?? 3) / 2)) * (G.grace("Apollo") >= 7 ? 2 : 1);
         G.data.kitDay = G.dayNumber; G.heal(n); this.gesture("act"); SOUND.sfx("pickup");
         G.say(`You wash your cuts with wine and water, smear them with honey, and bind them in clean linen. (+${n} Vitality; d6 and half your Gnosis)`);
         return true;
@@ -1122,7 +1127,7 @@ abstract class PlayScene extends Phaser.Scene {
       for (const o of this.placedObjs) if (o.p.id === "Campfire") this.showFire(o);
       if (G.data.weather === "rain" && this.scene.key === "Farm") { const f = this as unknown as FarmScene; for (const [k, v] of Object.entries(G.data.ground)) if (v === "tilled") { const [x, y] = k.split(",").map(Number); f.setGround(x, y, "wet"); } } // rain soaks the tilled soil
       // Slow healing while awake (a longer jump in time is sleep, which heals by itself).
-      const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo"))); this.lastHealAt = h;
+      const h = G.absHour; if (this.lastHealAt >= 0 && h > this.lastHealAt && h - this.lastHealAt < 2 && !this.paused) G.heal((h - this.lastHealAt) * G.vitalityMax / 96 * (1 + 0.25 * G.boon("Apollo")) * (G.grace("Ares") >= 4 && this.time.now - this.hurtAt > 30000 ? 4 : 1)); // War-Touched: quick recovery this.lastHealAt = h;
     }
     if (!this.spearChecked) { // your spear, if it lies where you left it
       this.spearChecked = true;
@@ -1130,12 +1135,15 @@ abstract class PlayScene extends Phaser.Scene {
       if (s && s.k === this.groundKey()) this.dropItem("spear", 1, s.x, s.y, "spearStuck");
     }
     this.movePlayer(dt);
+    this.petTick(dt);
+    this.dangerTick(dt);
     if (this.madUntil > this.time.now && !G.warded("Dionysus")) { const v = this.player.body!.velocity; this.player.setVelocity(-v.x, -v.y); }
     this.divineTick(dt);
     if (this.paused) { ui(this).prompt(null); this.focusGlow?.setVisible(false); this.focusTag?.setVisible(false); this.focusMarks?.clear(); return false; }
     if (G.tick(dt)) { ui(this).collapse(this); return false; }
     G.data.px = this.player.x; G.data.py = this.player.y;
     this.current = this.findTarget();
+    if (!this.current) { const l = this.animals.find((x) => this.lured(x) && Math.hypot(x.sprite.x - this.player.x, x.sprite.y - this.player.y) < 28); if (l) this.current = { x: l.sprite.x, y: l.sprite.y, label: `Let the ${beast(l.kind)} eat from your hand`, act: () => this.feedWild(l) }; }
     const angry = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 56 && !(isMonster(a.kind) && !MONSTERS[a.kind].calm));
     if (angry) this.current = { x: angry.sprite.x, y: angry.sprite.y, label: angry.kind === "brigand" ? "Yield: throw them your purse" : isMonster(angry.kind) && G.lore(angry.kind) >= 1 ? MONSTERS[angry.kind].calm : `Calm the ${beast(angry.kind)}`, act: () => this.appease(angry) };
     ui(this).prompt(this.current ? this.current.label : null);
@@ -1171,7 +1179,8 @@ abstract class PlayScene extends Phaser.Scene {
     if (d.aggression <= 0 || a.appeased) return false;
     const beastly = !isMonster(a.kind) && a.kind !== "eidolon" && a.kind !== "lampad";
     if (beastly && (G.warded("Artemis") || G.data.divine.day.calm === G.dayNumber)) return false; // the Mistress of beasts holds them
-    if ((a.kind === "eidolon" || a.kind === "lampad") && (G.warded("Hecate") || G.data.divine.day.hecateLight === G.dayNumber)) return false;
+    if ((a.kind === "eidolon" || a.kind === "lampad" || a.kind === "skeleton") && (G.warded("Hecate") || G.grace("Hecate") >= 7 || G.data.divine.day.hecateLight === G.dayNumber)) return false; // the Key-Holder passes
+    if (beastly && G.grace("Artemis") >= 10 && bonus < 3) return false; // the Huntress's Companion: beasts let you be unless you hurt them
     if (beastly && G.doomed("Artemis")) bonus += 3;
     // Beasts answer to Artemis and the hunter's hour; a monster to the god whose domain it is.
     const calmer = isMonster(a.kind) ? -Math.trunc(G.boon(MONSTERS[a.kind].patron) / 2) : (G.patron?.aretai === "Kardia" ? -2 : 0) - Math.trunc(G.boon("Artemis") / 2);
@@ -1205,6 +1214,7 @@ abstract class PlayScene extends Phaser.Scene {
   struck(a: Animal) {
     SOUND.sfx("hurt");
     if (this.invuln > 0 || this.leaving) return;
+    this.hurtAt = this.time.now;
     const d = SPECIES[a.kind];
     const hit = landBlow(blowOf(d.damage) + (G.exhausted ? 1 : 0) + (G.selectedItem?.id === "Kopis" ? 1 : 0)); // armor where it lands turns it; worn out (or swinging a kopis), you take it worse
     let dmg = hit.dmg;
@@ -1470,12 +1480,14 @@ abstract class PlayScene extends Phaser.Scene {
     // Bare bone shrugs off cuts and shatters under crushing blows (Terata).
     let dmg = tool === "torch" ? 1 : a.kind === "skeleton" ? ({ mattock: 2, axe: 1, sickle: 0, spear: 1, sword: 1, Club: 2, Labrys: 2, Kopis: 1, SilverDagger: 1, Javelin: 0 } as Record<string, number>)[tool] ?? 1 : MELEE[tool];
     if (tool === "SilverDagger" && (isMonster(a.kind) || a.kind === "eidolon")) dmg += 1; // silver bites the uncanny
+    if (G.grace("Zeus") >= 4 && isMonster(a.kind)) dmg += 1; // Zeus against the monsters
     if (dmg === 0) { G.say(`Your ${tool} skitters off bare bone. It needs a crushing blow.`); return true; }
     a.hp -= dmg;
     if (a.kind === "empousa" && a.state !== "charge" && a.state !== "recoil") { a.charge(6); a.sprite.setTexture("empousaTrue", 0); }
     this.chips(Math.floor(a.sprite.x / TILE), Math.floor(a.sprite.y / TILE), -1, 4);
     if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return true; }
     a.sprite.setTint(0xff8080); this.time.delayedCall(250, () => a.sprite.clearTint());
+    if (G.grace("Ares") >= 7) this.bleed(a);
     if (tool === "Club" || tool === "Labrys") { const ang = Math.atan2(a.sprite.y - this.player.y, a.sprite.x - this.player.x); a.sprite.setVelocity(Math.cos(ang) * 170, Math.sin(ang) * 170); if (a.state === "charge") { a.state = "recoil"; a.timer = 0.6; } }
     G.say(`You strike the ${name}${tool === "Club" ? " and knock it reeling" : ""}! (d12 ${roll}, needed 1–${target})`);
     if (a.state !== "charge" && a.state !== "recoil" && !this.aggressionRoll(a, 3)) { if (fightsBack(a.kind)) a.charge(6); else a.bolt(this.player); }
@@ -1829,11 +1841,19 @@ abstract class PlayScene extends Phaser.Scene {
     G.addFatigue(-perHour * dt / G.secondsPerClockHour);
     if (Math.floor(this.stillT) !== Math.floor(this.stillT - dt) && Math.floor(this.stillT) % 3 === 0) this.restFx();
   }
+  /** Is the player on a road or path? (Scenes with roads say so.) */
+  onRoad(): boolean { return false; }
+  /** A flower opens where you've just walked, and fades after a while (Aphrodite's grace). */
+  bloom() {
+    const x = this.player.x + (Math.random() - 0.5) * 10, y = this.player.y + 6 + Math.random() * 3;
+    const f = this.add.image(x, y, "tiles", "t12").setScale(0.45).setAlpha(0).setDepth(y - 8).setTint([0xffffff, 0xffc0d0, 0xfff0a0][Math.floor(Math.random() * 3)]);
+    this.tweens.add({ targets: f, alpha: 0.9, duration: 500, hold: 5000, yoyo: true, onComplete: () => f.destroy() });
+  }
   /** The weather on you, out of doors: rain soaks you and cold gets into your bones, unless you're wrapped up (gear.ts). */
   weatherSaid = ""; exposed = false;
   weather(dt: number) {
     this.exposed = false;
-    if (!this.outdoors || this.scene.key === "Labyrinth" || this.paused || this.boat) return;
+    if (!this.outdoors || this.scene.key === "Labyrinth" || this.paused || this.boat || G.grace("Zeus") >= 4) return; // Zeus spares you his storms
     const wet = G.data.weather === "rain", t = this.wildRec?.terrain ?? 3;
     const cold = G.month.season === "Winter" || ((t === 9 || G.data.weather === "wind") && !G.isDay);
     const need = (wet ? 1 : 0) + (cold ? 1 : 0), bare = Math.max(0, need - G.gear.weather);
@@ -1864,7 +1884,8 @@ abstract class PlayScene extends Phaser.Scene {
     if (w !== 2) { this.swimming = false; this.drownT = 0; return; }
     if (!this.swimming) { this.swimming = true; G.say("Out of your depth: you're swimming. Every stroke costs breath (Air). Get to the shallows before it runs out."); }
     if (G.warded("Poseidon")) return;
-    const drain = 2.5 * dt * Math.max(0.4, 1 - 0.1 * G.boon("Poseidon"));
+    if (G.grace("Poseidon") >= 7) return; // the Wave-Master cannot drown
+    const drain = 2.5 * dt * Math.max(0.4, 1 - 0.1 * G.boon("Poseidon")) * (G.grace("Poseidon") >= 4 ? 0.5 : 1);
     if (G.essence.Air > drain) { G.essence.Air -= drain; return; }
     G.essence.Air = 0; G.spentFlash = { el: "Air", at: performance.now() };
     this.drownT -= dt;
@@ -1879,7 +1900,7 @@ abstract class PlayScene extends Phaser.Scene {
     const b = this.boat!; const o = this.objLayer()!;
     if (dx || dy) { this.strokeT = (this.strokeT + dt) % 0.8; if (this.strokeT < dt) SOUND.sfx("loose"); } else this.strokeT = 0;
     const surge = this.strokeT < 0.3 ? 1.45 : 0.5; // average ≈ 0.85 of 70 × 2/3
-    const speed = 70 * (2 / 3) * surge * (G.exhausted ? 0.6 : 1) * (G.songOn("row") ? 1.35 : 1); // the rowers' chant
+    const speed = 70 * (2 / 3) * surge * (G.exhausted ? 0.6 : 1) * (G.songOn("row") ? 1.35 : 1) * (G.grace("Poseidon") >= 7 ? 1.33 : 1); // the rowers' chant; the Wave-Master
     let vx = dx * speed, vy = dy * speed;
     const wetAt = (x: number, y: number) => waterKind(o.getTileAtWorldXY(x, y)?.index) > 0;
     const look = 8;
@@ -2096,6 +2117,170 @@ abstract class PlayScene extends Phaser.Scene {
     }
     return m;
   }
+  // ---------------------------------------------------------------- companions (Artemis' grace)
+  pet?: { sprite: Phaser.GameObjects.Sprite; animT: number; biteT: number; huntT: number; target?: Animal; prey?: Animal; riding: boolean; said: boolean; t: Target };
+  warned = new Set<Animal>(); dangerT = 0;
+  /** Is this wild creature drawn to the food you hold out (and can it be tamed by you, now)? */
+  lured(a: Animal): boolean {
+    const tm = TAMABLE[a.kind], held = G.selectedItem?.id;
+    if (!tm || !held || !tm.food.includes(held) || G.data.companion || this.scene.key !== "Wild") return false;
+    if (a.state === "dead" || a.state === "gone" || a.state === "charge" || a.state === "recoil" || !a.sprite.visible) return false;
+    return G.grace("Artemis") >= 4 || (a.kind === "horse" && G.grace("Poseidon") >= 4);
+  }
+  /** The creature eats from your hand. Fed on enough different days, the next of its kind follows you home. */
+  feedWild(a: Animal) {
+    const held = G.selectedItem?.id; if (!held) return;
+    const tame = (G.data.tame ??= {}), t = (tame[a.kind] ??= { n: 0, day: -1 }), name = beast(a.kind);
+    if (t.day === G.dayNumber) { G.say(`The ${name} noses at your hand, but trust takes days, not hours. Come back tomorrow.`); a.appeased = true; return; }
+    G.removeItem(held, 1); t.n++; t.day = G.dayNumber;
+    const need = a.kind === "horse" && G.grace("Poseidon") >= 4 ? 1 : G.grace("Artemis") >= 10 ? 1 : G.grace("Artemis") >= 7 ? 2 : 3;
+    const heart = this.add.text(a.sprite.x, a.sprite.y - 12, "♥", { fontFamily: FONT, fontSize: "9px", color: "#9ad07a" }).setOrigin(0.5).setResolution(3).setDepth(99999);
+    this.tweens.add({ targets: heart, y: heart.y - 10, alpha: 0, duration: 1100, onComplete: () => heart.destroy() });
+    if (t.n < need) { a.appeased = true; a.state = "idle"; a.timer = 3; a.sprite.setVelocity(0, 0); G.say(`The ${name} eats from your hand, and lets you touch its neck before it steps away. It is beginning to trust you: ${t.n} of ${need} days.${t.n === need - 1 ? " One more day." : ""}`); return; }
+    // Tamed.
+    const nm = PET_NAMES[Math.floor(Math.random() * PET_NAMES.length)];
+    G.data.companion = { kind: a.kind, name: nm, since: G.dayNumber }; tame[a.kind] = { n: 0, day: G.dayNumber };
+    const x = a.sprite.x, y = a.sprite.y;
+    a.state = "dead"; a.sprite.destroy(); this.animals.splice(this.animals.indexOf(a), 1);
+    this.spawnPet(x, y);
+    const v = G.addFavor("Artemis", 1, 8); // she is glad of it (but taming alone won't make you her Chosen)
+    const role = TAMABLE[a.kind].role;
+    G.say(`The ${name} eats, and when you walk on, it follows. You call it ${nm}. ${role === "guard" ? "It will stand by you if anything comes at you." : role === "mount" ? "It will carry you: talk to it (E) and ride." : "It will warn you when danger is near."} (Artemis ${v >= 0 ? "+" : ""}${v}; E to talk to ${nm})`);
+  }
+  /** Where pets may go: out of doors, on your own land and in the wild (it waits outside houses and caves). */
+  petAllowed() { return ["Farm", "Wild", "Village", "Gym"].includes(this.scene.key); }
+  petPlaceKey() { return this.scene.key === "Wild" ? `Wild:${G.data.wx},${G.data.wy}` : this.scene.key; }
+  spawnPet(x: number, y: number) {
+    const c = G.data.companion!; const kind = c.kind as Species;
+    const sprite = this.add.sprite(x, y, kind, 0).setDepth(y);
+    const sc = this;
+    const t: Target = { get x() { return sprite.x; }, get y() { return sprite.y + 2; }, get label() { return sc.pet?.riding ? `Get down from ${c.name}` : `${c.name} the ${SPECIES[kind].name}`; }, act: () => sc.petMenu() };
+    this.pet = { sprite, animT: 0, biteT: 0, huntT: 20, riding: false, said: false, t };
+    this.targets.push(t);
+    if (c.riding && TAMABLE[c.kind]?.role === "mount") this.mount(true);
+  }
+  petMenu() {
+    const c = G.data.companion, p = this.pet; if (!c || !p) return;
+    const u = ui(this), role = TAMABLE[c.kind]?.role, opts: { label: string; fn: () => void }[] = [];
+    if (p.riding) { this.dismount(); return; }
+    if (role === "mount") opts.push({ label: `Ride ${c.name}`, fn: () => { u.closeTalk(); this.mount(); } });
+    if (c.stay) opts.push({ label: "Come with me", fn: () => { c.stay = undefined; u.closeTalk(); G.say(`${c.name} comes to your side.`); } });
+    else opts.push({ label: "Stay here and wait for me", fn: () => { c.stay = { scene: this.petPlaceKey(), wx: G.data.wx, wy: G.data.wy, x: p.sprite.x, y: p.sprite.y }; u.closeTalk(); G.say(`${c.name} settles down to wait for you here.`); } });
+    opts.push({ label: `Let ${c.name} go back to the wild`, fn: () => { u.closeTalk(); u.choose(`Let ${c.name} go? You will have to tame another from the start.`, () => this.releasePet()); } });
+    const days = G.dayNumber - c.since, what = role === "guard" ? "stands by you when anything comes at you" : role === "mount" ? "carries you, faster than you can walk" : "watches for danger and warns you of it";
+    u.showTalk(c.name, `your ${SPECIES[c.kind as Species].name} · tamed ${days === 0 ? "today" : `${days} day${days > 1 ? "s" : ""} ago`}`, `${c.name} ${what}.${c.stay ? " It is waiting here for you." : ""}`, opts);
+  }
+  releasePet() {
+    const p = this.pet, c = G.data.companion; if (!c) return;
+    G.data.companion = null;
+    if (p) { this.targets = this.targets.filter((t) => t !== p.t); const s = p.sprite; this.tweens.add({ targets: s, alpha: 0, x: s.x + (Math.random() < 0.5 ? -60 : 60), duration: 1200, onComplete: () => s.destroy() }); this.pet = undefined; }
+    G.say(`${c.name} looks back at you once, and goes off into the wild.`);
+  }
+  mount(quiet = false) {
+    const p = this.pet, c = G.data.companion; if (!p || !c || this.boat || this.underfoot()) return;
+    p.riding = true; c.riding = true; c.stay = undefined;
+    this.player.setPosition(p.sprite.x, p.sprite.y - 3);
+    if (!quiet) G.say(`You swing up onto ${c.name}'s back. (Move to ride; E to get down.)`);
+  }
+  dismount(quiet = false) {
+    const p = this.pet, c = G.data.companion; if (!p || !p.riding) return;
+    p.riding = false; if (c) c.riding = false; this.player.setCrop();
+    p.sprite.setPosition(this.player.x + (this.facing === 1 ? 12 : -12), this.player.y + 4);
+    if (!quiet) G.say(`You slide down from ${c?.name ?? "the horse"}'s back.`);
+  }
+  /** The companion's day: follow you (or wait where told), ride, defend you, hunt, and warn. */
+  petTick(dt: number) {
+    const c = G.data.companion;
+    if (!c) { if (this.pet) { this.pet.sprite.destroy(); this.pet = undefined; } return; }
+    if (!this.petAllowed()) { if (c.riding) c.riding = false; return; }
+    if (!this.pet) {
+      if (c.stay && c.stay.scene !== this.petPlaceKey()) return; // waiting elsewhere
+      if (this.boat || this.underfoot()) return;
+      if (c.stay) this.spawnPet(c.stay.x, c.stay.y); else this.spawnPet(this.player.x + (Math.random() < 0.5 ? -14 : 14), this.player.y + 6);
+      return;
+    }
+    const p = this.pet, s = p.sprite, def = SPECIES[c.kind as Species], tm = TAMABLE[c.kind];
+    if (this.paused) return;
+    let vx = 0, vy = 0;
+    if (p.riding) {
+      if (this.boat || this.underfoot()) { this.dismount(true); G.say(`${c.name} won't go into the water. You get down.`); return; }
+      s.setPosition(this.player.x, this.player.y + 4).setDepth(this.player.y + 0.6).setFlipX(this.facing === 1);
+      this.player.setCrop(0, 0, 16, 12);
+      const mv = (this.player.body as Phaser.Physics.Arcade.Body).velocity;
+      if (Math.abs(mv.x) + Math.abs(mv.y) > 1) { p.animT += dt * def.frameRate * 1.5; s.setFrame(Math.floor(p.animT) % 2); } else s.setFrame(0);
+      return;
+    }
+    const dist = Math.hypot(s.x - this.player.x, s.y - this.player.y);
+    // A guard goes for whatever is coming at you; a hunter runs down small game now and then.
+    if (tm?.role === "guard" && !c.stay) {
+      if (!p.target || p.target.state === "dead" || !p.target.sprite.active || (p.target.state !== "charge" && p.target.state !== "recoil")) {
+        p.target = this.animals.find((a) => (a.state === "charge" || a.state === "recoil") && a.kind !== "goat" && a.kind !== "eidolon" && a.kind !== "lampad" && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 160);
+        if (p.target && !p.said) { p.said = true; G.say(`${c.name} bares its teeth and goes for the ${beast(p.target.kind)}!`); }
+        if (!p.target) p.said = false;
+      }
+      if (!p.target && ["wolf", "fox", "jackal"].includes(c.kind) && (p.huntT -= dt) <= 0) {
+        p.prey = this.animals.find((a) => (a.kind === "hare" || a.kind === "bustard") && a.state !== "dead" && a.state !== "gone" && a.sprite.visible && Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y) < 180);
+        p.huntT = p.prey ? 999 : 15;
+      }
+    }
+    const goal = p.target ?? p.prey;
+    if (goal && (!goal.sprite.active || goal.state === "dead")) { if (goal === p.prey) { p.prey = undefined; p.huntT = 60; } p.target = undefined; }
+    else if (goal) {
+      const d = Math.hypot(goal.sprite.x - s.x, goal.sprite.y - s.y), sp = 150;
+      vx = (goal.sprite.x - s.x) / d * sp; vy = (goal.sprite.y - s.y) / d * sp;
+      if (d < 12 && (p.biteT -= dt) <= 0) {
+        p.biteT = 1;
+        if (goal === p.prey) { G.say(`${c.name} runs down the ${beast(goal.kind)} and leaves it at your feet.`); this.kill(goal); p.prey = undefined; p.huntT = 60; }
+        else this.petBite(goal, tm?.bite ?? 1);
+      }
+    } else if (c.stay) { vx = 0; vy = 0; }
+    else if (dist > 260) { s.setPosition(this.player.x - 14, this.player.y + 6); }
+    else if (dist > 22) {
+      const sp = Math.min(160, Math.max(def.walk * 2.5, 70) * (dist > 80 ? 1.8 : 1));
+      vx = (this.player.x - s.x) / dist * sp; vy = (this.player.y + 4 - s.y) / dist * sp;
+    }
+    s.x += vx * dt; s.y += vy * dt;
+    const moving = Math.abs(vx) + Math.abs(vy) > 1;
+    if (moving) { p.animT += dt * def.frameRate; s.setFrame(Math.floor(p.animT) % 2); if (Math.abs(vx) > 1) s.setFlipX(vx < 0); } else s.setFrame(0);
+    s.setDepth(s.y);
+  }
+  petBite(a: Animal, dmg: number) {
+    const q = QUARRY[a.kind]; if (a.hp < 0) a.hp = q?.hp ?? 2;
+    a.hp -= dmg; SOUND.sfx("hit");
+    a.sprite.setTint(0xff8080); this.time.delayedCall(220, () => a.sprite.active && a.sprite.clearTint());
+    if (a.hp <= 0) { this.kill(a); this.creatureEvent(a, "slain"); return; }
+    const ang = Math.atan2(a.sprite.y - this.pet!.sprite.y, a.sprite.x - this.pet!.sprite.x);
+    (a.sprite as Phaser.Physics.Arcade.Sprite).setVelocity?.(Math.cos(ang) * 140, Math.sin(ang) * 140);
+    a.state = "recoil"; a.timer = 0.9;
+  }
+  /** Warnings of danger: Athena's owls, Artemis' birds, a watchful companion. And Athena's grey eyes see through an empousa. */
+  dangerTick(dt: number) {
+    if ((this.dangerT -= dt) > 0 || this.paused) return; this.dangerT = 0.5;
+    const owl = G.grace("Athena") >= 4, birds = G.grace("Artemis") >= 7, watcher = !!this.pet && !this.pet.riding && TAMABLE[G.data.companion?.kind ?? ""]?.role === "watch" && !G.data.companion?.stay;
+    const grey = G.grace("Athena") >= 7;
+    for (const a of this.animals) {
+      if (this.warned.has(a) || a.state === "dead" || a.state === "gone" || !a.sprite.visible || a.appeased) continue;
+      const hostile = isMonster(a.kind) || a.kind === "brigand" || (SPECIES[a.kind]?.aggression ?? 0) >= 5;
+      if (!hostile) continue;
+      const dx = a.sprite.x - this.player.x, dy = a.sprite.y - this.player.y, d = Math.hypot(dx, dy);
+      if (d > 240) continue;
+      this.warned.add(a);
+      if (a.kind === "empousa" && grey) { a.sprite.setTexture("empousaTrue", 0); if (G.lore("empousa") < 1) G.data.lore.tier.empousa = 1; G.say("Your grey eyes see through her: the lovely woman in the meadow is an empousa. Mock her, or show her a mirror."); }
+      if (!owl && !birds && !watcher) continue;
+      const dir = Math.abs(dx) > Math.abs(dy) * 2 ? (dx > 0 ? "east" : "west") : Math.abs(dy) > Math.abs(dx) * 2 ? (dy > 0 ? "south" : "north") : `${dy > 0 ? "south" : "north"}-${dx > 0 ? "east" : "west"}`;
+      const c = G.data.companion;
+      G.say(watcher ? `${c!.name} goes still, ears up, staring ${dir}: something dangerous is near.` : owl ? `An owl hoots, sharp and sudden: Athena's warning. Something dangerous is near, to the ${dir}.` : `The birds fall silent, then cry out in alarm to the ${dir}: something dangerous is near.`);
+      if (watcher) this.alarm({ sprite: this.pet!.sprite } as unknown as Animal);
+    }
+  }
+  /** Blood-Blessed (Ares' grace): the wound bleeds, and a moment later it costs the creature another blow's worth. */
+  bleed(a: Animal) {
+    this.time.delayedCall(1800, () => {
+      if (!a.sprite.active || a.state === "dead" || a.state === "gone" || a.hp <= 0) return;
+      a.hp -= 1; a.sprite.setTint(0xb03030); this.time.delayedCall(200, () => a.sprite.active && a.sprite.clearTint());
+      if (a.hp <= 0) { G.say(`The ${beast(a.kind)} staggers, bleeding, and falls.`); this.kill(a); this.creatureEvent(a, "slain"); }
+    });
+  }
   /** A scene may take over what happens when a creature is beaten (the dead fall apart and rise again). */
   overcome(_a: Animal) { return false; }
 
@@ -2265,6 +2450,11 @@ abstract class PlayScene extends Phaser.Scene {
     for (const a of this.animals) { a.decide ??= (x) => this.aggressionRoll(x); a.strikes ??= (x) => this.struck(x); }
     const lights = this.animals.some((a) => a.kind === "eidolon") ? this.fireLights() : [];
     if (!this.paused) for (const a of this.animals) {
+      if (this.lured(a)) { // it smells the food in your hand, and comes to see
+        a.rolled = true; const d = Math.hypot(a.sprite.x - this.player.x, a.sprite.y - this.player.y);
+        if (d > 18 && d < 120 && a.state !== "walk") { a.state = "walk"; a.tx = this.player.x + (a.sprite.x < this.player.x ? -10 : 10); a.ty = this.player.y; a.timer = 2; }
+        a.update(dt, this.player, 0); continue;
+      }
       a.update(dt, this.player, base * (G.lore(a.kind) >= 3 ? 0.67 : 1));
       // Noumenia: the gathered dead circle their crossroads or graveyard, until something draws them.
       if (a.orbit && (a.state === "idle" || a.state === "walk")) {
@@ -2326,6 +2516,9 @@ class TitleScene extends Phaser.Scene {
   }
 }
 
+/** What a recipe needs from you: the Smith's Apprentice (Hephaestus' grace at +7) saves a copper at the forge. */
+const needsOf = (r: { needs: [string, number][]; at?: Station }): [string, number][] =>
+  r.at === "forge" && G.grace("Hephaestus") >= 7 ? r.needs.map(([id, n]) => [id, id === "Copper" ? Math.max(1, n - 1) : n] as [string, number]) : r.needs;
 /** What Lykos the smith will make in bronze: [item, silver, copper ore]. */
 const SMITH_ARMOR: [string, number, number][] = [["Kopis", 60, 2], ["Greaves", 40, 1], ["Corinthian", 70, 2], ["ScaleCuirass", 110, 2], ["Aspis", 60, 1], ["Cuirass", 170, 4]];
 /** What some village households sell: the weaver clothes, the old soldier his old gear. [item, silver] */
@@ -2334,7 +2527,10 @@ const HOUSE_WARES: Record<string, { say: string; wares: [string, number][] }> = 
   oldsoldier: { say: "\"I've no use for it now. Better it keeps someone alive than hangs on my wall.\"", wares: [["Kynee", 12], ["LeatherShirt", 28], ["Pelte", 26], ["Linothorax", 60], ["Boots", 26]] },
 };
 /** How far you see in the dark: a torch, a lamp, and a bronze mirror to throw the light further. */
-const caveDark = () => inDark ? "dark0" : G.count("Lamp") > 0 ? (G.count("Mirror") > 0 ? "dark3" : "dark2") : G.count("Mirror") > 0 ? "dark2" : "dark1";
+const caveDark = () => { // a torch, a lamp; a bronze mirror and Hades' grace each throw the light a step further
+  const steps = ["dark1", "dark2", "dark3"], n = (G.count("Lamp") > 0 ? 1 : 0) + (G.count("Mirror") > 0 ? 1 : 0) + (G.grace("Hades") >= 4 ? 1 : 0);
+  return inDark ? (G.grace("Hades") >= 4 ? "dark1" : "dark0") : steps[Math.min(2, n)];
+};
 /** Draw the player in what they wear now, and show it at once in the scene they're in. */
 function dressPlayer(scene: Phaser.Scene) {
   makePlayerTexture(scene, G.data.look, G.data.worn);
@@ -2668,6 +2864,7 @@ class FarmScene extends PlayScene {
   /** Tiles under the homestead's fixed structures, where nothing can be set down. */
   reserved = new Set<string>();
   placeKey() { return "farm"; }
+  onRoad() { const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE); return this.baseGround?.[ty]?.[tx] === T.PATH; }
   placeBlocked(tx: number, ty: number) {
     const k = `${tx},${ty}`;
     if (tx < 2 || ty < 2 || tx >= MW - 2 || ty >= MH - 2) return "Not at the very edge of your land.";
@@ -2981,7 +3178,7 @@ class FarmScene extends PlayScene {
   tendGoat(g: Goat, a: Animal) {
     const today = G.dayNumber;
     if (g.pettedDay !== today) {
-      g.pettedDay = today; g.affection = Math.min(10, g.affection + 1);
+      g.pettedDay = today; g.affection = Math.min(10, g.affection + (G.grace("Hera") >= 4 ? 2 : 1));
       this.heart(a.sprite.x, a.sprite.y);
       G.say(`${g.name} leans into your hand. (Affection ${g.affection}/10)`);
     } else if (g.fed && g.milkedDay !== today && (G.data.divine.day[`sick_${g.name}`] ?? 0) > today) {
@@ -3096,6 +3293,7 @@ class FarmScene extends PlayScene {
       const extra = dem !== 0 && Math.random() < 0.15 * Math.abs(dem) ? Math.sign(dem) : 0;
       const got = give(d.id, Math.max(1, d.yield + mastery(d.id) + extra + reap), q);
       if (extra > 0) G.say("Demeter is generous: an extra measure.");
+      if (G.grace("Demeter") >= 4) { const sn = 1 + (Math.random() < 0.5 ? 1 : 0); G.say(`Green-Blessed: the harvest gives back seed, ${give(seedId(d.id), sn)}.`); }
       if (d.regrow) { c.picks++; c.growth = 0; c.dryNights = 0; c.dryStreak = 0; G.say(`You pick the ${d.name.toLowerCase()}: ${got}. It will be ready again in ${d.regrow} nights.`); }
       else { delete G.data.crops[k]; G.say(`You harvest the ${d.name.toLowerCase()}: ${got}${q === 3 ? ". A splendid crop!" : ""}`); }
       this.drawCrop(k);
@@ -3198,7 +3396,7 @@ class FarmScene extends PlayScene {
     for (const id of ["WildGrapes", "Grapes"]) { const t = G.removeItem(id, take); take -= t; }
     const base = qsum / Math.max(1, n);
     const great = score >= 11, dion = G.patron?.aretai === "Pneuma";
-    const q = Math.max(1, Math.min(3, Math.round(base) + (great ? 1 : 0) + (dion ? 1 : 0) - (score <= 4 ? 1 : 0)));
+    const q = Math.max(G.grace("Dionysus") >= 4 ? 2 : 1, Math.min(3, Math.round(base) + (great ? 1 : 0) + (dion ? 1 : 0) - (score <= 4 ? 1 : 0)));
     G.addFatigue(6);
     v.must = must; v.q = q; v.sealed = G.dayNumber;
     G.say(`You tread the grapes until your legs are purple to the knee: ${must} measure${must > 1 ? "s" : ""} of must, sealed in jars to work for ${FERMENT_DAYS} days.${great ? " A fine treading." : score <= 4 ? " A clumsy treading; the must is muddied." : ""}${dion ? " In Dionysus' hour, the god himself seems to stamp with you." : ""} It will be ${QUALITY[q]} wine.`);
@@ -5252,6 +5450,7 @@ class WildScene extends PlayScene {
     const shod = G.gear.feet;
     return t === T.MUD ? [0.7, 0.75, 0.85][shod] : t === T.SAND ? [0.88, 0.92, 0.96][shod] : 1;
   }
+  onRoad() { const tx = Math.floor(this.player.x / TILE), ty = Math.floor((this.player.y + 4) / TILE); return (this.groundData?.[ty]?.[tx] ?? this.groundLayer?.getTileAtWorldXY(this.player.x, this.player.y + 4)?.index) === T.PATH; }
   /** The desert sun wears you down by day, except in the shade by water. */
   desertHeat(dt: number) {
     if (this.rec.terrain !== 8 || !G.isDay || G.warded("Apollo") || G.absHour - (G.data.drankAt ?? -99) < 2) return; // a drink from the skin keeps it off two hours
@@ -6131,6 +6330,7 @@ class WildScene extends PlayScene {
     const go = (msg: string) => { u.closeTalk(); this.brigandsLeave(g, msg); };
     const fight = (msg: string) => { u.closeTalk(); this.brigandsAttack(g, msg); };
     const opts: { label: string; fn: () => void }[] = [];
+    if (G.grace("Hermes") >= 7) opts.push({ label: "Walk on (Hermes keeps his own)", fn: () => go("You walk on as if they weren't there. The one with the club opens his mouth, and shuts it again, and they stand aside: something about you says Hermes, patron of thieves, would not like it. (Swift One)") });
     if (G.data.silver > 0) opts.push({ label: `Hand over ${toll} silver`, fn: () => { G.data.silver -= toll; go(`They weigh the coins in their hands, grin, and melt back into the brush. (−${toll} silver)`); } });
     else opts.push({ label: "Turn out your empty purse", fn: () => { const r = d12(); if (r <= 6) go("They stare at your empty purse, and laugh, and one of them claps you on the back. \"Poorer than us! Go on, then.\""); else fight("\"Nothing? Then we'll take it out of your hide.\""); } });
     const tl = (G.data.aretai.Logos ?? 3) + 1 + G.boon("Hermes");
@@ -6332,7 +6532,7 @@ class WildScene extends PlayScene {
           const [old, young] = g.people;
           const tl = (G.data.aretai.Logos ?? 3) + 2 + G.boon("Athena");
           opts.push({ label: "Hear them both out, and judge (Logos)", fn: () => {
-            const r = d12();
+            const r = G.grace("Zeus") >= 7 ? 1 : d12(); // the Lawgiver's word carries
             if (r > tl) { G.addFatigue(5); again(`You listen, and ask, and listen, and by the end they are both shouting at you instead of each other. (d12 ${r}, needed 1–${tl}; +5 Fatigue)`); return; }
             g.done.judged = today; const v = G.addFavor("Zeus", 1, 6); G.data.silver += 5; G.earn("Kleos", 1, "you judged a boundary quarrel");
             u.closeTalk(); G.say(`You walk the line with them, find the old hole where the stone stood, and set it back. They grumble, and then they shake hands, and press 5 silver on you for your trouble. (d12 ${r}, needed 1–${tl}; Zeus of boundaries ${v >= 0 ? "+" : ""}${v}; +5 silver)`);
@@ -6896,7 +7096,7 @@ class CaveScene extends PlayScene {
       const b = labor(EFFORT.mine, 5 + darkPen(), "Kratos"); if (b === null) return;
       this.clearObject(x, y);
       const lode = Math.random() < 0.06 && !G.count("Loadstone");
-      G.say(`You break out the ore: ${give("Copper", Math.max(1, 1 + (Math.random() < 0.4 ? 1 : 0) + Math.trunc(G.boon("Hades") / 2)))}${lode ? `, and a dark stone that tugs at your knife: ${give("Loadstone", 1)}` : ""}${inDark ? " (by feel, in the dark)" : ""}${b}`);
+      G.say(`You break out the ore: ${give("Copper", Math.max(1, 1 + (Math.random() < 0.4 ? 1 : 0) + Math.trunc(G.boon("Hades") / 2) + (G.grace("Hades") >= 7 ? 1 : 0)))}${lode ? `, and a dark stone that tugs at your knife: ${give("Loadstone", 1)}` : ""}${inDark ? " (by feel, in the dark)" : ""}${b}`);
       return;
     }
     if (obj === T.CAVEWALL) { G.say("Solid rock."); return; }
@@ -7594,7 +7794,7 @@ class UIScene extends Phaser.Scene {
     SOUND.update(dt, { scene: G.data.scene, terrain, season: G.month.season, day: G.isDay, dusk: G.data.clock >= G.daylight - 1.2 && G.data.clock < G.daylight + 1, weather: G.data.weather, danger, festival: !!festToday() });
     this.drawRain(dt);
     this.timeText.setText(G.timeLabel());
-    const homeWay = G.data.scene === "Wild" && G.count("Loadstone") > 0 && (G.data.wx || G.data.wy) ? `  ·  home lies ${directions(-G.data.wx, -G.data.wy).replace(" of your farm", "")}` : "";
+    const homeWay = G.data.scene === "Wild" && (G.count("Loadstone") > 0 || G.grace("Hermes") >= 4) && (G.data.wx || G.data.wy) ? `  ·  home lies ${directions(-G.data.wx, -G.data.wy).replace(" of your farm", "")}` : "";
     const placeTxt = G.locationLabel() + homeWay;
     if (this.place.text !== placeTxt) this.place.setText(placeTxt);
     this.purse.setText(`Purse: ${money(G.data.silver)}`);
@@ -7616,7 +7816,7 @@ class UIScene extends Phaser.Scene {
     let col = 0x000000, a = 0;
     if (c < 0.8) { col = 0xf2a6c4; a = 0.22 * (1 - c / 0.8); }
     else if (c >= day - 1.2 && c < day) { col = 0xd9732e; a = 0.25 * (1 - (day - c) / 1.2); }
-    else if (c >= day) { col = 0x0b1630; a = Math.min(0.62, 0.3 + (c - day) * 0.12); }
+    else if (c >= day) { col = 0x0b1630; a = Math.min(0.62, 0.3 + (c - day) * 0.12); if (G.grace("Hecate") >= 4) a *= 0.5; else if (G.grace("Artemis") >= 7 && !/new/i.test(G.moon)) a *= 0.6; } // Torch-Kin; Moon-Blessed
     // A grey day: overcast and rain dim the daylight a little.
     const outdoor = ["Farm", "Wild", "Village", "Gym"].includes(G.data.scene);
     if (outdoor && c < day && (G.data.weather === "rain" || G.data.weather === "cloudy")) { const g = G.data.weather === "rain" ? 0.2 : 0.08; if (a < g) { col = 0x3a4250; a = g; } }
@@ -7778,7 +7978,7 @@ class UIScene extends Phaser.Scene {
     const welcome = (G.blessed("hospitality") ? 1 : 0) + (G.songOn("charm") ? 1 : 0); // and the nightingale's song
     const opts: { label: string; fn: () => void }[] = [];
     if (rec.talked !== today) opts.push({ label: "Chat a while", fn: () => {
-      rec.talked = today; G.note(`chat:${v.id}`); const gain = Math.max(0, 1 + phoenix + welcome); const r = this.changeRel(v.id, gain);
+      rec.talked = today; G.note(`chat:${v.id}`); const gain = Math.max(0, 1 + phoenix + welcome + (G.grace("Aphrodite") >= 4 ? 1 : 0)); const r = this.changeRel(v.id, gain);
       // A kledon: now and then a chance word turns out to be about tomorrow. Pneuma tells you it was meant for you.
       let kledon = "";
       if (G.data.nextWeather && Math.random() < 0.25) {
@@ -7795,7 +7995,7 @@ class UIScene extends Phaser.Scene {
       if (v.loves.includes(id)) { d = 3; say = `"${n[0].toUpperCase() + n.slice(1)}! How did you know? Thank you, truly."`; }
       else if (v.likes.includes(id)) { d = 2; say = `"Oh, ${n}. I'll put this to good use."`; }
       else if (v.dislikes.includes(id)) { d = -2; say = `"...${n}. Well. Thank you, I suppose."`; }
-      if (d > 0) d += phoenix + (G.songOn("charm") ? 1 : 0);
+      if (d > 0) d += phoenix + (G.songOn("charm") ? 1 : 0) + (G.grace("Aphrodite") >= 7 ? 2 : 0); // the Golden One's gifts
       this.changeRel(v.id, d);
       this.talkTo(v, `${say}\n\n(${d >= 0 ? `+${d}` : d} with ${v.name}.)`);
     } });
@@ -8431,7 +8631,7 @@ class UIScene extends Phaser.Scene {
     // Bronze armor, made to order (the Core Rules' prices, more or less, in the village's silver).
     for (const [id, silver, copper] of SMITH_ARMOR) {
       const price = Math.round(silver * discount), ok = G.data.silver >= price && G.count("Copper") >= copper, nm = ITEMS[id].name.toLowerCase();
-      opts.push({ label: `Make me ${/^[aeiou]/i.test(nm) ? "an" : "a"} ${nm}: ${money(price)} and ${copper} copper ore${ok ? "" : " (you can't afford it yet)"}`, fn: () => {
+      opts.push({ label: `Make me ${nm.endsWith("s") ? "a pair of" : /^[aeiou]/i.test(nm) ? "an" : "a"} ${nm}: ${money(price)} and ${copper} copper ore${ok ? "" : " (you can't afford it yet)"}`, fn: () => {
         if (!ok) { this.talkTo(v, `"${money(price)}, and ${copper} lumps of copper ore. Bronze is copper and tin, and the tin comes from the ends of the earth."`); return; }
         G.data.silver -= price; G.removeItem("Copper", copper);
         G.data.smithJob = { tool: id, level: 0, ready: G.dayNumber + 1 };
@@ -8464,7 +8664,7 @@ class UIScene extends Phaser.Scene {
     const opts: { label: string; fn: () => void }[] = [];
     if (!st.sensed) opts.push({ label: "Look closely at them (Pneuma)", fn: () => {
       st.sensed = true;
-      const target = Math.max(1, (G.data.aretai.Pneuma ?? 3) - 2 + G.boon("Dionysus")), roll = 1 + Math.floor(Math.random() * 12);
+      const target = G.grace("Athena") >= 7 ? 12 : Math.max(1, (G.data.aretai.Pneuma ?? 3) - 2 + G.boon("Dionysus")), roll = 1 + Math.floor(Math.random() * 12);
       const odds = `(Pneuma: d12 ${roll}, needed 1–${target})`;
       this.talkToStranger(st.god && roll <= target ? `Something shines behind their eyes, old as the hills and bright as noon. This is no ordinary traveler. ${odds}` : `A traveler, tired and dusty, as far as you can tell. ${odds}`);
     } });
@@ -8592,7 +8792,7 @@ class UIScene extends Phaser.Scene {
 
   appeaseMyth(id: string, how: string) {
     const d = MYTH[id], m = mythRec(id), before = rungOf(m.days);
-    m.last = G.dayNumber; m.days++; G.note(`myth:${id}`);
+    m.last = G.dayNumber; m.days += G.grace("Dionysus") >= 7 ? 2 : 1; G.note(`myth:${id}`);
     const after = rungOf(m.days);
     let note = "";
     if (m.stolen && id === "satyrs") { G.addItem(m.stolen, 1); note += ` A satyr sheepishly hands back your ${ITEMS[m.stolen].name.toLowerCase()}.`; m.stolen = undefined; }
@@ -8744,9 +8944,11 @@ class UIScene extends Phaser.Scene {
         root.add(b);
         b.setInteractive({ useHandCursor: !why }).on("pointerover", () => detail.setText(`${d.power.name}: ${d.power.desc}${why ? `\n${why}` : ""}`)).on("pointerdown", () => { if (!why && ps) { this.closeSheet(); ps.invokePower(god); } });
       } else {
-        root.add(this.add.text(px, y + 1, f <= -4 ? `troubles in ${d.domain.split(",")[0]}` : f >= 4 ? `gifts in ${d.domain.split(",")[0]}` : f !== 0 ? d.passive.split(";")[0] : "", { ...font, fontSize: "11px", color: f !== 0 ? "#c9c0a8" : "#8d877b", wordWrap: { width: 270 } }).setMaxLines(1));
+        const gr = GRACES[god], gname = f >= 7 ? gr?.at7.name : f >= 4 ? gr?.at4.name : "";
+        root.add(this.add.text(px, y + 1, f <= -4 ? `troubles in ${d.domain.split(",")[0]}` : gname ? `grace: ${gname}` : f !== 0 ? d.passive.split(";")[0] : "", { ...font, fontSize: "11px", color: f !== 0 ? "#c9c0a8" : "#8d877b", wordWrap: { width: 270 } }).setMaxLines(1));
       }
-      nm.setInteractive({ useHandCursor: true }).on("pointerover", () => detail.setText(`${UIScene.standing(god)}\nDomain: ${d.domain}.`));
+      const gr = GRACES[god], graceLine = gr ? `\nGraces: at +4, ${gr.at4.name}${f >= 4 ? " (yours)" : ""}: ${gr.at4.desc}  At +7, ${gr.at7.name}${f >= 7 ? " (yours)" : ""}: ${gr.at7.desc}` : "";
+      nm.setInteractive({ useHandCursor: true }).on("pointerover", () => detail.setText(`${UIScene.standing(god)}\nDomain: ${d.domain}.${graceLine}`));
     });
     root.add(detail);
     root.add(this.add.text(x0 + 20, y0 + h - 140, CURRENCIES.map((c) => `${c} ${G.data.currencies[c]}`).join("   ·   "), { ...font, fontSize: "13px", color: "#fbe39a" }));
@@ -8942,7 +9144,7 @@ class UIScene extends Phaser.Scene {
     let q = roll <= Math.ceil(skill / 2) ? 3 : roll <= skill + 3 ? 2 : 1;
     if (ch.Hephaestus) { ch.Hephaestus--; q = 3; G.say(`The god's own hand guides yours.${ch.Hephaestus ? ` (${ch.Hephaestus} more)` : ""}`); }
     else if (ch.botch) { ch.botch = 0; q = 1; G.say("Something is off in the work today. Hephaestus looks away."); }
-    if (G.warded("Hephaestus")) q = Math.max(2, q);
+    if (G.warded("Hephaestus") || G.grace("Hephaestus") >= 4) q = Math.max(2, q);
     return { q, roll, skill };
   }
 
@@ -8963,9 +9165,9 @@ class UIScene extends Phaser.Scene {
     root.add(this.add.text(W / 2, y0 + 40, sub, { ...font, fontSize: "13px", color: "#c9b48f" }).setOrigin(0.5, 0));
     list.forEach((r, i) => {
       const y = y0 + 68 + i * row;
-      const ok = r.needs.every(([id, n]) => G.count(id) >= n) && (!r.upgrade || G.count(r.out) > 0);
+      const ok = needsOf(r).every(([id, n]) => G.count(id) >= n) && (!r.upgrade || G.count(r.out) > 0);
       root.add(this.add.image(x0 + 34, y + 16, "items", r.out).setScale(2));
-      const need = r.needs.map(([id, n]) => `${n} ${ITEMS[id].name} (${G.count(id)})`).join(", ") + (r.upgrade ? ` + your ${ITEMS[r.out].name.toLowerCase()}` : "");
+      const need = needsOf(r).map(([id, n]) => `${n} ${ITEMS[id].name} (${G.count(id)})`).join(", ") + (r.upgrade ? ` + your ${ITEMS[r.out].name.toLowerCase()}` : "");
       const label = r.upgrade ? toolName(r.out, r.upgrade, ITEMS[r.out].name) : ITEMS[r.out].name;
       const t = this.add.text(x0 + 64, y, `${label}${r.qty > 1 ? ` × ${r.qty}` : ""}  ←  ${need}`, { ...font, fontSize: "15px", color: ok ? "#f2e6c9" : "#8d877b" });
       root.add(t);
@@ -8978,7 +9180,7 @@ class UIScene extends Phaser.Scene {
   makeRecipe(r: (typeof RECIPES)[number]) {
     const heavy = r.at && r.at !== "hand";
     if (labor(heavy ? EFFORT.station : EFFORT.hand, heavy ? 2 : 1, "Techne") === null) return;
-    for (const [id, n] of r.needs) G.removeItem(id, n);
+    for (const [id, n] of needsOf(r)) G.removeItem(id, n);
     G.note("craft"); G.note(`craft:${r.out}`);
     if (r.upgrade) {
       G.data.tools[r.out] = r.upgrade; SOUND.sfx("chop");
